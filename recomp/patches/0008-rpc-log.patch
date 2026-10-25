@@ -1,0 +1,26 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+index 07fcd29..0accb09 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+@@ -20,6 +20,21 @@ namespace ps2_syscalls
+         {
+             event.seq = ++g_sif_rpc_debug_next_seq;
+             g_sif_rpc_debug_history[event.seq % kSifRpcDebugHistoryCount] = event;
++            // Hidden Leaf: the same events on stderr with HL_RPC_LOG=1
++            static const bool s_rpcLog = std::getenv("HL_RPC_LOG") != nullptr;
++            if (s_rpcLog)
++            {
++                std::cerr << "[rpc] " << event.op << " thread=" << event.threadId << std::hex << " sid=0x" << event.sid
++                          << " fno=0x" << event.rpcNum << " send=0x" << event.sendSize << " recv=0x" << event.recvSize
++                          << " flags=0x" << event.flags << " ra=0x" << event.ra << std::dec << " result=" << event.result
++                          << " data=";
++                for (uint32_t i = 0; i < event.sendPreviewSize; ++i)
++                {
++                    static const char kHex[] = "0123456789abcdef";
++                    std::cerr << kHex[event.sendPreview[i] >> 4] << kHex[event.sendPreview[i] & 15];
++                }
++                std::cerr << std::endl;
++            }
+         }
+ 
+         void pushSifRpcDebugEvent(SifRpcDebugEvent event)
