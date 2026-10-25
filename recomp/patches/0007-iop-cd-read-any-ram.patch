@@ -1,0 +1,67 @@
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+index ad58fb4..268a0d2 100644
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -9,8 +9,10 @@
+ #include <algorithm>
+ #include <array>
+ #include <cctype>
++#include <cstdlib>
+ #include <cstring>
+ #include <filesystem>
++#include <iostream>
+ #include <limits>
+ #include <string>
+ #include <system_error>
+@@ -228,7 +230,16 @@ namespace ps2x::iop::detail
+                 return true;
+ 
+             case 6: // sceCdRead
+-                if (readSectors(a0, a1, a2))
++            {
++                const bool ok = readSectors(a0, a1, a2);
++                // Hidden Leaf: every IOP read with HL_CD_LOG=1, as on the EE side
++                static const bool s_cdLog = std::getenv("HL_CD_LOG") != nullptr;
++                if (s_cdLog)
++                {
++                    std::cerr << "[iop sceCdRead] lsn=0x" << std::hex << a0 << " sectors=0x" << a1 << " buf=0x" << a2
++                              << " ra=0x" << cpu.gpr[31] << std::dec << (ok ? "" : " FAILED") << std::endl;
++                }
++                if (ok)
+                 {
+                     signalCommandComplete();
+                     if (callback.address != 0u)
+@@ -244,6 +255,7 @@ namespace ps2x::iop::detail
+                 else
+                     cpu.gpr[2] = 0u;
+                 return true;
++            }
+ 
+             case 7: // sceCdSeek
+                 currentLsn = a0;
+@@ -266,6 +278,14 @@ namespace ps2x::iop::detail
+ 
+             case 10: // sceCdSearchFile
+                 cpu.gpr[2] = searchFile(a0, a1) ? 1u : 0u;
++                if (std::getenv("HL_CD_LOG") != nullptr)
++                {
++                    uint8_t lsn[4] = {};
++                    (void)memory.readRam(a0, lsn, sizeof(lsn));
++                    std::cerr << "[iop sceCdSearchFile] " << memory.readString(a1, 1024u) << " -> " << cpu.gpr[2]
++                              << " lsn=0x" << std::hex << (lsn[0] | lsn[1] << 8 | lsn[2] << 16 | lsn[3] << 24)
++                              << " volume=0x" << volumeSectors << std::dec << std::endl;
++                }
+                 return true;
+ 
+             case 11: // sceCdSync
+@@ -659,7 +679,9 @@ namespace ps2x::iop::detail
+                 return true;
+             }
+             const uint64_t byteCount64 = static_cast<uint64_t>(sectors) * kSectorSize;
+-            if (byteCount64 > IopMemory::RamSize || !memory.ownsRamRange(destination, static_cast<size_t>(byteCount64)))
++            // the drive DMAs into any IOP RAM, not only memory the emulator saw allocated or written (Ultimate Ninja 5's
++            // sound driver reads SNDDATA.BIN into 0x1bac40, untouched until then); writeRam checks the bounds
++            if (byteCount64 > IopMemory::RamSize)
+             {
+                 lastError = kCdvdErrorRead;
+                 return false;
