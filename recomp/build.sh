@@ -8,7 +8,8 @@
 #   2. extracts the disc to build/disc/ (the runtime reads cdrom0:\ from the folder of the ELF)
 #   3. the ELF for the recompiler: its one big section split into code and data (tools/un5.py prepelf)
 #   4. PS2Recomp at the pinned commit (build/PS2Recomp), its recompiler and analyzer
-#   5. the analyzer's config, then the recompiler: build/gen/output (C++, one file per function)
+#   5. the analyzer's config, then the recompiler twice: the second time with the functions only reached through
+#      pointers added (tools/un5.py fnmap): build/gen/output (C++, one file per function)
 #   6. the overlays of PRG/ (fights, adventure, menus, texts), each recompiled on its own and renamed into a module
 #      the runtime finds by what is in memory (recomp/overlays.py, recomp/runtime/un5_overlays.cpp)
 #   7. the runtime (PS2Recomp + recomp/patches) with the generated code: build/PS2Recomp/build-rt/.../ps2EntryRunner
@@ -66,6 +67,11 @@ cd "$B/gen"
 sed -i 's|^output = .*|output = "./output/"|' un5_config.toml
 rm -rf output
 "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
+# second pass: plus the functions only reached through pointers in the data (constructors, vtables, callbacks)
+python3 "$here/tools/un5.py" fnmap un5_split.elf output un5_map.csv
+sed -i 's|^ghidra_output = .*|ghidra_output = "un5_map.csv"|' un5_config.toml
+rm -rf output
+"$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
 grep -E "Functions processed|Generated functions" recomp.log
 errors=$(grep -c "\[error\]" recomp.log || true)
 echo "recompiler errors: $errors"
@@ -83,6 +89,10 @@ for bin in "$B"/disc/PRG/*.BIN; do
     ( cd "$d"
       "$B/PS2Recomp/build-tools/ps2xAnalyzer/ps2_analyzer" "$n.elf" cfg.toml > analyzer.log 2>&1
       sed -i 's|^output = .*|output = "./output/"|' cfg.toml
+      "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1
+      python3 "$here/tools/un5.py" fnmap "$n.elf" output map.csv >/dev/null
+      sed -i 's|^ghidra_output = .*|ghidra_output = "map.csv"|' cfg.toml
+      rm -rf output
       "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1
       echo "$n: $(grep -E 'Functions processed' recomp.log), errors: $(grep -c '\[error\]' recomp.log || true)" )
     python3 "$here/recomp/overlays.py" "$n" "$bin" "$d/output" "$B/gen/ovl/modules" >/dev/null

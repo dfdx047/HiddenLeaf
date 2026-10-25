@@ -14,6 +14,10 @@ outside the tree (or into build/, which git ignores).
   un5.py unpack   <elf> <out>            unpacks an ELF packed with SjCRUNCH (the Brazilian version's)
   un5.py prepelf  <elf> <out>            the ELF for the recompiler: its one big section split into code and data
   un5.py ovlelf   <overlay.BIN> <out>    an overlay (MWo3) as an ELF at its load address, code and data apart
+  un5.py fnmap    <elf> <recomp output> <map.csv>
+                                         the function map for a second pass of the recompiler: the functions it
+                                         found, plus every function only reached through a pointer in the data
+                                         (constructors, vtables, callbacks), in the CSV format of a Ghidra export
 
 Functions are found here by their ends (jr ra + delay slot): an approximation, good enough to size a mod's changes.
 The function map the recompiler uses comes from Ghidra (docs/plano.md).
@@ -368,6 +372,72 @@ def cmd_ovlelf(a):
     print("overlay id %d at %08x: code %#x, data %#x, bss %#x -> %s" % (o["id"], o["addr"], o["text"], o["data"], o["bss"], a.out))
 
 
+def sections_of(data):
+    """(name, addr, offset, size, flags, type) of an ELF32's sections."""
+    shoff, = struct.unpack_from("<I", data, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x2E)
+    raw = [struct.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize) for i in range(shnum)]
+    stroff = raw[shstrndx][4]
+    out = []
+    for e in raw[1:]:
+        name = data[stroff + e[0]:data.index(b"\0", stroff + e[0])].decode()
+        out.append((name, e[3], e[4], e[5], e[2], e[1]))
+    return out
+
+
+def cmd_fnmap(a):
+    data = open(a.elf, "rb").read()
+    secs = sections_of(data)
+    code = [(addr, addr + size, off) for name, addr, off, size, flags, t in secs if flags & SHF_EXEC and t == 1]
+    blobs = [(addr, off, size) for name, addr, off, size, flags, t in secs if t == 1 and flags & SHF_ALLOC]
+
+    def word(addr):
+        for lo, hi, off in code:
+            if lo <= addr < hi:
+                return struct.unpack_from("<I", data, off + addr - lo)[0]
+        return None
+
+    def after_return(v):
+        """v follows the end of a function: jr ra, its delay slot, then maybe nop padding."""
+        p = v - 4
+        for _ in range(8):
+            w = word(p)
+            if w is None:
+                return False
+            if w != 0:
+                break
+            p -= 4
+        return word(p) == 0x03E00008 or word(p - 4) == 0x03E00008
+
+    starts = set()
+    for f in os.listdir(a.output):
+        m = re.match(r"sub_([0-9A-Fa-f]{8})_0x", f)
+        if m:
+            starts.add(int(m.group(1), 16))
+    found = len(starts)
+    # pointers in any allocated part of the ELF to a function prologue (addiu sp, sp, -N) in the code
+    added = 0
+    for addr, off, size in blobs:
+        for i in range(0, size - 3, 4):
+            v, = struct.unpack_from("<I", data, off + i)
+            if v & 3 or v in starts:
+                continue
+            w = word(v)
+            if w is None or w == 0:
+                continue
+            if ((w >> 16) == 0x27BD and (w & 0x8000)) or after_return(v):
+                starts.add(v)
+                added += 1
+    ordered = sorted(starts)
+    with open(a.map, "w") as f:
+        f.write("name,start,end,size\n")
+        for i, s in enumerate(ordered):
+            hi = next((h for lo, h, _ in code if lo <= s < h), s + 4)
+            e = min(ordered[i + 1], hi) if i + 1 < len(ordered) else hi
+            f.write("sub_%08X,0x%x,0x%x,%d\n" % (s, s, e, e - s))
+    print("%d functions found by the recompiler, %d more reached through pointers -> %s" % (found, added, a.map))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -378,6 +448,7 @@ def main():
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
     s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
     s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.set_defaults(fn=cmd_ovlelf)
+    s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.set_defaults(fn=cmd_fnmap)
     a = ap.parse_args()
     sys.exit(a.fn(a) or 0)
 
