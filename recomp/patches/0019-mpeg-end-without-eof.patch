@@ -1,0 +1,29 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 49f3ff9..8daac39 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -2478,11 +2478,23 @@ namespace ps2_stubs
+         std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
+         g_mpeg_stub_state.initialized = true;
+         MpegPlaybackState &playback = getPlaybackState(mpegAddr);
++        // Hidden Leaf: UN5 streams its PSS files without the last sector, which holds only the program end code, so the
++        // CD stream never reaches its EOF. Once the video sequence has ended and all that was read went through the
++        // demux, the stream is over.
++        const bool sequenceDrained =
++            playback.sawSequenceEnd &&
++            playback.cdStreamGeneration == g_mpeg_stub_state.cdStreamGeneration &&
++            g_mpeg_stub_state.cdStreamBytesProduced != 0u &&
++            g_mpeg_stub_state.cdStreamBytesDemuxed >= g_mpeg_stub_state.cdStreamBytesProduced;
++        if (sequenceDrained && !playback.streamEnded)
++        {
++            finishPlaybackStream(mpegAddr, playback);
++        }
+         // Only the producer/demux EOF is authoritative. A sequence_end_code can
+         // be observed while more PSS data is still buffered, and a decoder
+         // failure before producer EOF may still recover on a later sequence.
+         const bool producerEnded =
+-            g_mpeg_stub_state.currentCdStreamEofSeen &&
++            (g_mpeg_stub_state.currentCdStreamEofSeen || sequenceDrained) &&
+             playback.cdStreamGeneration == g_mpeg_stub_state.cdStreamGeneration;
+         const bool ended = producerEnded &&
+                            (playback.streamEnded || (playback.decoderFailed && playback.sawInput));

@@ -448,6 +448,15 @@ STUB_ALIASES = {
 }
 
 
+# SDK functions of the European ELF the analyzer leaves unnamed (sub_), bound to the runtime's handler by address.
+# libmpeg keeps its state for the runtime's stubs, not in the game's memory: the game's own sceMpegIsEnd and
+# sceMpegIsRefBuffEmpty read fields nobody fills, so the opening movie never ended (its last frame stayed on screen).
+STUB_AT = {
+    0x159748: "sceMpegIsEnd",
+    0x159758: "sceMpegIsRefBuffEmpty",
+}
+
+
 # SDK functions the analyzer stubs that must run as the game's own code. The libvu0 math is VU0 macro code: recompiled,
 # it keeps the PS2's float rules (no Inf or NaN, overflow clamps), which the runtime's C++ versions lose (the 2D camera's
 # sceVu0MulMatrix gave the x86 NaN, so every sprite landed at 0,0 and was clipped). Each one moves from stubs to
@@ -477,6 +486,12 @@ def cmd_stubfix(a):
         text = text[:m.start()] + text[m.end():]
         text = re.sub(r"^(stubs = \[\s*\n)", lambda s: s.group(1) + '  "%s@%s",\n' % (handler, m.group(1)), text, count=1, flags=re.M)
         moved.append("%s -> %s@%s" % (name, handler, m.group(1)))
+    for addr, handler in STUB_AT.items():
+        entry = "%s@0x%08X" % (handler, addr)
+        if '"%s"' % entry in text:
+            continue
+        text = re.sub(r"^(stubs = \[\s*\n)", lambda s: s.group(1) + '  "%s",\n' % entry, text, count=1, flags=re.M)
+        moved.append("0x%x -> %s" % (addr, handler))
     open(a.config, "w").write(text)
     print("stubs: " + (", ".join(moved) if moved else "nothing to change"))
 
