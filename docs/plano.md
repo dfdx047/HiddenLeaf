@@ -67,25 +67,21 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 
 ### Onde o jogo está
 
-- Passa do IOP, monta o `DATA.CVM`, carrega o boot e chega à **tela de seleção de idioma** (`TEX_xlanguage`) da versão
-  europeia, esperando um botão. O laço principal (`0x1C5DA0`: `sub_00108510` espera de quadro, `sub_001D5760` acorda
-  as tarefas) roda a ~33 fps; o loader (tarefa 13, `0x1d78d0`) fica ocioso. Nenhum overlay carregado ainda.
-- Tarefas = threads: 8 = sequência de boot (`0x1E6B20`), espera `1DFCC0()==1`, `1C2130()==1` (gp-0x350) e a máquina de
-  estados `1E6500` (gp-0x214) chegar a 1; ela fica no estado 2 = tela de idioma (`sub_003D0C60` lê o controle em
-  gp-0x3f4+0x84; o fade fica em obj+0x1a=0x1000). gp = `0x617ef0`.
-- **Tela preta porque nenhuma sprite passa do recorte.** Objetos 2D (0xf8 bytes, criados por `1D0E10/1D0F30/1D2940`);
-  `sub_001D1180` descarrega cada objeto; `sub_001F1A00` → `sub_001D1480(obj,0,1)` → `sub_001D14D0` (emissor). Em
-  `0x1d2440` o emissor recorta: x (s1+0x1D0) < 0x9001, x+w (0x1E0) ≥ 0x7000, y (0x1D4) < 0x8E01, y+h (0x1E4) ≥ 0x7200;
-  s1 fica no scratchpad (`0x70000000+`). x/y vêm de `sub_0010F1B0` (transformação VU0 macro com a matriz em
-  cam+0x1c0, cam = camada+0x3c = `0xbd9e50` nesta execução).
-- **Causa:** a matriz da câmera é NaN. Quem a escreve é `sceVu0MulMatrix` (`0x152DD8`, chamada por `sub_0010BC70`
-  dentro de `sub_0010DD00`), que o analisador marcou como stub: roda a versão C++ do runtime (`Stubs/VU.cpp`) com float
-  do x86. O PS2 não tem NaN/Inf (satura em ±FLT_MAX); a câmera já tem `ffc00000`/`7f800000` (cam+0x40, +0x100,
-  +0x140) e o C++ propaga NaN. NaN → `vftoi0` dá 0x80000000 → sprite fora da janela.
-- **Correção em teste:** `un5.py stubfix` tira as 29 `sceVu0*` dos stubs e as manda para `entry_points` (recompiladas,
-  com o tratamento de float do PS2Recomp: `ps2_vadd/vmul` → `ps2_vslow`). Só `sceVpu0Reset` fica stub.
-  **Se ainda der NaN:** corrigir na conversão de float do runtime (VU0 e COP1: limitar o resultado a ±FLT_MAX,
-  denormal = 0), não caso a caso.
+- Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE) →
+  carga do `DATA.CVM` → abertura `\PSS\NARUTO10.PSS` (o "10th" do Naruto), com a imagem do FFmpeg. Depois da abertura
+  vem a tela de título (próximo passo). O jogo roda a ~10 vsync/s com o filme (o IOP pesa: ver Falta).
+- gp = `0x617ef0`. Laço principal `0x1C5DA0`; tarefas = threads (8 = sequência de boot `0x1E6B20`, 13 = loader).
+- **Filmes (libmpeg da Sony, stubs do runtime em `Stubs/MPEG.cpp`).** Thread de stream `sub_00104020` (lê o CD em
+  anel, `sceMpegDemuxPssRing`), thread de vídeo `sub_00101C00` (buffer livre `1015B0` na fila gp-0x3C8 →
+  `sceMpegGetPicture` → envia `101620`), exibição no vsync `sub_001052E0` (só com gp-0x3B0 ligado, que `1044A0` liga
+  quando o áudio pré-carregado em obj+0x54 chega a obj+0x48 = 24576). O quadro sai num pacote DMA do VIF1 com o
+  callback `105120` (`109090`), chamado pelo tratador de fim de DMA `108D10` → `108F00`, que acha o pacote em
+  `D1_MADR - 0x10`; `105120` tira o quadro da fila. Fim: `sceMpegIsEnd` (`0x159748`) e `sceMpegIsRefBuffEmpty`
+  (`0x159758`), sem nome no ELF.
+- Corrigido nesta etapa: VU0 (`sceVu0*` recompiladas, vf0 fixo em todas as threads), blit com ZTE=0 apagando a origem
+  (0015), ID 0x79 do controle em modo de pressão (0016), callbacks de stream perdidos porque o heap do runtime está
+  cheio (0017), MADR no fim da cadeia DMA (0018), `sceMpegIsEnd`/`IsRefBuffEmpty` ligados por endereço (`un5.py
+  stubfix`, `STUB_AT`).
 
 ### Gráficos (o que já funciona)
 
@@ -104,6 +100,9 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 | `HL_DMA_LOG=1` | cada cadeia DMA (`[dma-chain] ch chcr tags bytes next lastTag`) (0012) |
 | `HL_RPC_LOG=1` | cada chamada SIF RPC (0008) |
 | `HL_IOP_TRACE=pc,pc` | registradores do IOP nesses PCs, em hexa (0009) |
+| `HL_AUTOPRESS="15:CROSS,140:START"` | aperta botões sozinho (segundos desde a 1ª leitura do controle:botão, 0,25 s cada) (0014) |
+| `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
+| `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
 
 Depurar com gdb: `rdram = $rdi`, `ctx = $rsi`, `r[n]` em `$rsi+n*16`, `pc` em `$rsi+512`; rodar sob gdb (ptrace_scope
 bloqueia attach), interromper com `pkill -INT -x ps2EntryRunner`. Watchpoint de hardware em `$rdi+endereço` acha quem
@@ -114,18 +113,17 @@ escreve; watchpoint condicional em `ctx->pc` é lento demais. Patches novos: ger
 
 `b3c382b` fnmap (delay slot do `jr ra`); patches 0004 log do sceCdRead, 0005 dump do EE, 0006 pilha do main abaixo das
 pilhas de callback, 0007 leitura de CD do IOP em qualquer RAM, 0008 log de RPC, 0009 trace do IOP, 0010 DMA do SPU2
-antes de WaitEventFlag sem thread (resolvia `sceHSyn_VoisTrans Error`), 0011 VIF1 DIRECT, 0012 dumps de depuração.
+antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 0013 vf0 fixo, 0014 HL_AUTOPRESS,
+0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA;
+`un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
 ### Falta
 
-1. Testar o build com `sceVu0*` recompiladas + deslocamento de 0x40 dos overlays (`recomp/overlays.py`, `un5.py`: o
-   jogo carrega o arquivo inteiro, cabeçalho incluso, em addr; o código fica em addr+0x40). Commitar os dois se
-   funcionarem.
-2. Ver a tela de idioma no `HL_FRAME_DUMP`.
-3. `HL_AUTOPRESS="5:CROSS,8:START"` (segundos:botão) no runtime para passar das telas sozinho; seguir até o título e o
-   menu principal.
-4. Depois: `[un5] overlay ... resident`; desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por
-   causa do autoDMA do ADX).
+1. Passar da abertura à tela de título e ao menu principal (`HL_AUTOPRESS`).
+2. Deslocamento de 0x40 dos overlays (`recomp/overlays.py`, `un5.py`: o jogo carrega o arquivo inteiro, cabeçalho
+   incluso, em addr; o código fica em addr+0x40): já entra no build, falta ver `[un5] overlay ... resident`.
+3. Áudio: SPU2 do ARMSX2 (ver Decisões).
+4. Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
 
 ## Teste nos aparelhos
 
