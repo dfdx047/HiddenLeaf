@@ -407,7 +407,9 @@ def cmd_fnmap(a):
             if w != 0:
                 break
             p -= 4
-        return word(p) == 0x03E00008 or word(p - 4) == 0x03E00008
+        # p is the last word that is not a nop: the delay slot itself, or the jr ra when the slot is a nop. A jr ra
+        # right before v puts v on its delay slot, which belongs to that function (0x12203c, addiu sp, sp, 0x30)
+        return word(p - 4) == 0x03E00008 or (word(p) == 0x03E00008 and p < v - 4)
 
     starts = set()
     for f in os.listdir(a.output):
