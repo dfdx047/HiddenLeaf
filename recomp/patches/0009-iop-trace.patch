@@ -1,0 +1,44 @@
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 54679f4..92bb668 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -19,6 +19,10 @@
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <cstdlib>
++#include <iostream>
++#include <string>
++#include <vector>
+ #include <map>
+ #include <optional>
+ #include <span>
+@@ -389,6 +393,28 @@ namespace ps2x::iop::detail
+             if (checkInterrupt(cpu))
+                 return true;
+ 
++            // Hidden Leaf: HL_IOP_TRACE=pc[,pc...] (hex) prints the registers each time the IOP gets to one of them
++            static const std::vector<uint32_t> s_tracePcs = []
++            {
++                std::vector<uint32_t> pcs;
++                if (const char *list = std::getenv("HL_IOP_TRACE"))
++                {
++                    std::istringstream in(list);
++                    std::string item;
++                    while (std::getline(in, item, ','))
++                        pcs.push_back(static_cast<uint32_t>(std::stoul(item, nullptr, 16)));
++                }
++                return pcs;
++            }();
++            if (!s_tracePcs.empty() && std::find(s_tracePcs.begin(), s_tracePcs.end(), cpu.pc) != s_tracePcs.end())
++            {
++                std::ostringstream out;
++                out << "[iop-trace] pc=0x" << std::hex << cpu.pc << " a0=0x" << cpu.gpr[4] << " a1=0x" << cpu.gpr[5]
++                    << " a2=0x" << cpu.gpr[6] << " a3=0x" << cpu.gpr[7] << " v0=0x" << cpu.gpr[2] << " ra=0x" << cpu.gpr[31]
++                    << " sp=0x" << cpu.gpr[29] << " [sp+10]=0x" << memory.read32(cpu.gpr[29] + 0x10u);
++                std::cerr << out.str() << std::endl;
++            }
++
+             if (const auto import = imports.decode(cpu.pc))
+             {
+                 const ImportDisposition disposition = dispatchImport(*import, cpu);
