@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,7 +62,8 @@ import com.dfdx047.hiddenleaf.touch.TouchMode
 import com.dfdx047.hiddenleaf.touch.PadStyle
 import com.dfdx047.hiddenleaf.touch.TouchLayout
 import com.dfdx047.hiddenleaf.touch.TouchListener
-import com.dfdx047.hiddenleaf.touch.TouchPadView
+import com.dfdx047.hiddenleaf.touch.PadScene
+import androidx.compose.ui.graphics.Brush
 import com.dfdx047.hiddenleaf.touch.TouchSurface
 import com.dfdx047.hiddenleaf.touch.createTouchSurface
 import com.dfdx047.hiddenleaf.touch.view
@@ -85,24 +87,39 @@ fun ControlsScreen(vm: AppViewModel) {
     ) {
         ScreenTitle(stringResource(R.string.nav_controls), stringResource(R.string.controls_subtitle))
 
-        // a small picture of the layout, in the chosen look
+        // a picture of the layout, in the chosen look, for each scene
+        var scene by remember { mutableStateOf(PadScene.FIGHT) }
+        if (c.layout == TouchLayout.MOBILE) {
+            ChipRow(
+                options = listOf(
+                    stringResource(R.string.pad_scene_fight) to PadScene.FIGHT.ordinal,
+                    stringResource(R.string.pad_scene_campaign) to PadScene.CAMPAIGN.ordinal,
+                    stringResource(R.string.pad_scene_menu) to PadScene.MENU.ordinal,
+                ),
+                selected = scene.ordinal,
+                onSelect = { scene = PadScene.entries[it] },
+            )
+        }
         Box(
             Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(MaterialTheme.shapes.large)
-                .background(Color(0xFF0B1020)),
+                .background(Brush.verticalGradient(listOf(Color(0xFF1B2147), Color(0xFF3A2440), Color(0xFF5A2A12)))),
         ) {
             key(c.layout) { // (the other layout is another view)
                 AndroidView(
-                    factory = { ctx -> createTouchSurface(ctx, c.copy(mode = TouchMode.ALWAYS)).view },
-                    update = { (it as TouchSurface).config = c.copy(mode = TouchMode.ALWAYS) },
+                    factory = { ctx -> createTouchSurface(ctx, c.copy(mode = TouchMode.ALWAYS)).also { it.previewScene = scene }.view },
+                    update = { v -> (v as TouchSurface).also { it.config = c.copy(mode = TouchMode.ALWAYS); it.previewScene = scene } },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+        }
+        if (c.layout == TouchLayout.MOBILE) {
+            Text(stringResource(R.string.pad_scenes_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         FilledTonalButton(onClick = { editing = true }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp)); Spacer(Modifier.size(8.dp)); Text(stringResource(R.string.touch_edit_layout))
         }
 
-        SectionCard(stringResource(R.string.touch_controls), Icons.Rounded.SportsEsports, accent = Konoha.ChakraBlue) {
+        SectionCard(stringResource(R.string.touch_controls), NinjaIcons.Shuriken, accent = Konoha.ChakraBlue) {
             Text(stringResource(R.string.touch_layout), style = MaterialTheme.typography.titleSmall)
             ChipRow(
                 options = listOf(stringResource(R.string.touch_layout_mobile) to TouchLayout.MOBILE.ordinal, stringResource(R.string.touch_layout_classic) to TouchLayout.CLASSIC.ordinal),
@@ -121,7 +138,7 @@ fun ControlsScreen(vm: AppViewModel) {
                 Text(stringResource(R.string.touch_style), style = MaterialTheme.typography.titleSmall)
                 ChipRow(
                     options = listOf(
-                        stringResource(R.string.touch_style_dragon) to PadStyle.DRAGON.ordinal,
+                        stringResource(R.string.touch_style_ink) to PadStyle.INK.ordinal,
                         stringResource(R.string.touch_style_glass) to PadStyle.GLASS.ordinal,
                     ),
                     selected = c.style.ordinal,
@@ -144,7 +161,7 @@ fun ControlsScreen(vm: AppViewModel) {
             ToggleRow(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { vm.updateTouch(c.copy(sticksFloat = it)) }
         }
 
-        SectionCard(stringResource(R.string.macros), Icons.Rounded.Bolt, accent = Konoha.ChakraAmber) {
+        SectionCard(stringResource(R.string.macros), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
             Text(stringResource(R.string.macros_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             c.macros.forEach { m ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -184,7 +201,7 @@ fun ControlsScreen(vm: AppViewModel) {
 private fun LayoutEditor(c: TouchConfig, onChange: (TouchConfig) -> Unit, onDone: () -> Unit) {
     Dialog(onDismissRequest = onDone, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(Color(0xFF0B1020))) {
-            // Keep the preview itself unobstructed. Help and tool labels are drawn inside TouchPadView's
+            // Keep the preview itself unobstructed. Help and tool labels are drawn inside NinjaPadView's
             // compact top toolbar instead of as a transparent Compose layer over the controls.
             key(c.layout) {
                 AndroidView(
@@ -265,13 +282,4 @@ private fun stepText(skin: PadSkin, s: MacroStep): String {
 }
 
 /** A PS2 button's name in the chosen console's look. */
-private fun buttonName(skin: PadSkin, bit: Int): String {
-    val ctl = com.dfdx047.hiddenleaf.touch.Ctl.entries.firstOrNull { it.bit == bit }
-    return when (bit) {
-        Ps2.UP -> "↑"
-        Ps2.DOWN -> "↓"
-        Ps2.LEFT -> "←"
-        Ps2.RIGHT -> "→"
-        else -> ctl?.let { TouchPadView.faceLabel(skin, it) } ?: "?"
-    }
-}
+private fun buttonName(skin: PadSkin, bit: Int): String = Ps2.label(skin, bit)

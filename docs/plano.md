@@ -64,6 +64,23 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 - Medir como no Dragon Rage: luta gravada com a entrada repetida, FPS, pior quadro, tempo de CPU+GPU, comparação de
   pixels contra a referência.
 
+## Controles na tela
+
+Três cenas, cada uma com o próprio layout (editável) e trocadas sozinhas pelo motor:
+
+| Cena | Movimento | Botões |
+|---|---|---|
+| Luta (2D) | direcional | ○ Ataque, ✕ Pular, △ Chakra, □ Item, Jutsu (△ → ○), Ougi (△ △ → ○), R2 Defesa, R3 Despertar, L1/R1 item |
+| Campanha (mapa do Master mode) | analógico | ○, ✕, △, □, L1/R1, Start/Select |
+| Menus | direcional | o losango do PS2, L1/R1, Start/Select |
+
+- As funções vêm do manual do Ultimate Ninja 2 (○ ataque, ✕ pulo, △ prepara a técnica secreta, □ item,
+  L1/R1 trocam o item, L2/R2 defesa) e das entradas da série (△ ○ jutsu, △ △ ○ jutsu supremo). **Conferir no UN5
+  quando o jogo rodar**, inclusive o tempo entre os toques do Jutsu e do Ougi (hoje 70/50/90 ms).
+- Depois: variantes de direção dos jutsus e os minijogos do Ougi num toque.
+- **Contrato do motor:** `TouchBridge.nativeScene()` → 0 desconhecido, 1 menu, 2 luta, 3 campanha. O motor sabe
+  pelo overlay carregado (`BTL.BIN` luta, `ADV.BIN` aventura/campanha) e pelo estado do jogo.
+
 ## Launcher (feito)
 
 Do template do Dragon Rage: tema (laranja do Naruto, índigo e roxo do Sasuke, verde do Rock Lee), botão Jogar com a

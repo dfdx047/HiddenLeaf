@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -127,7 +128,7 @@ fun SettingsScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.ps2_effects), Icons.Rounded.AutoAwesome, accent = Konoha.ChakraAmber) {
+        SectionCard(stringResource(R.string.ps2_effects), NinjaIcons.Leaf, accent = Konoha.ChakraAmber) {
             val fxOff = get(EngineSettings.FX_OFF, 0)
             listOf(
                 Triple(1, R.string.fx_outline, R.string.fx_outline_text),

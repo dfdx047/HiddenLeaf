@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,7 +40,7 @@ fun GpuDriverCard(vm: AppViewModel) {
     val chosen by vm.gpuDriver.collectAsStateWithLifecycle()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importDriver(it) } }
 
-    SectionCard(stringResource(R.string.gpu_driver), Icons.Rounded.DeveloperBoard, accent = Konoha.ChakraBlue) {
+    SectionCard(stringResource(R.string.gpu_driver), NinjaIcons.Bolt, accent = Konoha.ChakraBlue) {
         Text(stringResource(R.string.gpu_driver_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             RadioButton(selected = chosen == null, onClick = { vm.selectDriver(null) })
@@ -76,7 +77,7 @@ fun LogCard(vm: AppViewModel) {
             runCatching { context.startActivity(Intent.createChooser(send, share)) }
         }
     }
-    SectionCard(stringResource(R.string.log_title), Icons.Rounded.BugReport, accent = Konoha.ChakraAmber) {
+    SectionCard(stringResource(R.string.log_title), NinjaIcons.Eye, accent = Konoha.ChakraAmber) {
         Text(stringResource(R.string.log_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FilledTonalButton(onClick = { vm.exportLog() }) {
             Icon(Icons.Rounded.Download, null, Modifier.size(18.dp)); Spacer(Modifier.size(6.dp)); Text(stringResource(R.string.log_export))

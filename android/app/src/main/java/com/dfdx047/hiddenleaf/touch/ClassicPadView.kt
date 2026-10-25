@@ -27,8 +27,11 @@ import kotlin.math.roundToInt
  * default centre as a fraction of the screen. Face buttons are placed around a centre so the diamond keeps its shape
  * on any screen: [dx], [dy] in dp from ([x], [y]).
  */
+/** What a control of the classic pad is. */
+enum class ClassicKind { DPAD, STICK_L, STICK_R, BUTTON, PILL, SHOULDER, SYSTEM, MACRO }
+
 enum class ClassicCtl(
-    val kind: CtlKind,
+    val kind: ClassicKind,
     val bit: Int,
     val size: Float,
     val x: Float,
@@ -37,28 +40,28 @@ enum class ClassicCtl(
     val dy: Float = 0f,
     val shownByDefault: Boolean = true,
 ) {
-    DPAD(CtlKind.DPAD, 0, 128f, 0.10f, 0.40f),
-    STICK_L(CtlKind.STICK_L, 0, 150f, 0.19f, 0.74f),
-    STICK_R(CtlKind.STICK_R, 0, 110f, 0.66f, 0.80f, shownByDefault = false),
-    CROSS(CtlKind.BUTTON, Ps2.CROSS, 66f, 0.86f, 0.64f, 0f, 62f),
-    CIRCLE(CtlKind.BUTTON, Ps2.CIRCLE, 66f, 0.86f, 0.64f, 62f, 0f),
-    SQUARE(CtlKind.BUTTON, Ps2.SQUARE, 66f, 0.86f, 0.64f, -62f, 0f),
-    TRIANGLE(CtlKind.BUTTON, Ps2.TRIANGLE, 66f, 0.86f, 0.64f, 0f, -62f),
-    L1(CtlKind.SHOULDER, Ps2.L1, 84f, 0.17f, 0.12f),
-    L2(CtlKind.SHOULDER, Ps2.L2, 84f, 0.07f, 0.12f),
-    R1(CtlKind.SHOULDER, Ps2.R1, 84f, 0.83f, 0.12f),
-    R2(CtlKind.SHOULDER, Ps2.R2, 84f, 0.93f, 0.12f),
-    L3(CtlKind.BUTTON, Ps2.L3, 50f, 0.30f, 0.60f, shownByDefault = false),
-    R3(CtlKind.BUTTON, Ps2.R3, 50f, 0.56f, 0.70f, shownByDefault = false),
-    SELECT(CtlKind.PILL, Ps2.SELECT, 70f, 0.42f, 0.92f),
-    START(CtlKind.PILL, Ps2.START, 70f, 0.58f, 0.92f),
-    MENU(CtlKind.SYSTEM, 0, 40f, 0.47f, 0.07f),    // the game's pause / settings window (the back key)
-    OPTIONS(CtlKind.SYSTEM, 0, 40f, 0.53f, 0.07f), // this controller's own quick menu
+    DPAD(ClassicKind.DPAD, 0, 128f, 0.10f, 0.40f),
+    STICK_L(ClassicKind.STICK_L, 0, 150f, 0.19f, 0.74f),
+    STICK_R(ClassicKind.STICK_R, 0, 110f, 0.66f, 0.80f, shownByDefault = false),
+    CROSS(ClassicKind.BUTTON, Ps2.CROSS, 66f, 0.86f, 0.64f, 0f, 62f),
+    CIRCLE(ClassicKind.BUTTON, Ps2.CIRCLE, 66f, 0.86f, 0.64f, 62f, 0f),
+    SQUARE(ClassicKind.BUTTON, Ps2.SQUARE, 66f, 0.86f, 0.64f, -62f, 0f),
+    TRIANGLE(ClassicKind.BUTTON, Ps2.TRIANGLE, 66f, 0.86f, 0.64f, 0f, -62f),
+    L1(ClassicKind.SHOULDER, Ps2.L1, 84f, 0.17f, 0.12f),
+    L2(ClassicKind.SHOULDER, Ps2.L2, 84f, 0.07f, 0.12f),
+    R1(ClassicKind.SHOULDER, Ps2.R1, 84f, 0.83f, 0.12f),
+    R2(ClassicKind.SHOULDER, Ps2.R2, 84f, 0.93f, 0.12f),
+    L3(ClassicKind.BUTTON, Ps2.L3, 50f, 0.30f, 0.60f, shownByDefault = false),
+    R3(ClassicKind.BUTTON, Ps2.R3, 50f, 0.56f, 0.70f, shownByDefault = false),
+    SELECT(ClassicKind.PILL, Ps2.SELECT, 70f, 0.42f, 0.92f),
+    START(ClassicKind.PILL, Ps2.START, 70f, 0.58f, 0.92f),
+    MENU(ClassicKind.SYSTEM, 0, 40f, 0.47f, 0.07f),    // the game's pause / settings window (the back key)
+    OPTIONS(ClassicKind.SYSTEM, 0, 40f, 0.53f, 0.07f), // this controller's own quick menu
 }
 
 /**
  * The CLASSIC on-screen controller (the layout before 0.3.0: a generic console pad, sticks, d-pad, face diamond,
- * shoulders, Start/Select), kept as an option next to the game-specific one ([TouchPadView]).
+ * shoulders, Start/Select), kept as an option next to the game-specific one ([NinjaPadView]).
  * Draws the controls in the chosen console's look, turns touches into the PS2 pad's
  * buttons and sticks ([TouchListener.onPad]), plays macros, and in edit mode lets the controls be moved, resized and hidden
  * (with its own small toolbar at the top), handing the changed layout to [TouchListener.onConfigChanged].
@@ -66,6 +69,8 @@ enum class ClassicCtl(
  */
 @SuppressLint("ViewConstructor")
 class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = false) : View(context), TouchSurface {
+
+    override var previewScene: PadScene? = null
 
     override var listener: TouchListener? = null
 
@@ -109,7 +114,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         val key: String,
         val ctl: ClassicCtl?,
         val macro: Macro?,
-        val kind: CtlKind,
+        val kind: ClassicKind,
         var cx: Float,
         var cy: Float,
         var w: Float,
@@ -117,7 +122,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         var scale: Float,
         var visible: Boolean,
     ) {
-        val round: Boolean get() = kind == CtlKind.BUTTON || kind == CtlKind.STICK_L || kind == CtlKind.STICK_R || kind == CtlKind.SYSTEM || kind == CtlKind.MACRO
+        val round: Boolean get() = kind == ClassicKind.BUTTON || kind == ClassicKind.STICK_L || kind == ClassicKind.STICK_R || kind == ClassicKind.SYSTEM || kind == ClassicKind.MACRO
         fun hit(x: Float, y: Float, slack: Float): Boolean =
             if (round) hypot(x - cx, y - cy) <= w / 2 * slack
             else abs(x - cx) <= w / 2 * slack && abs(y - cy) <= h / 2 * slack
@@ -126,9 +131,9 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
     private val dp = resources.displayMetrics.density
     private val els = mutableListOf<El>()
 
-    private fun baseSize(kind: CtlKind, size: Float): Pair<Float, Float> = when (kind) {
-        CtlKind.SHOULDER -> size to size * 0.52f
-        CtlKind.PILL -> size to size * 0.44f
+    private fun baseSize(kind: ClassicKind, size: Float): Pair<Float, Float> = when (kind) {
+        ClassicKind.SHOULDER -> size to size * 0.52f
+        ClassicKind.PILL -> size to size * 0.44f
         else -> size to size
     }
 
@@ -147,9 +152,9 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
             els += El(c.name, c, null, c.kind, cx, cy, bw * dp * all * s, bh * dp * all * s, s, p?.visible ?: c.shownByDefault)
         }
         config.macros.forEachIndexed { i, m ->
-            val size = 58f * dp * all * m.place.scale
-            val (px, py) = if (m.place == Placement(0.74f, 0.40f, 1f, true)) (0.74f - 0.07f * (i % 3)) to (0.38f - 0.13f * (i / 3)) else m.place.x to m.place.y
-            els += El("M:" + m.id, null, m, CtlKind.MACRO, px * w, py * h, size, size, m.place.scale, m.place.visible)
+            val mp = m.place ?: PadDefaults.macroPlace(i)
+            val size = 58f * dp * all * mp.scale
+            els += El("M:" + m.id, null, m, ClassicKind.MACRO, mp.x * w, mp.y * h, size, size, mp.scale, mp.visible)
         }
         invalidate()
     }
@@ -278,7 +283,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         return true
     }
 
-    private fun find(x: Float, y: Float, slack: Float = 1.12f, kinds: Set<CtlKind>? = null): El? {
+    private fun find(x: Float, y: Float, slack: Float = 1.12f, kinds: Set<ClassicKind>? = null): El? {
         var best: El? = null
         var bestD = Float.MAX_VALUE
         for (e in els) {
@@ -307,21 +312,21 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         tracks[id] = t
         if (e == null) return
         when (e.kind) {
-            CtlKind.BUTTON, CtlKind.SHOULDER, CtlKind.PILL -> {
+            ClassicKind.BUTTON, ClassicKind.SHOULDER, ClassicKind.PILL -> {
                 pressedEls += e; buzz(); recompute()
             }
-            CtlKind.DPAD -> {
+            ClassicKind.DPAD -> {
                 dpadBits = dpadDir(e, x, y); buzz(); recompute()
             }
-            CtlKind.STICK_L, CtlKind.STICK_R -> stick(e, t, x, y)
-            CtlKind.MACRO -> {
+            ClassicKind.STICK_L, ClassicKind.STICK_R -> stick(e, t, x, y)
+            ClassicKind.MACRO -> {
                 val m = e.macro ?: return
                 buzz()
                 players.getOrPut(m.id) { MacroPlayer(m) }.start()
                 pressedEls += e
                 invalidate()
             }
-            CtlKind.SYSTEM -> {
+            ClassicKind.SYSTEM -> {
                 pressedEls += e; buzz(); invalidate()
             }
         }
@@ -332,30 +337,30 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         val e = t.el
         if (e == null) {
             // a finger that landed between buttons and slides onto one presses it
-            val n = find(x, y, 1.0f, setOf(CtlKind.BUTTON))
+            val n = find(x, y, 1.0f, setOf(ClassicKind.BUTTON))
             if (n != null) {
                 t.el = n; pressedEls += n; buzz(); recompute()
             }
             return
         }
         when (e.kind) {
-            CtlKind.BUTTON -> if (!e.hit(x, y, 1.25f)) {
+            ClassicKind.BUTTON -> if (!e.hit(x, y, 1.25f)) {
                 // sliding across the face buttons: the one under the finger now
                 pressedEls -= e
-                val n = find(x, y, 1.0f, setOf(CtlKind.BUTTON))
+                val n = find(x, y, 1.0f, setOf(ClassicKind.BUTTON))
                 t.el = n
                 if (n != null) {
                     pressedEls += n; buzz()
                 }
                 recompute()
             }
-            CtlKind.DPAD -> {
+            ClassicKind.DPAD -> {
                 val d = dpadDir(e, x, y)
                 if (d != dpadBits) {
                     dpadBits = d; recompute()
                 }
             }
-            CtlKind.STICK_L, CtlKind.STICK_R -> stick(e, t, x, y)
+            ClassicKind.STICK_L, ClassicKind.STICK_R -> stick(e, t, x, y)
             else -> {}
         }
     }
@@ -364,24 +369,24 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         val t = tracks.remove(id) ?: return
         val e = t.el ?: return
         when (e.kind) {
-            CtlKind.BUTTON, CtlKind.SHOULDER, CtlKind.PILL -> {
+            ClassicKind.BUTTON, ClassicKind.SHOULDER, ClassicKind.PILL -> {
                 if (tracks.values.none { it.el === e }) pressedEls -= e
                 recompute()
             }
-            CtlKind.DPAD -> {
+            ClassicKind.DPAD -> {
                 dpadBits = 0; recompute()
             }
-            CtlKind.STICK_L -> {
+            ClassicKind.STICK_L -> {
                 lx = 128; ly = 128; floatL = null; recompute()
             }
-            CtlKind.STICK_R -> {
+            ClassicKind.STICK_R -> {
                 rx = 128; ry = 128; recompute()
             }
-            CtlKind.MACRO -> {
+            ClassicKind.MACRO -> {
                 e.macro?.let { players[it.id]?.release() }
                 pressedEls -= e; invalidate()
             }
-            CtlKind.SYSTEM -> {
+            ClassicKind.SYSTEM -> {
                 pressedEls -= e; invalidate()
                 if (e.hit(x, y, 1.3f)) {
                     if (e.ctl == ClassicCtl.MENU) listener?.onMenu() else listener?.onOptions()
@@ -419,7 +424,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         }
         val vx = (128 + dx * 127).roundToInt().coerceIn(0, 255)
         val vy = (128 + dy * 127).roundToInt().coerceIn(0, 255)
-        if (e.kind == CtlKind.STICK_L) {
+        if (e.kind == ClassicKind.STICK_L) {
             lx = vx; ly = vy
         } else {
             rx = vx; ry = vy
@@ -489,11 +494,11 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
             }
             3 -> {
                 config = if (e == null) {
-                    config.copy(classicPlaces = emptyMap(), scale = 1f, macros = config.macros.map { it.copy(place = Placement(0.74f, 0.40f)) })
+                    config.copy(classicPlaces = emptyMap(), scale = 1f, macros = config.macros.map { it.copy(place = null) })
                 } else if (e.ctl != null) {
                     config.copy(classicPlaces = config.classicPlaces - e.ctl.name)
                 } else {
-                    config.copy(macros = config.macros.map { if (it.id == e.macro?.id) it.copy(place = Placement(0.74f, 0.40f)) else it })
+                    config.copy(macros = config.macros.map { if (it.id == e.macro?.id) it.copy(place = null) else it })
                 }
                 selected = null
                 listener?.onConfigChanged(config)
@@ -543,7 +548,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         for (e in els) {
             if (!e.visible && !editing) continue
             val k = if (!e.visible) 0.3f else alpha
-            val pressed = e in pressedEls || (e.kind == CtlKind.MACRO && e.macro?.let { players[it.id]?.held } == true)
+            val pressed = e in pressedEls || (e.kind == ClassicKind.MACRO && e.macro?.let { players[it.id]?.held } == true)
             drawEl(canvas, e, k, pressed)
             if (editing && e === selected) {
                 dash.strokeWidth = 2.5f * dp
@@ -560,7 +565,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
         val ring = Color.argb(200, 255, 255, 255)
         stroke.strokeWidth = 2f * dp
         when (e.kind) {
-            CtlKind.BUTTON -> {
+            ClassicKind.BUTTON -> {
                 val ctl = e.ctl!!
                 val r = e.w / 2 * (if (pressed) 0.93f else 1f)
                 val face = faceColor(skin, ctl)
@@ -574,7 +579,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
                     label(c, faceLabel(skin, ctl), e.cx, e.cy, r * 0.9f, a(if (skin == PadSkin.XBOX && ctl == ClassicCtl.TRIANGLE) Color.rgb(40, 34, 10) else if (pressed) Color.rgb(30, 30, 30) else Color.WHITE, k))
                 }
             }
-            CtlKind.SHOULDER, CtlKind.PILL -> {
+            ClassicKind.SHOULDER, ClassicKind.PILL -> {
                 rect.set(e.cx - e.w / 2, e.cy - e.h / 2, e.cx + e.w / 2, e.cy + e.h / 2)
                 val rr = e.h / 2
                 fill.color = a(base, k)
@@ -583,10 +588,10 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
                 c.drawRoundRect(rect, rr, rr, stroke)
                 label(c, faceLabel(skin, e.ctl!!), e.cx, e.cy, e.h * 0.85f, a(if (pressed) Color.rgb(30, 30, 30) else Color.WHITE, k))
             }
-            CtlKind.DPAD -> drawDpad(c, e, k)
-            CtlKind.STICK_L, CtlKind.STICK_R -> {
-                val (sx, sy) = if (e.kind == CtlKind.STICK_L) lx to ly else rx to ry
-                val (ox, oy) = if (e.kind == CtlKind.STICK_L) (floatL ?: (e.cx to e.cy)) else (e.cx to e.cy)
+            ClassicKind.DPAD -> drawDpad(c, e, k)
+            ClassicKind.STICK_L, ClassicKind.STICK_R -> {
+                val (sx, sy) = if (e.kind == ClassicKind.STICK_L) lx to ly else rx to ry
+                val (ox, oy) = if (e.kind == ClassicKind.STICK_L) (floatL ?: (e.cx to e.cy)) else (e.cx to e.cy)
                 fill.color = a(Color.argb(110, 20, 20, 26), k)
                 c.drawCircle(ox, oy, e.w / 2, fill)
                 stroke.color = a(ring, k)
@@ -598,7 +603,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
                 stroke.color = a(ring, k)
                 c.drawCircle(kx, ky, e.w * 0.24f, stroke)
             }
-            CtlKind.SYSTEM -> {
+            ClassicKind.SYSTEM -> {
                 val r = e.w / 2
                 fill.color = a(base, k)
                 c.drawCircle(e.cx, e.cy, r, fill)
@@ -614,7 +619,7 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
                     for (i in -1..1) c.drawCircle(e.cx + i * r * 0.42f, e.cy, r * 0.12f, fill)
                 }
             }
-            CtlKind.MACRO -> {
+            ClassicKind.MACRO -> {
                 val r = e.w / 2 * (if (pressed) 0.93f else 1f)
                 fill.color = a(if (pressed) Color.rgb(255, 176, 32) else Color.argb(150, 20, 20, 26), k)
                 c.drawCircle(e.cx, e.cy, r, fill)

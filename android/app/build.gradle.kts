@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         // CI passes the tag (android-v0.1.0 -> 0.1.0) and the run number; a local build is named after the line below
-        val vName = System.getenv("HL_VERSION_NAME") ?: "0.1.0"
+        val vName = System.getenv("HL_VERSION_NAME") ?: "0.2.0"
         val vParts = vName.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
         versionCode = System.getenv("HL_VERSION_CODE")?.toInt()
             ?: maxOf(1, vParts.getOrElse(0) { 0 } * 10000 + vParts.getOrElse(1) { 0 } * 100 + vParts.getOrElse(2) { 0 })
@@ -59,6 +59,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions {
+        // screenshots of the screens and of the on-screen controller (src/test, Robolectric with native graphics)
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.systemProperty("hl.shots", rootProject.file("build/shots").path) }
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -87,4 +92,11 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core-ktx:1.6.1")
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -85,7 +86,7 @@ fun DriversScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.drivers_installed), Icons.Rounded.DeveloperBoard, accent = Konoha.ChakraBlue) {
+        SectionCard(stringResource(R.string.drivers_installed), NinjaIcons.Bolt, accent = Konoha.ChakraBlue) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(selected = chosen == null, onClick = { vm.selectDriver(null) })
                 Text(stringResource(R.string.gpu_driver_system), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))

@@ -18,10 +18,12 @@ interface TouchSurface {
     var editing: Boolean
     var suppressed: Boolean
     var hiddenForPad: Boolean
+    /** The scene shown no matter what the game says (the launcher's preview); null: the game's. */
+    var previewScene: PadScene?
 }
 
 /** The view of the layout the config asks for: the game-specific one (default) or the classic generic pad. */
 fun createTouchSurface(context: Context, config: TouchConfig, editing: Boolean = false): TouchSurface =
-    if (config.layout == TouchLayout.CLASSIC) ClassicPadView(context, config, editing) else TouchPadView(context, config, editing)
+    if (config.layout == TouchLayout.CLASSIC) ClassicPadView(context, config, editing) else NinjaPadView(context, config, editing)
 
 val TouchSurface.view: View get() = this as View

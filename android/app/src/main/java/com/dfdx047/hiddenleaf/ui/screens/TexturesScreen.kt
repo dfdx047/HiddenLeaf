@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +72,7 @@ fun TexturesScreen(vm: AppViewModel) {
         ) {
             item { ScreenTitle(stringResource(R.string.textures_title), stringResource(R.string.textures_sub)) }
             item {
-                SectionCard(stringResource(R.string.textures_use), Icons.Rounded.Texture) {
+                SectionCard(stringResource(R.string.textures_use), NinjaIcons.BrushPen) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             stringResource(R.string.textures_use_text),

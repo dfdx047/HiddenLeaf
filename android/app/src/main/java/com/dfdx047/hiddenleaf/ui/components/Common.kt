@@ -1,6 +1,16 @@
 package com.dfdx047.hiddenleaf.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,18 +83,30 @@ private data class Quad(val x: Float, val y: Float, val rot: Float, val k: Float
 
 @Composable
 fun ScreenTitle(title: String, subtitle: String? = null, modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.primary
+    val second = MaterialTheme.colorScheme.tertiary
     Column(modifier.padding(horizontal = 4.dp, vertical = 12.dp)) {
-        Text(title.uppercase(), style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
-        Box(
-            Modifier.padding(top = 2.dp, bottom = 4.dp).size(width = 44.dp, height = 3.dp).clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary))),
-        )
+        Text(title, style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
+        // a brush stroke under the title: thick at the start, thinning out
+        Canvas(Modifier.padding(top = 2.dp, bottom = 6.dp).size(width = 120.dp, height = 7.dp)) {
+            val p = Path().apply {
+                moveTo(0f, size.height * 0.35f)
+                quadraticTo(size.width * 0.5f, 0f, size.width, size.height * 0.55f)
+                quadraticTo(size.width * 0.45f, size.height * 0.75f, 0f, size.height)
+                close()
+            }
+            drawPath(p, Brush.horizontalGradient(listOf(accent, second.copy(alpha = 0.6f))))
+        }
         if (subtitle != null) {
             Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
+/**
+ * A card of the launcher: cut corners like a forehead protector's plate, a coloured edge on the left, the icon in a
+ * diamond and a rope-like line under the title.
+ */
 @Composable
 fun SectionCard(
     title: String,
@@ -93,21 +115,37 @@ fun SectionCard(
     accent: Color = MaterialTheme.colorScheme.primary,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    val shape = MaterialTheme.shapes.large
+    val rope = MaterialTheme.colorScheme.outlineVariant
+    Box(
+        modifier.fillMaxWidth().clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, accent.copy(alpha = 0.22f), shape)
+            .drawBehind {
+                // the plate's edge
+                drawRect(accent, topLeft = Offset(0f, size.height * 0.12f), size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height * 0.76f))
+            },
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(start = 20.dp, end = 18.dp, top = 16.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (icon != null) {
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).background(accent.copy(alpha = 0.18f)),
+                        Modifier.size(34.dp).graphicsLayer { rotationZ = 45f }.clip(RoundedCornerShape(6.dp))
+                            .background(accent.copy(alpha = 0.18f)).border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(icon, null, tint = accent, modifier = Modifier.size(18.dp)) }
-                    Spacer(Modifier.width(10.dp))
+                    ) { Icon(icon, null, tint = accent, modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = -45f }) }
+                    Spacer(Modifier.width(14.dp))
                 }
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title.uppercase(), style = MaterialTheme.typography.titleSmall.copy(letterSpacing = 1.2.sp), color = accent)
+            }
+            Canvas(Modifier.fillMaxWidth().height(3.dp)) {
+                // a twisted rope: short slanted strokes
+                val step = 7.dp.toPx()
+                var x = 0f
+                while (x < size.width) {
+                    drawLine(rope, Offset(x, size.height), Offset(x + step * 0.6f, 0f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
+                    x += step
+                }
             }
             content()
         }
@@ -116,13 +154,20 @@ fun SectionCard(
 
 @Composable
 fun EmptyState(icon: ImageVector, title: String, text: String, modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.primary
     Column(
         modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Box(
+            Modifier.size(84.dp).drawBehind {
+                drawCircle(accent.copy(alpha = 0.10f))
+                drawCircle(accent.copy(alpha = 0.45f), style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
+            },
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, Modifier.size(40.dp), tint = accent.copy(alpha = 0.85f)) }
+        Text(title, style = MaterialTheme.typography.headlineSmall)
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -130,31 +175,37 @@ fun EmptyState(icon: ImageVector, title: String, text: String, modifier: Modifie
 @Composable
 fun BusyBar(busy: Busy?) {
     if (busy == null) return
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer, tonalElevation = 3.dp) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text(busy.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(NinjaIcons.Shuriken, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(busy.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+            }
             if (busy.detail.isNotEmpty()) {
                 Text(
                     busy.detail, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.size(6.dp))
-            LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.tertiary)
+            LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f))
         }
     }
 }
 
-/** A small "power level" pill: label and value. */
+/** A tag like the one hanging from a scroll: the number large in the brush type, the label under it. */
 @Composable
 fun StatPill(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Column(
-        modifier
-            .clip(MaterialTheme.shapes.medium)
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+    val shape = MaterialTheme.shapes.medium
+    Row(
+        modifier.clip(shape).background(color.copy(alpha = 0.12f)).border(1.dp, color.copy(alpha = 0.35f), shape),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(value, style = MaterialTheme.typography.headlineSmall, color = color)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Box(Modifier.width(5.dp).height(52.dp).background(color))
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, color = color)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
     }
 }

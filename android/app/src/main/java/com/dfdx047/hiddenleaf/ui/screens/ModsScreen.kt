@@ -1,7 +1,11 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,8 +24,6 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -73,7 +75,7 @@ fun ModsScreen(vm: AppViewModel) {
     ) {
         ScreenTitle(stringResource(R.string.nav_mods), stringResource(R.string.mods_subtitle))
 
-        SectionCard(stringResource(R.string.mods_how_title), Icons.Rounded.Extension, accent = Konoha.LeeGreen) {
+        SectionCard(stringResource(R.string.mods_how_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
             Text(stringResource(R.string.mods_how), style = MaterialTheme.typography.bodyMedium)
             Button(onClick = { pick.launch(arrayOf("*/*")) }, enabled = base) {
                 Icon(Icons.Rounded.Add, null, Modifier.size(18.dp)); Spacer(Modifier.size(6.dp)); Text(stringResource(R.string.mods_add_iso))
@@ -84,7 +86,7 @@ fun ModsScreen(vm: AppViewModel) {
         }
 
         if (mods.isEmpty()) {
-            EmptyState(Icons.Rounded.Extension, stringResource(R.string.mods_empty_title), stringResource(R.string.mods_empty))
+            EmptyState(NinjaIcons.Scroll, stringResource(R.string.mods_empty_title), stringResource(R.string.mods_empty))
         } else {
             mods.forEachIndexed { i, m ->
                 ModCard(
@@ -137,19 +139,8 @@ private fun ModCard(
                 IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, stringResource(R.string.delete)) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (m.changesCode) {
-                    AssistChip(
-                        onClick = {}, label = { Text(stringResource(R.string.mod_kind_code)) },
-                        leadingIcon = { Icon(Icons.Rounded.Code, null, Modifier.size(16.dp)) },
-                        colors = AssistChipDefaults.assistChipColors(labelColor = Konoha.SasukeBlueLight, leadingIconContentColor = Konoha.SasukeBlueLight),
-                    )
-                } else {
-                    AssistChip(
-                        onClick = {}, label = { Text(stringResource(R.string.mod_kind_data)) },
-                        leadingIcon = { Icon(Icons.Rounded.Translate, null, Modifier.size(16.dp)) },
-                        colors = AssistChipDefaults.assistChipColors(labelColor = Konoha.LeeGreenLight, leadingIconContentColor = Konoha.LeeGreenLight),
-                    )
-                }
+                if (m.changesCode) Tag(stringResource(R.string.mod_kind_code), Icons.Rounded.Code, Konoha.SasukeBlueLight)
+                else Tag(stringResource(R.string.mod_kind_data), Icons.Rounded.Translate, Konoha.LeeGreenLight)
             }
             if (m.changesCode && !m.pack) {
                 Text(
@@ -159,5 +150,19 @@ private fun ModCard(
                 )
             }
         }
+    }
+}
+
+/** A label on a mod's card (what kind of mod it is): not a button. */
+@Composable
+private fun Tag(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        Modifier.padding(top = 4.dp).clip(MaterialTheme.shapes.small).background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.4f), MaterialTheme.shapes.small).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(14.dp), tint = color)
+        Spacer(Modifier.size(6.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
     }
 }

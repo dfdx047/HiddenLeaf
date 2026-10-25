@@ -1,5 +1,6 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
@@ -114,7 +115,7 @@ fun HomeScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.game_data), Icons.Rounded.Album) {
+        SectionCard(stringResource(R.string.game_data), NinjaIcons.Disc) {
             when (val s = install) {
                 InstallState.NotInstalled -> {
                     Text(
@@ -162,7 +163,7 @@ fun HomeScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.engine), Icons.Rounded.Memory, accent = MaterialTheme.colorScheme.secondary) {
+        SectionCard(stringResource(R.string.engine), NinjaIcons.Engine, accent = MaterialTheme.colorScheme.secondary) {
             Text(
                 stringResource(if (vm.engineAvailable) R.string.engine_included else R.string.engine_missing),
                 style = MaterialTheme.typography.bodyMedium,
@@ -194,16 +195,7 @@ fun HomeScreen(vm: AppViewModel) {
 private fun Hero() {
     Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
         val fire = Brush.verticalGradient(listOf(Konoha.ScrollCream, Konoha.ChakraAmber, Konoha.NarutoOrange))
-        Text(
-            "HIDDEN LEAF",
-            style = TitleStyle,
-            modifier = Modifier
-                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-                .drawWithContent {
-                    drawContent()
-                    drawRect(fire, blendMode = BlendMode.SrcIn)
-                },
-        )
+        Text("HIDDEN LEAF", style = TitleStyle.copy(brush = fire))
         // Naruto, Sasuke, Lee
         Row(Modifier.padding(top = 4.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             listOf(Konoha.NarutoOrange to 64.dp, Konoha.SasukeBlue to 40.dp, Konoha.LeeGreen to 24.dp).forEach { (c, w) ->

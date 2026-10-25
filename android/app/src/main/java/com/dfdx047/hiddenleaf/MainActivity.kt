@@ -1,6 +1,17 @@
 package com.dfdx047.hiddenleaf
 
 import android.os.Bundle
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
+import com.dfdx047.hiddenleaf.ui.theme.Konoha
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,20 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BugReport
-import androidx.compose.material.icons.rounded.DeveloperBoard
-import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SportsEsports
-import androidx.compose.material.icons.rounded.Texture
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -96,13 +95,13 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Dest(val route: String, val label: Int, val icon: ImageVector) {
-    HOME("home", R.string.nav_home, Icons.Rounded.Home),
-    TEXTURES("textures", R.string.nav_textures, Icons.Rounded.Texture),
-    MODS("mods", R.string.nav_mods, Icons.Rounded.Extension),
-    CONTROLS("controls", R.string.nav_controls, Icons.Rounded.SportsEsports),
-    DRIVERS("drivers", R.string.nav_drivers, Icons.Rounded.DeveloperBoard),
-    DEBUG("debug", R.string.nav_debug, Icons.Rounded.BugReport),
-    SETTINGS("settings", R.string.nav_settings, Icons.Rounded.Settings),
+    HOME("home", R.string.nav_home, NinjaIcons.Gate),
+    MODS("mods", R.string.nav_mods, NinjaIcons.Scroll),
+    CONTROLS("controls", R.string.nav_controls, NinjaIcons.Shuriken),
+    TEXTURES("textures", R.string.nav_textures, NinjaIcons.BrushPen),
+    DRIVERS("drivers", R.string.nav_drivers, NinjaIcons.Bolt),
+    DEBUG("debug", R.string.nav_debug, NinjaIcons.Eye),
+    SETTINGS("settings", R.string.nav_settings, NinjaIcons.Tools),
 }
 
 @Composable
@@ -130,16 +129,7 @@ private fun HiddenLeafApp(vm: AppViewModel) {
 
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxSize().background(colors.background).leafBackground(colors.primary, colors.secondary)) {
-        if (wide) {
-            NavigationRail(containerColor = Color.Transparent, modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
-                Dest.entries.forEach { d ->
-                    NavigationRailItem(
-                        selected = current == d.route, onClick = { go(d) },
-                        icon = { Icon(d.icon, null) }, label = { Text(stringResource(d.label)) },
-                    )
-                }
-            }
-        }
+        if (wide) SideScroll(current) { go(it) }
         Scaffold(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbar) },
@@ -147,14 +137,14 @@ private fun HiddenLeafApp(vm: AppViewModel) {
                 Column {
                     BusyBar(busy)
                     if (!wide) {
-                        // seven pages: a bar that scrolls sideways when the screen is too narrow for all of them
-                        Surface(color = colors.surfaceContainer.copy(alpha = 0.94f)) {
+                        // the pages: a bar that scrolls sideways when the screen is too narrow for all of them
+                        Surface(color = colors.surfaceContainerLowest.copy(alpha = 0.94f)) {
                             Row(
                                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                                     .windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 4.dp, vertical = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                             ) {
-                                Dest.entries.forEach { d -> BarItem(d, current == d.route) { go(d) } }
+                                Dest.entries.forEach { d -> NavItem(d, current == d.route, wide = false) { go(d) } }
                             }
                         }
                     }
@@ -179,20 +169,45 @@ private fun HiddenLeafApp(vm: AppViewModel) {
     }
 }
 
-/** One page of the bottom bar: its icon in a pill that lights when it is the page shown, and its name. */
+/**
+ * The side panel in landscape: a dark strip with a thin wooden edge, the app's leaf at the top and the pages under it;
+ * the page shown sits on an orange plate with cut corners and a kunai pointing at it.
+ */
 @Composable
-private fun BarItem(d: Dest, selected: Boolean, onClick: () -> Unit) {
+private fun SideScroll(current: String?, go: (Dest) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(
-        Modifier.width(76.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
+        Modifier.fillMaxHeight().width(92.dp)
+            .background(colors.surfaceContainerLowest.copy(alpha = 0.85f))
+            .drawBehind {
+                drawRect(Konoha.Wood, topLeft = Offset(size.width - 3.dp.toPx(), 0f), size = Size(3.dp.toPx(), size.height))
+            }
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(NinjaIcons.Leaf, null, tint = Konoha.LeeGreen, modifier = Modifier.padding(bottom = 8.dp).size(30.dp))
+        Dest.entries.forEach { d -> NavItem(d, current == d.route, wide = true) { go(d) } }
+    }
+}
+
+/** One page of the navigation: its icon on a plate that lights orange when it is the page shown, and its name. */
+@Composable
+private fun NavItem(d: Dest, selected: Boolean, wide: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val plate = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
+    Column(
+        Modifier.width(if (wide) 80.dp else 74.dp).clip(plate).clickable(onClick = onClick).padding(vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.clip(RoundedCornerShape(16.dp))
-                .background(if (selected) colors.primary.copy(alpha = 0.22f) else Color.Transparent)
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+            Modifier.clip(plate)
+                .background(if (selected) Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep, Konoha.NarutoOrange)) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+                .padding(horizontal = 16.dp, vertical = 5.dp),
         ) {
-            Icon(d.icon, null, tint = if (selected) colors.primary else colors.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            Icon(d.icon, null, tint = if (selected) Konoha.NarutoBlack else colors.onSurfaceVariant, modifier = Modifier.size(24.dp))
         }
         Text(
             stringResource(d.label), maxLines = 1, overflow = TextOverflow.Ellipsis,

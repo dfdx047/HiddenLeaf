@@ -4,22 +4,28 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** The look of the on-screen controller: which console's buttons it shows. The PS2 buttons behind them are the same. */
+/** The look of the on-screen controller's button letters: which console's. The PS2 buttons behind them are the same. */
 enum class PadSkin { PLAYSTATION, XBOX, NINTENDO }
 
-/**
- * How the controls are drawn: DRAGON (0.6.0 and on, the default) dark round buttons with gold icons and coloured
- * letter badges, a Dragon Ball for the stick; GLASS the translucent look of 0.3.0 to 0.5.0.
- */
-enum class PadStyle { DRAGON, GLASS }
+/** How the controls are drawn: INK dark translucent buttons with a coloured rim; GLASS lighter, see-through. */
+enum class PadStyle { INK, GLASS }
 
-/** Which layout of the on-screen controller: the game-specific one (0.3.0 and on) or the classic generic pad. */
+/** Which layout of the on-screen controller: the game's own (by scene) or the classic generic pad. */
 enum class TouchLayout { MOBILE, CLASSIC }
 
 /** When the on-screen controller shows: never, until a physical controller is used (and again on a touch), always. */
 enum class TouchMode { OFF, AUTO, ALWAYS }
 
-/** The PS2 pad's buttons, as the engine's pad buffer has them (port/src/gs/gs_input.c, include/sys/pad.h). */
+/**
+ * What the game is showing, and so which controls are on the screen:
+ *  - FIGHT: a 2D fight. A D-pad (the fights are on a plane), the fighting buttons and one-touch jutsu;
+ *  - CAMPAIGN: the Master mode's map, walked with the stick;
+ *  - MENU: menus, with the D-pad and the PS2 diamond.
+ * The engine says which one it is (TouchBridge.scene); the SCENE button changes it by hand.
+ */
+enum class PadScene { FIGHT, CAMPAIGN, MENU }
+
+/** The PS2 pad's buttons, as the engine's pad buffer has them. */
 object Ps2 {
     const val SELECT = 0x0001
     const val L3 = 0x0002
@@ -40,96 +46,151 @@ object Ps2 {
 
     /** Buttons a macro step can press, in the order the editor lists them. */
     val MACRO_BUTTONS = listOf(CROSS, CIRCLE, SQUARE, TRIANGLE, L1, R1, L2, R2, UP, DOWN, LEFT, RIGHT, L3, R3, START, SELECT)
+
+    /** A button's name in a console's look (positions stay the PS2's: south is cross). */
+    fun label(skin: PadSkin, bit: Int): String = when (bit) {
+        UP -> "↑"; DOWN -> "↓"; LEFT -> "←"; RIGHT -> "→"
+        else -> when (skin) {
+            PadSkin.PLAYSTATION -> when (bit) {
+                CROSS -> "✕"; CIRCLE -> "○"; SQUARE -> "□"; TRIANGLE -> "△"
+                L1 -> "L1"; L2 -> "L2"; R1 -> "R1"; R2 -> "R2"; L3 -> "L3"; R3 -> "R3"
+                START -> "START"; SELECT -> "SELECT"; else -> "?"
+            }
+            PadSkin.XBOX -> when (bit) {
+                CROSS -> "A"; CIRCLE -> "B"; SQUARE -> "X"; TRIANGLE -> "Y"
+                L1 -> "LB"; L2 -> "LT"; R1 -> "RB"; R2 -> "RT"; L3 -> "LS"; R3 -> "RS"
+                START -> "MENU"; SELECT -> "VIEW"; else -> "?"
+            }
+            PadSkin.NINTENDO -> when (bit) {
+                CROSS -> "B"; CIRCLE -> "A"; SQUARE -> "Y"; TRIANGLE -> "X"
+                L1 -> "L"; L2 -> "ZL"; R1 -> "R"; R2 -> "ZR"; L3 -> "LS"; R3 -> "RS"
+                START -> "+"; SELECT -> "−"; else -> "?"
+            }
+        }
+    }
 }
 
 /** What a control on the screen is. */
-enum class CtlKind { DPAD, STICK_L, STICK_R, BUTTON, PILL, SHOULDER, SYSTEM, MACRO }
-
-/**
- * One fixed control of the on-screen controller. [size] is its diameter (or width) in dp at scale 1; [x], [y] its
- * default centre as a fraction of the screen. Face buttons are placed around a centre so the diamond keeps its shape
- * on any screen: [dx], [dy] in dp from ([x], [y]).
- */
-enum class Ctl(
-    val kind: CtlKind,
-    val bit: Int,
-    val size: Float,
-    val x: Float,
-    val y: Float,
-    val dx: Float = 0f,
-    val dy: Float = 0f,
-    val shownByDefault: Boolean = true,
-) {
-    // Battle mode uses a virtual stick. Menu mode swaps to this D-pad because BT3's menus read digital directions.
-    DPAD(CtlKind.DPAD, 0, 128f, 0.10f, 0.43f),
-    STICK_L(CtlKind.STICK_L, 0, 148f, 0.145f, 0.775f),
-    STICK_R(CtlKind.STICK_R, 0, 100f, 0.70f, 0.78f, shownByDefault = false),
-
-    // Combat controls form a mobile thumb cluster rather than the classic PS2 diamond.
-    // The tiny controller symbol is only a reference; the illustrated action is the primary affordance.
-    SQUARE(CtlKind.BUTTON, Ps2.SQUARE, 82f, 0.845f, 0.805f),       // melee attack
-    CIRCLE(CtlKind.BUTTON, Ps2.CIRCLE, 66f, 0.745f, 0.735f),      // guard
-    TRIANGLE(CtlKind.BUTTON, Ps2.TRIANGLE, 66f, 0.855f, 0.605f),  // Ki blast
-    CROSS(CtlKind.BUTTON, Ps2.CROSS, 60f, 0.945f, 0.735f),        // dash
-
-    // One-touch versions of common simultaneous-input attacks. They still send the exact native PS2 bits.
-    BLAST1(CtlKind.BUTTON, Ps2.L2 or Ps2.CIRCLE, 52f, 0.745f, 0.555f),
-    BLAST2(CtlKind.BUTTON, Ps2.L2 or Ps2.TRIANGLE, 52f, 0.945f, 0.555f),
-    ULTIMATE(CtlKind.BUTTON, Ps2.L2 or Ps2.DOWN or Ps2.TRIANGLE, 52f, 0.955f, 0.905f),
-
-    // Utility actions stay near their screen edge and outside the primary thumb cluster.
-    L1(CtlKind.SHOULDER, Ps2.L1, 78f, 0.075f, 0.155f),          // lock-on
-    L2(CtlKind.SHOULDER, Ps2.L2, 78f, 0.075f, 0.275f),          // Ki charge (hold)
-    R1(CtlKind.SHOULDER, Ps2.R1, 78f, 0.875f, 0.155f),          // jump / ascend
-    R2(CtlKind.SHOULDER, Ps2.R2, 78f, 0.875f, 0.275f),          // descend
-    L3(CtlKind.BUTTON, Ps2.L3, 50f, 0.31f, 0.58f),
-    R3(CtlKind.BUTTON, Ps2.R3, 48f, 0.965f, 0.415f),             // transform / free look
-    // Battle-only roster actions. The native game decides the actual team size at runtime.
-    TEAM_SWAP(CtlKind.SYSTEM, 0, 54f, 0.22f, 0.325f),            // sends L3 + R3 together
-    TEAM_SELECT(CtlKind.SYSTEM, 0, 48f, 0.22f, 0.435f),          // one right-stick-down input advances the roster target
-    SELECT(CtlKind.PILL, Ps2.SELECT, 50f, 0.355f, 0.065f, shownByDefault = false),
-    START(CtlKind.PILL, Ps2.START, 50f, 0.645f, 0.065f),
-    MENU(CtlKind.SYSTEM, 0, 40f, 0.465f, 0.065f),                // port pause / settings window
-    OPTIONS(CtlKind.SYSTEM, 0, 40f, 0.535f, 0.065f),             // controller quick menu
-    NAV_MODE(CtlKind.SYSTEM, 0, 42f, 0.50f, 0.155f),              // manually swap combat controls <-> menu D-pad
-}
-
-/** Where a control is: centre as a fraction of the screen, its scale, shown or not. */
-data class Placement(val x: Float, val y: Float, val scale: Float = 1f, val visible: Boolean = true, val opacity: Int = 100)
+enum class CtlKind { DPAD, STICK, BUTTON, SHOULDER, PILL, SYSTEM, MACRO }
 
 /** One step of a macro: these buttons held for [ms] milliseconds (0 buttons: a pause). */
 data class MacroStep(val buttons: Int, val ms: Int)
 
 /**
- * A button of the user's that plays a sequence of presses: a combo, or several buttons at once. [repeat]: it
- * plays again for as long as the button is held (turbo).
+ * The controls of Ultimate Ninja 5. The functions are the series' on the PS2 (Ultimate Ninja 2's manual: ○ attack,
+ * ✕ jump, △ chakra for a secret technique, □ item, L1/R1 change item, L2/R2 guard); the one-touch jutsu play the
+ * series' inputs: △ then ○ for a jutsu, △ △ then ○ for the ultimate one. To check on the game when it runs.
+ */
+enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List<MacroStep> = emptyList()) {
+    DPAD(CtlKind.DPAD, 0, 140f),
+    STICK(CtlKind.STICK, 0, 150f),
+    ATTACK(CtlKind.BUTTON, Ps2.CIRCLE, 88f),
+    JUMP(CtlKind.BUTTON, Ps2.CROSS, 66f),
+    CHAKRA(CtlKind.BUTTON, Ps2.TRIANGLE, 64f),
+    ITEM(CtlKind.BUTTON, Ps2.SQUARE, 62f),
+    JUTSU(CtlKind.MACRO, 0, 60f, listOf(MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90))),
+    OUGI(CtlKind.MACRO, 0, 60f, listOf(
+        MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
+    )),
+    GUARD(CtlKind.BUTTON, Ps2.R2, 60f),
+    AWAKEN(CtlKind.BUTTON, Ps2.R3, 52f),
+    ITEM_PREV(CtlKind.SHOULDER, Ps2.L1, 72f),
+    ITEM_NEXT(CtlKind.SHOULDER, Ps2.R1, 72f),
+    START(CtlKind.PILL, Ps2.START, 56f),
+    SELECT(CtlKind.PILL, Ps2.SELECT, 56f),
+    MENU(CtlKind.SYSTEM, 0, 40f),     // the engine's own menu (settings)
+    OPTIONS(CtlKind.SYSTEM, 0, 40f),  // the controller's quick menu
+    SCENE(CtlKind.SYSTEM, 0, 44f),    // fight / campaign / menu by hand
+}
+
+/** Where a control is: centre as a fraction of the screen's safe area, its scale, shown or not, its opacity. */
+data class Placement(val x: Float, val y: Float, val scale: Float = 1f, val visible: Boolean = true, val opacity: Int = 100)
+
+/** Which controls each scene has, and where they start. A control missing from a scene is not on screen in it. */
+object PadDefaults {
+    private val top = listOf(
+        Ctl.SCENE to Placement(0.37f, 0.075f),
+        Ctl.MENU to Placement(0.47f, 0.075f),
+        Ctl.OPTIONS to Placement(0.53f, 0.075f),
+        Ctl.START to Placement(0.63f, 0.075f),
+    )
+
+    val FIGHT: Map<Ctl, Placement> = linkedMapOf(
+        Ctl.DPAD to Placement(0.13f, 0.68f),
+        Ctl.ATTACK to Placement(0.84f, 0.74f),
+        Ctl.JUMP to Placement(0.955f, 0.60f),
+        Ctl.CHAKRA to Placement(0.86f, 0.49f),
+        Ctl.ITEM to Placement(0.725f, 0.86f),
+        Ctl.JUTSU to Placement(0.73f, 0.58f),
+        Ctl.OUGI to Placement(0.80f, 0.29f),
+        Ctl.GUARD to Placement(0.955f, 0.87f),
+        Ctl.AWAKEN to Placement(0.955f, 0.38f),
+        Ctl.ITEM_PREV to Placement(0.07f, 0.20f),
+        Ctl.ITEM_NEXT to Placement(0.93f, 0.17f),
+    ) + top
+
+    val CAMPAIGN: Map<Ctl, Placement> = linkedMapOf(
+        Ctl.STICK to Placement(0.15f, 0.70f),
+        Ctl.ATTACK to Placement(0.84f, 0.74f),
+        Ctl.JUMP to Placement(0.955f, 0.60f),
+        Ctl.CHAKRA to Placement(0.86f, 0.49f),
+        Ctl.ITEM to Placement(0.725f, 0.86f),
+        Ctl.ITEM_PREV to Placement(0.07f, 0.20f),
+        Ctl.ITEM_NEXT to Placement(0.93f, 0.17f),
+        Ctl.SELECT to Placement(0.27f, 0.075f),
+    ) + top
+
+    val MENU: Map<Ctl, Placement> = linkedMapOf(
+        Ctl.DPAD to Placement(0.14f, 0.62f),
+        Ctl.CHAKRA to Placement(0.855f, 0.43f, 0.95f),  // △ north
+        Ctl.ATTACK to Placement(0.935f, 0.62f, 0.72f),  // ○ east
+        Ctl.JUMP to Placement(0.855f, 0.81f, 0.95f),    // ✕ south
+        Ctl.ITEM to Placement(0.775f, 0.62f, 1f),       // □ west
+        Ctl.ITEM_PREV to Placement(0.07f, 0.20f),
+        Ctl.ITEM_NEXT to Placement(0.93f, 0.20f),
+        Ctl.SELECT to Placement(0.27f, 0.075f),
+    ) + top
+
+    fun of(scene: PadScene): Map<Ctl, Placement> = when (scene) {
+        PadScene.FIGHT -> FIGHT
+        PadScene.CAMPAIGN -> CAMPAIGN
+        PadScene.MENU -> MENU
+    }
+
+    /** Where the user's own macros start (by their place in the list). */
+    fun macroPlace(i: Int) = Placement(0.62f - 0.075f * (i % 3), 0.40f - 0.13f * (i / 3))
+}
+
+/**
+ * A button of the user's that plays a sequence of presses: a combo, or several buttons at once. [repeat]: it plays
+ * again for as long as the button is held. Shown in fights and in the campaign.
  */
 data class Macro(
     val id: String,
     val name: String,
     val steps: List<MacroStep>,
     val repeat: Boolean = false,
-    val place: Placement = Placement(0.74f, 0.40f, 1f, true),
+    val place: Placement? = null,
 )
 
 data class TouchConfig(
     val mode: TouchMode = TouchMode.AUTO,
-    val skin: PadSkin = PadSkin.XBOX,
-    val style: PadStyle = PadStyle.DRAGON,
-    val opacity: Int = 70,          // %
+    val skin: PadSkin = PadSkin.PLAYSTATION,
+    val style: PadStyle = PadStyle.INK,
+    val opacity: Int = 75,          // %
     val scale: Float = 1f,          // all controls
     val haptics: Boolean = true,
-    val sticksFloat: Boolean = false, // the left stick starts where the thumb lands (within its half of the screen)
-    val places: Map<Ctl, Placement> = emptyMap(), // only those moved; the rest at their defaults
+    val sticksFloat: Boolean = true, // the stick starts where the thumb lands (left part of the screen)
+    val places: Map<String, Placement> = emptyMap(), // "FIGHT.ATTACK" → moved; the rest at PadDefaults
     val layout: TouchLayout = TouchLayout.MOBILE,
-    val autoMode: Boolean = true,   // menu buttons outside a fight, fight buttons in one (the MENU/FIGHT button still overrides)
+    val autoMode: Boolean = true,   // the scene follows the game (the SCENE button still overrides)
     val classicPlaces: Map<String, Placement> = emptyMap(), // the classic layout's own moved controls (by ClassicCtl name)
     val macros: List<Macro> = emptyList(),
 ) {
-    fun placeOf(c: Ctl): Placement? = places[c]
+    fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("version", 2)
+        put("version", 3)
         put("mode", mode.name)
         put("skin", skin.name)
         put("style", style.name)
@@ -137,7 +198,7 @@ data class TouchConfig(
         put("scale", scale.toDouble())
         put("haptics", haptics)
         put("sticksFloat", sticksFloat)
-        put("places", JSONObject().apply { places.forEach { (c, p) -> put(c.name, p.json()) } })
+        put("places", JSONObject().apply { places.forEach { (k, p) -> put(k, p.json()) } })
         put("layout", layout.name)
         put("autoMode", autoMode)
         put("classicPlaces", JSONObject().apply { classicPlaces.forEach { (n, p) -> put(n, p.json()) } })
@@ -147,7 +208,7 @@ data class TouchConfig(
                     put("id", m.id)
                     put("name", m.name)
                     put("repeat", m.repeat)
-                    put("place", m.place.json())
+                    m.place?.let { put("place", it.json()) }
                     put("steps", JSONArray().apply { m.steps.forEach { put(JSONArray().put(it.buttons).put(it.ms)) } })
                 })
             }
@@ -156,16 +217,9 @@ data class TouchConfig(
 
     companion object {
         fun fromJson(o: JSONObject): TouchConfig {
-            val places = mutableMapOf<Ctl, Placement>()
-            // Version 2 introduces the BT3-specific mobile layout. Old v1 absolute placements describe the
-            // generic controller and would override the new ergonomic defaults, so migrate those once.
-            if (o.optInt("version", 1) >= 2) {
-                o.optJSONObject("places")?.let { p ->
-                    p.keys().forEach { k ->
-                        val c = Ctl.entries.firstOrNull { it.name == k } ?: return@forEach
-                        p.optJSONObject(k)?.let { places[c] = placement(it) }
-                    }
-                }
+            val places = mutableMapOf<String, Placement>()
+            if (o.optInt("version", 1) >= 3) {
+                o.optJSONObject("places")?.let { p -> p.keys().forEach { k -> p.optJSONObject(k)?.let { places[k] = placement(it) } } }
             }
             val classic = mutableMapOf<String, Placement>()
             o.optJSONObject("classicPlaces")?.let { p ->
@@ -187,18 +241,18 @@ data class TouchConfig(
                         name = m.optString("name").ifEmpty { "M${i + 1}" },
                         steps = steps,
                         repeat = m.optBoolean("repeat"),
-                        place = m.optJSONObject("place")?.let { placement(it) } ?: Placement(0.74f, 0.40f),
+                        place = m.optJSONObject("place")?.let { placement(it) },
                     )
                 }
             }
             return TouchConfig(
                 mode = runCatching { TouchMode.valueOf(o.optString("mode")) }.getOrDefault(TouchMode.AUTO),
                 skin = runCatching { PadSkin.valueOf(o.optString("skin")) }.getOrDefault(PadSkin.PLAYSTATION),
-                style = runCatching { PadStyle.valueOf(o.optString("style")) }.getOrDefault(PadStyle.DRAGON),
-                opacity = o.optInt("opacity", 70).coerceIn(10, 100),
+                style = runCatching { PadStyle.valueOf(o.optString("style")) }.getOrDefault(PadStyle.INK),
+                opacity = o.optInt("opacity", 75).coerceIn(10, 100),
                 scale = o.optDouble("scale", 1.0).toFloat().coerceIn(0.5f, 2f),
                 haptics = o.optBoolean("haptics", true),
-                sticksFloat = o.optBoolean("sticksFloat", false),
+                sticksFloat = o.optBoolean("sticksFloat", true),
                 places = places,
                 layout = runCatching { TouchLayout.valueOf(o.optString("layout")) }.getOrDefault(TouchLayout.MOBILE),
                 autoMode = o.optBoolean("autoMode", true),
