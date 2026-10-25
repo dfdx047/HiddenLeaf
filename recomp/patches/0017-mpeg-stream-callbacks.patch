@@ -1,0 +1,65 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 44eaef4..49f3ff9 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1590,14 +1590,31 @@ namespace ps2_stubs
+                 return;
+             }
+ 
+-            const uint32_t cbDataAddr = runtime->guestMalloc(kMpegCallbackDataSize, 16u);
+-            if (cbDataAddr == 0u)
++            // Games that stub malloc to the runtime heap and take all of it at boot (UN5) leave nothing here; without a
++            // fallback every stream callback was dropped and the movie waited forever for its audio. The fallback is
++            // a ring outside the game's memory (the async callback area); a slot lives until 256 callbacks later.
++            uint32_t cbDataAddr = runtime->guestMalloc(kMpegCallbackDataSize, 16u);
++            const bool fromHeap = cbDataAddr != 0u;
++            if (!fromHeap)
+             {
+-                return;
++                constexpr uint32_t kRingSlots = 256u;
++                static uint32_t s_ringBase = 0u;
++                static uint32_t s_ringNext = 0u;
++                if (s_ringBase == 0u)
++                {
++                    const uint32_t top = runtime->reserveAsyncCallbackStack(kRingSlots * kMpegCallbackDataSize, 16u);
++                    s_ringBase = top != 0u ? top - kRingSlots * kMpegCallbackDataSize : 0u;
++                }
++                if (s_ringBase == 0u)
++                {
++                    return;
++                }
++                cbDataAddr = s_ringBase + (s_ringNext++ % kRingSlots) * kMpegCallbackDataSize;
+             }
+             if (!writeMpegCallbackData(rdram, cbDataAddr, event))
+             {
+-                runtime->guestFree(cbDataAddr);
++                if (fromHeap)
++                    runtime->guestFree(cbDataAddr);
+                 return;
+             }
+ 
+@@ -1613,9 +1630,10 @@ namespace ps2_stubs
+             GuestInvocation invocation{};
+             invocation.kind = GuestInvocationKind::RpcCallback;
+             invocation.context = callbackCtx;
+-            invocation.onComplete = [runtime, cbDataAddr](const R5900Context &, R5900Context &)
++            invocation.onComplete = [runtime, cbDataAddr, fromHeap](const R5900Context &, R5900Context &)
+             {
+-                runtime->guestFree(cbDataAddr);
++                if (fromHeap)
++                    runtime->guestFree(cbDataAddr);
+             };
+             runtime->eeScheduler().queueInvocation(std::move(invocation));
+         }
+@@ -2206,6 +2224,11 @@ namespace ps2_stubs
+                 });
+             }
+             setReturnS32(ctx, 0);
++            // The real demux always takes the data (the IPU drains it). A guest feeder that retries at once spins
++            // here and starves the thread that would take the decoded pictures (UN5's opening movie): sleep it
++            // until the next vsync instead.
++            if (runtime->eeScheduler().currentThreadId() > 0)
++                runtime->eeScheduler().waitVSync(runtime->eeScheduler().currentVSyncTick(), 0);
+             return;
+         }
+         const bool currentStreamCompleted = std::find(completedMpegIds.begin(), completedMpegIds.end(), mpegAddr) != completedMpegIds.end();
