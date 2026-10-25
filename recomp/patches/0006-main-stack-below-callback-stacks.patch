@@ -1,0 +1,51 @@
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 908c5b2..ccb8fff 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -384,6 +384,8 @@ public:
+     uint32_t guestHeapEnd() const;
+     uint32_t guestHeapLimit() const;
+     uint32_t reserveAsyncCallbackStack(uint32_t size, uint32_t alignment = 16u);
++    // Keeps the async callback stacks below [low, high): the main thread's stack (SetupThread)
++    void excludeAsyncCallbackStackRange(uint32_t low, uint32_t high);
+ 
+     void drainCompletedDmacHandlers(uint8_t *rdram);
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 9614016..4f00c5f 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -531,6 +531,11 @@ namespace ps2_syscalls
+         }
+ 
+         scheduler.setupCurrentThread(initialStack, stackSize, getRegU32(ctx, 28));
++        // the main stack grows down from sp: the interrupt/alarm/callback stacks must not be carved from it
++        // (Ultimate Ninja 5: an interrupt handler's stack at 0x1ff7ff0 zeroed main's saved ra at 0x1ff7f90)
++        constexpr uint32_t kDefaultMainStackSize = 0x10000u;
++        const uint32_t reserved = stackSize != 0u ? stackSize : kDefaultMainStackSize;
++        runtime->excludeAsyncCallbackStackRange(sp > reserved ? sp - reserved : 0u, sp);
+         setReturnU32(ctx, sp);
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index dacf296..615af23 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1990,6 +1990,17 @@ uint32_t PS2Runtime::guestHeapLimit() const
+     return m_guestHeapConfigured ? m_guestHeapLimit : m_guestHeapSuggestedBase;
+ }
+ 
++void PS2Runtime::excludeAsyncCallbackStackRange(uint32_t low, uint32_t high)
++{
++    std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
++    // the callback stacks are carved down from m_asyncCallbackStackTop: start them under the range when they would
++    // reach into it (SetupThread(-1) puts the main stack right under the top of RAM, where they began)
++    if (low < high && low < m_asyncCallbackStackTop && high > m_asyncCallbackStackFloor)
++    {
++        m_asyncCallbackStackTop = std::max(low & ~0xFu, m_asyncCallbackStackFloor);
++    }
++}
++
+ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment)
+ {
+     if (size == 0u)
