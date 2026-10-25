@@ -22,7 +22,9 @@ funções são aproximadas (fim de função por `jr ra`); o mapa real sai do Ghi
   Compilado com o Metrowerks CodeWarrior (MW MIPS C Compiler 2.4.1.01).
 - Fim do BSS: europeu `0x928900`; A35 `0xa28900` (1 MB a mais, para o código novo).
 - **Overlays em `cdrom0:\PRG\`**, formato `MWo3` do CodeWarrior. Cabeçalho de 0x40 bytes: magic, id, endereço de
-  carga, tamanho do texto, tamanho dos dados, BSS, fim, fim+BSS; o corpo começa em 0x40.
+  carga, tamanho do texto, tamanho dos dados, BSS, início e fim da tabela de construtores estáticos; o corpo começa em
+  0x40 (o jogo carrega o arquivo inteiro em addr, então o código fica em addr+0x40). Os construtores são código dentro
+  dos dados (BTL `0x8ea080`…, ADV `0x8aa680`…): `un5.py ovlelf` os marca como seções de código (`ctor_islands`).
 
 | Arquivo | id | Carga | SHA-256 europeu | SHA-256 A35 |
 |---|---|---|---|---|

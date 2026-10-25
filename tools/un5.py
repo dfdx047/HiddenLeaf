@@ -144,11 +144,58 @@ def elf_text(data):
 
 
 def mwo3(data):
-    """A CodeWarrior overlay: header of 0x40 bytes, then text and data. Returns a dict, or None."""
+    """A CodeWarrior overlay: header of 0x40 bytes, then text and data. Returns a dict, or None.
+    The game loads the whole file, header included, at addr: the body (code) is at addr + 0x40 in memory ("code");
+    ETC.BIN's end is addr + 0x40 + text + data, and the overlays' jal targets are prologues there."""
     if data[:4] != b"MWo3":
         return None
-    oid, addr, text, dat, bss, end, bss_end = struct.unpack_from("<7I", data, 4)
-    return dict(id=oid, addr=addr, text=text, data=dat, bss=bss, end=end, bss_end=bss_end, body=data[0x40:])
+    oid, addr, text, dat, bss, ctors, ctors_end = struct.unpack_from("<7I", data, 4)
+    return dict(id=oid, addr=addr, code=addr + 0x40, text=text, data=dat, bss=bss, ctors=ctors, ctors_end=ctors_end,
+                body=data[0x40:])
+
+
+def ctor_islands(data, o):
+    """The header's last two words are the overlay's table of static constructors (ctors .. ctors_end), which the game
+    calls after loading it. CodeWarrior puts them in the data, outside text (BTL.BIN 0x8ea080, ADV.BIN 0x8aa680 on).
+    Returns the code around each one: [(lo, hi)], from the constructor through the functions right after it."""
+    lo_data, hi_data = o["code"] + o["text"], o["code"] + o["text"] + o["data"]
+
+    def word(addr):
+        return struct.unpack_from("<I", data, addr - o["addr"])[0] if lo_data <= addr < hi_data else None
+
+    islands = []
+    for at in range(o["ctors"], o["ctors_end"], 4):
+        start = word(at)
+        if start is None or not lo_data <= start < hi_data:
+            continue
+        p, reach = start, start
+        while True:
+            w = word(p)
+            if w is None:
+                break
+            op = w >> 26
+            if op in (1, 4, 5, 6, 7, 0x14, 0x15, 0x16, 0x17) or (op == 0x11 and (w >> 21) & 0x1F == 8):
+                imm = w & 0xFFFF
+                reach = max(reach, p + 4 + ((imm - 0x10000 if imm & 0x8000 else imm) << 2))
+            if w == 0x03E00008 and p + 4 >= reach:
+                p += 8
+                while word(p) == 0:
+                    p += 4
+                nxt = word(p)
+                # another function follows (addiu sp, sp, -n): the same island
+                if nxt is not None and nxt >> 16 == 0x27BD and nxt & 0x8000:
+                    reach = p
+                    continue
+                break
+            p += 4
+        islands.append((start, p))
+    merged = []
+    for lo, hi in sorted(islands):
+        if merged and lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
 
 
 def functions(blob, base):
@@ -167,7 +214,7 @@ def code_regions(iso):
         if p.startswith("PRG/"):
             o = mwo3(iso.read(p))
             if o:
-                out[p] = (o["addr"], o["body"])
+                out[p] = (o["code"], o["body"])
     return out
 
 
@@ -221,9 +268,9 @@ def cmd_overlays(a):
             print(f"{os.path.basename(p):14} (not an overlay)")
             continue
         body = o["body"]
-        fn = len(functions(body[:o["text"] + o["data"]], o["addr"]))
+        fn = len(functions(body[:o["text"] + o["data"]], o["code"]))
         print(f"{os.path.basename(p):14} id {o['id']}  load {o['addr']:08x}  text {o['text']:06x}  data {o['data']:06x}"
-              f"  bss {o['bss']:05x}  end {o['end']:08x}  ~{fn} functions")
+              f"  bss {o['bss']:05x}  ctors {o['ctors']:08x}  ~{fn} functions")
 
 
 def cmd_diff(a):
@@ -358,18 +405,24 @@ def cmd_ovlelf(a):
     # ELF header + one program header, then the body
     hdr = bytearray(52 + 32)
     hdr[0:16] = b"\x7fELF\x01\x01\x01" + b"\0" * 9
-    struct.pack_into("<HHIIIIIHHHHHH", hdr, 16, 2, 8, 1, o["addr"], 52, 0, 0x20924001, 52, 32, 1, 40, 0, 0)
+    struct.pack_into("<HHIIIIIHHHHHH", hdr, 16, 2, 8, 1, o["code"], 52, 0, 0x20924001, 52, 32, 1, 40, 0, 0)
     body_off = 0x80
-    struct.pack_into("<IIIIIIII", hdr, 52, 1, body_off, o["addr"], o["addr"], len(body), len(body) + o["bss"], 7, 0x10)
+    struct.pack_into("<IIIIIIII", hdr, 52, 1, body_off, o["code"], o["code"], len(body), len(body) + o["bss"], 7, 0x10)
     data = bytes(hdr) + b"\0" * (body_off - len(hdr)) + body
-    secs = [(".text", 1, SHF_ALLOC | SHF_EXEC, o["addr"], body_off, o["text"])]
-    if o["data"]:
-        secs.append((".data", 1, SHF_ALLOC | SHF_WRITE, o["addr"] + o["text"], body_off + o["text"], o["data"]))
+    secs = [(".text", 1, SHF_ALLOC | SHF_EXEC, o["code"], body_off, o["text"])]
+    # the data, with the static constructors' code in it as code sections of its own
+    at, n = o["code"] + o["text"], 0
+    for lo, hi in ctor_islands(raw, o) + [(o["code"] + o["text"] + o["data"],) * 2]:
+        if lo > at:
+            secs.append((".data%d" % n, 1, SHF_ALLOC | SHF_WRITE, at, body_off + at - o["code"], lo - at))
+        if hi > lo:
+            secs.append((".init%d" % n, 1, SHF_ALLOC | SHF_EXEC, lo, body_off + lo - o["code"], hi - lo))
+        at, n = hi, n + 1
     if o["bss"]:
-        secs.append((".bss", 8, SHF_ALLOC | SHF_WRITE, o["addr"] + o["text"] + o["data"], body_off + len(body), o["bss"]))
+        secs.append((".bss", 8, SHF_ALLOC | SHF_WRITE, o["code"] + o["text"] + o["data"], body_off + len(body), o["bss"]))
     with open(a.out, "wb") as f:
         f.write(write_sections(data, secs))
-    print("overlay id %d at %08x: code %#x, data %#x, bss %#x -> %s" % (o["id"], o["addr"], o["text"], o["data"], o["bss"], a.out))
+    print("overlay id %d at %08x: code %#x, data %#x, bss %#x -> %s" % (o["id"], o["code"], o["text"], o["data"], o["bss"], a.out))
 
 
 def sections_of(data):

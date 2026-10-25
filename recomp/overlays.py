@@ -25,8 +25,9 @@ SIG_LEN = 32
 def mwo3(raw):
     if raw[:4] != b"MWo3":
         raise SystemExit("not an MWo3 overlay")
-    oid, addr, text, data, bss, end, bss_end = struct.unpack_from("<7I", raw, 4)
-    return dict(id=oid, addr=addr, text=text, data=data, body=raw[0x40:])
+    oid, addr, text, data, bss, ctors, ctors_end = struct.unpack_from("<7I", raw, 4)
+    # the game loads the whole file, header included, at addr: the body (code) is at addr + 0x40
+    return dict(id=oid, addr=addr + 0x40, text=text, data=data, body=raw[0x40:])
 
 
 def signature(o):
@@ -71,7 +72,8 @@ def one(name, binpath, outdir, dest):
         w.write("    }\n} init_%s;\n}\n" % name)
     sig = signature(o)
     with open(os.path.join(dest, "un5_%s.sig" % name), "w") as w:
-        w.write("%d %x %x %x\n" % (o["id"], o["addr"], o["text"], base))
+        # the range the overlay answers for: text and data (its static constructors are code in the data)
+        w.write("%d %x %x %x\n" % (o["id"], o["addr"], o["text"] + o["data"], base))
         for off, b in sig:
             w.write("%x %s\n" % (off, b.hex()))
     print("%s: %d functions, %d table entries, base %08x, %d slots" % (name, count, len(entries), base, slots))
