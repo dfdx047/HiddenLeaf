@@ -1,0 +1,25 @@
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index f0ad507..5b5c07c 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -877,7 +877,10 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+         return;
+     }
+ 
+-    const uint32_t ztestMethod = static_cast<uint32_t>((ctx.test >> 17) & 3u);
++    // ZTE (TEST bit 16) off: no depth test and no depth write, whatever ZTST and ZMSK say (the GS, like PCSX2).
++    // A copy with ZTE=0 and ZBUF at its own source (UN5's final blit) must not overwrite the source with Z.
++    const bool zte = ((ctx.test >> 16) & 1u) != 0u;
++    const uint32_t ztestMethod = zte ? static_cast<uint32_t>((ctx.test >> 17) & 3u) : 1u;
+     const bool alphaBlendEnabled = state.prim.abe;
+     const bool preserveDestinationAlpha = writeMask.writeRgb && !writeMask.writeAlpha && fpsm == GS_PSM_CT32;
+     const bool destinationAlphaTestNeedsRead = ((ctx.test >> 14) & 0x1u) != 0u && (fpsm == GS_PSM_CT32 || fpsm == GS_PSM_CT16 || fpsm == GS_PSM_CT16S);
+@@ -1006,7 +1009,7 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+         WriteVramUnlocked(fpsm, fbp, fbw, x, y, pixel);
+     }
+ 
+-    if (writeMask.writeDepth && !ctx.zbuf.zmask)
++    if (writeMask.writeDepth && zte && !ctx.zbuf.zmask)
+     {
+         WriteVramUnlocked(zpsm, zbp, fbw, x, y, z);
+     }
