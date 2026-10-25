@@ -1,0 +1,114 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..ad0f001 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -4,13 +4,30 @@
+ #include "ps2_runtime_macros.h"
+ 
+ #include <algorithm>
++#include <array>
++#include <unordered_map>
+ #include <cassert>
++#include <cstdlib>
+ #include <cstring>
++#include <iostream>
+ #include <limits>
+ #include <stdexcept>
+ 
+ namespace
+ {
++    // Hidden Leaf: the last top-level dispatches (pc, ra, sp) of each thread, for HL_EE_DUMP
++    struct HlDispatchRing
++    {
++        std::array<std::array<uint32_t, 3>, 32> pcs{};
++        uint32_t next = 0u;
++    };
++
++    std::unordered_map<int, HlDispatchRing> &hlDispatchRing()
++    {
++        static std::unordered_map<int, HlDispatchRing> rings;
++        return rings;
++    }
++
+     constexpr int KE_OK = 0;
+     constexpr int KE_ERROR = -1;
+     constexpr int KE_ILLEGAL_PRIORITY = -403;
+@@ -170,6 +187,44 @@ void EeScheduler::run()
+             GuestThread *next = selectReady();
+             if (!next && m_pendingInvocations.empty())
+             {
++                // Hidden Leaf: with HL_EE_DUMP=1, every 5 s of an idle EE, what each thread waits for
++                static const bool s_dump = std::getenv("HL_EE_DUMP") != nullptr;
++                static auto s_lastDump = std::chrono::steady_clock::now();
++                if (s_dump && std::chrono::steady_clock::now() - s_lastDump > std::chrono::seconds(5))
++                {
++                    s_lastDump = std::chrono::steady_clock::now();
++                    std::cerr << "[ee-dump] idle, vsync tick " << m_vsyncTick << std::endl;
++                    for (const auto &[id, t] : m_threads)
++                    {
++                        const R5900Context &c = t.invocations.empty() ? t.context : t.invocations.back().context;
++                        std::cerr << "[ee-dump] thread " << id << " status=" << static_cast<int>(t.status)
++                                  << " wait=" << static_cast<int>(t.wait.reason) << " obj=" << waitObjectId(t.wait);
++                        if (t.wait.reason == EeWaitReason::External)
++                        {
++                            const auto &e = std::get<EeExternalWait>(t.wait.payload);
++                            std::cerr << " ext.type=0x" << std::hex << e.type << " ext.token=0x" << e.token << std::dec;
++                        }
++                        std::cerr << " prio=" << t.currentPriority << std::hex << " entry=0x" << t.entry
++                                  << " pc=0x" << c.pc << " ra=0x" << getRegU32(&c, 31) << " sp=0x" << getRegU32(&c, 29)
++                                  << std::dec << " invocations=" << t.invocations.size() << std::endl;
++                    }
++                    for (const auto &[id, s] : m_semaphores)
++                    {
++                        if (!s.waiters.empty())
++                        {
++                            std::cerr << "[ee-dump] sema " << id << " count=" << s.count << "/" << s.maxCount
++                                      << " waiters=" << s.waiters.size() << std::endl;
++                        }
++                    }
++                    for (const auto &[id, f] : m_eventFlags)
++                    {
++                        if (!f.waiters.empty())
++                        {
++                            std::cerr << "[ee-dump] evflag " << id << " bits=0x" << std::hex << f.bits << std::dec
++                                      << " waiters=" << f.waiters.size() << std::endl;
++                        }
++                    }
++                }
+                 copyMainContextToRuntime();
+                 publishIdleDebugContext();
+                 publishSnapshot();
+@@ -246,6 +301,21 @@ void EeScheduler::run()
+                 }
+                 continue;
+             }
++            if (running->id > 0 && std::getenv("HL_EE_DUMP") != nullptr)
++            {
++                // Hidden Leaf: a thread that ran into pc 0 (returned from its entry, or jumped to 0)
++                const auto &ring = hlDispatchRing()[running->id];
++                std::cerr << "[ee-dump] thread " << running->id << " ran into pc 0 (dormant); last dispatches:" << std::hex;
++                for (uint32_t i = 0; i < 32u; ++i)
++                {
++                    const auto &e = ring.pcs[(ring.next + i) % 32u];
++                    if (e[0] != 0u)
++                    {
++                        std::cerr << " 0x" << e[0] << "(ra 0x" << e[1] << " sp 0x" << e[2] << ")";
++                    }
++                }
++                std::cerr << std::dec << std::endl;
++            }
+             makeDormant(*running);
+             m_currentThreadId = 0;
+             copyMainContextToRuntime();
+@@ -286,6 +356,11 @@ void EeScheduler::run()
+             continue;
+         }
+         PS2Runtime::RecompiledFunction function = m_runtime.lookupFunction(context.pc);
++        {
++            auto &ring = hlDispatchRing()[running->id];
++            ring.pcs[ring.next] = {context.pc, getRegU32(&context, 31), getRegU32(&context, 29)};
++            ring.next = (ring.next + 1u) % 32u;
++        }
+ 
+         if (checkpointDue(kGuestDispatchCycles))
+         {
