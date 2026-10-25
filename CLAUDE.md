@@ -52,11 +52,13 @@ O log da execução vai para `build/run.log`.
 
 ## Próximos passos
 
-1. **Segunda execução** (`--run`): ver se passa da busca de arquivos e chega ao `flist.dir`/`DATA` e ao primeiro overlay.
-2. **Overlays:** conferir no log `[un5] overlay <nome> resident` quando o jogo carrega um; se uma chamada cair em
-   "No exact recompiled function" dentro de `0x6c6d00–0x8f3d00`, ver se a assinatura (`build/gen/ovl/modules/un5_*.sig`)
-   bate com a memória ou se o overlay escreve no próprio código.
-3. Gráficos/áudio: GS do runtime no PC; depois o renderizador ARMSX2 no Android (ver o projeto do BT4).
+O estado detalhado do boot (onde o jogo está, endereços, variáveis `HL_*` de depuração) fica em `docs/plano.md`,
+seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg), chega à tela de título e,
+com START, carrega o `BTL.BIN` e mostra os menus do memory card. Sem áudio.
+
+1. PNG da tela de título e o menu principal (`HL_AUTOPRESS`).
+2. Áudio: SPU2 do ARMSX2 num patch (ver `docs/plano.md`, Decisões).
+3. Gráficos no Android: o renderizador do GS do ARMSX2.
 4. `TouchBridge.nativeScene()` no host Android: 1 menu, 2 luta (`BTL.BIN` residente), 3 campanha (`ADV.BIN`).
 
 ## Aparelhos de teste

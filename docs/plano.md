@@ -67,9 +67,13 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 
 ### Onde o jogo está
 
-- Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE) →
-  carga do `DATA.CVM` → abertura `\PSS\NARUTO10.PSS` (o "10th" do Naruto), com a imagem do FFmpeg. Depois da abertura
-  vem a tela de título (próximo passo). O jogo roda a ~10 vsync/s com o filme (o IOP pesa: ver Falta).
+- Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE e
+  CyberConnect2) → carga do `DATA.CVM` → `\PSS\NARUTO10.PSS` (o "10th") → abertura em anime `\PSS\OPENING.PSS` →
+  tela de título → (START) carrega o **`BTL.BIN`** (`[un5] overlay btl (id 1) resident`) e mostra os menus em janela
+  ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…", "Return to title screen?"). Tudo com imagem
+  certa, sem áudio. Falta o PNG da tela de título: com `HL_AUTOPRESS="15:CROSS"` a abertura dura mais de 4500 vsyncs;
+  rodar uns 8 min com `HL_FRAME_DUMP=100` (ou um START no meio da abertura e o dump logo depois).
+- Nos menus aparecem `(null)` em volta de "Yes": provavelmente ícones de botão que o texto procura por nome.
 - gp = `0x617ef0`. Laço principal `0x1C5DA0`; tarefas = threads (8 = sequência de boot `0x1E6B20`, 13 = loader).
 - **Filmes (libmpeg da Sony, stubs do runtime em `Stubs/MPEG.cpp`).** Thread de stream `sub_00104020` (lê o CD em
   anel, `sceMpegDemuxPssRing`), thread de vídeo `sub_00101C00` (buffer livre `1015B0` na fila gp-0x3C8 →
@@ -81,7 +85,9 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 - Corrigido nesta etapa: VU0 (`sceVu0*` recompiladas, vf0 fixo em todas as threads), blit com ZTE=0 apagando a origem
   (0015), ID 0x79 do controle em modo de pressão (0016), callbacks de stream perdidos porque o heap do runtime está
   cheio (0017), MADR no fim da cadeia DMA (0018), `sceMpegIsEnd`/`IsRefBuffEmpty` ligados por endereço (`un5.py
-  stubfix`, `STUB_AT`).
+  stubfix`, `STUB_AT`), fim dos filmes sem o EOF do stream (0019: o jogo nunca lê o último setor do PSS, só com o
+  código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
+  tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
 ### Gráficos (o que já funciona)
 
@@ -114,14 +120,15 @@ escreve; watchpoint condicional em `ctx->pc` é lento demais. Patches novos: ger
 `b3c382b` fnmap (delay slot do `jr ra`); patches 0004 log do sceCdRead, 0005 dump do EE, 0006 pilha do main abaixo das
 pilhas de callback, 0007 leitura de CD do IOP em qualquer RAM, 0008 log de RPC, 0009 trace do IOP, 0010 DMA do SPU2
 antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 0013 vf0 fixo, 0014 HL_AUTOPRESS,
-0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA;
+0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes;
+overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
 ### Falta
 
-1. Passar da abertura à tela de título e ao menu principal (`HL_AUTOPRESS`).
-2. Deslocamento de 0x40 dos overlays (`recomp/overlays.py`, `un5.py`: o jogo carrega o arquivo inteiro, cabeçalho
-   incluso, em addr; o código fica em addr+0x40): já entra no build, falta ver `[un5] overlay ... resident`.
+1. PNG da tela de título; depois seguir o menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar
+   os dados).
+2. Os `(null)` dos menus.
 3. Áudio: SPU2 do ARMSX2 (ver Decisões).
 4. Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
 
