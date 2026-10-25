@@ -65,6 +65,7 @@ say "5. analyzer and recompiler"
 cd "$B/gen"
 "$B/PS2Recomp/build-tools/ps2xAnalyzer/ps2_analyzer" un5_split.elf un5_config.toml > analyzer.log 2>&1
 sed -i 's|^output = .*|output = "./output/"|' un5_config.toml
+python3 "$here/tools/un5.py" stubfix un5_config.toml
 rm -rf output
 "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
 # second pass: plus the functions only reached through pointers in the data (constructors, vtables, callbacks)
@@ -108,9 +109,11 @@ cp output/*.cpp "$rt/src/runner/"
 cp output/*.h "$rt/include/"
 cp "$B"/gen/ovl/modules/* "$rt/src/runner/"
 cp "$here"/recomp/runtime/*.cpp "$rt/src/runner/"
+# link-time optimization only with HL_LTO=1: the LTO link of the whole game takes long and a lot of memory
+no_lto=ON; [ "${HL_LTO:-0}" = "1" ] && no_lto=OFF
 cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-rt" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS2X_BUILD_RECOMP=OFF -DPS2X_BUILD_ANALYZER=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF \
-    -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_FFMPEG=OFF \
+    -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_FFMPEG=OFF -DPS2X_DISABLE_IPO="$no_lto" \
     -DCMAKE_CXX_FLAGS="-march=native" -DCMAKE_C_FLAGS="-march=native"
 cmake --build "$B/PS2Recomp/build-rt" -j"$jobs"
 runner=$(find "$B/PS2Recomp/build-rt" -name ps2EntryRunner -type f | head -1)

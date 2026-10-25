@@ -40,11 +40,18 @@ O log da execução vai para `build/run.log`.
   `ETC`, `TEXT*`) é recompilado à parte (BTL 2832 funções, ADV 3679, ETC 253, 0 erros), renomeado num módulo com
   tabela própria (`recomp/overlays.py`) e achado em tempo de execução pelo conteúdo da memória
   (`recomp/runtime/un5_overlays.cpp`), via um gancho no despacho do runtime (`recomp/patches/0001-overlay-resolver.patch`).
+- **Primeira execução no PC:** a janela abre e o jogo roda até o boot do IOP. Corrigido em seguida:
+  - `MODULES.BIN` (9 IRX) é copiado para a RAM do IOP com `sceSifSetDma` e carregado com `sceSifLoadModuleBuffer`
+    pelo endereço do IOP; o runtime lia esse endereço na RAM do EE e falhava calado. `0003-iop-module-buffers.patch`
+    lê da RAM do IOP, roda de verdade `libsd`, `sdr_driver`, `modmidi`, `modhsyn`, `cdvdstm` e deixa `sio2man`,
+    `padman`, `mcman`, `mcserv` no HLE do EE. Com isso o driver ADX (CRI) registra o RPC `0x90000200`.
+  - O EE ficava preso em `0x173460` esperando o RPC `0x80000597` (busca de arquivo do `cdvdfsv`):
+    `sceCdLayerSearchFile` (`0x1733c0`) não tinha tratador. `un5.py stubfix` o liga ao `sceCdSearchFile` do runtime.
+  - LTO desligado por padrão (`HL_LTO=1` liga).
 
 ## Próximos passos
 
-1. **Primeira execução** (`--run`): ver até onde vai (módulos IOP, leitura do disco, primeiro overlay). Anotar no
-   `docs/plano.md` o primeiro erro e o endereço.
+1. **Segunda execução** (`--run`): ver se passa da busca de arquivos e chega ao `flist.dir`/`DATA` e ao primeiro overlay.
 2. **Overlays:** conferir no log `[un5] overlay <nome> resident` quando o jogo carrega um; se uma chamada cair em
    "No exact recompiled function" dentro de `0x6c6d00–0x8f3d00`, ver se a assinatura (`build/gen/ovl/modules/un5_*.sig`)
    bate com a memória ou se o overlay escreve no próprio código.

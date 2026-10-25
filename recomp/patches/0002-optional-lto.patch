@@ -1,0 +1,14 @@
+diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
+index 92ef0d5..0bc9394 100644
+--- a/ps2xRuntime/cmake/ReleaseMode.cmake
++++ b/ps2xRuntime/cmake/ReleaseMode.cmake
+@@ -34,7 +34,8 @@ function(EnableFastReleaseMode TargetName)
+         endif()
+     endif()
+ 
+-    if(IPO_SUPPORTED)
++    # PS2X_DISABLE_IPO: no link-time optimization (development builds: the link of a whole game is much faster)
++    if(IPO_SUPPORTED AND NOT PS2X_DISABLE_IPO)
+         set_property(TARGET ${TargetName} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+     else()
+         message(WARNING "Interprocedural optimization not supported: ${ipo_error}")

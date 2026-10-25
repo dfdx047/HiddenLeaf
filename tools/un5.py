@@ -438,6 +438,28 @@ def cmd_fnmap(a):
     print("%d functions found by the recompiler, %d more reached through pointers -> %s" % (found, added, a.map))
 
 
+# SDK functions the analyzer names, that the runtime handles under another name. Without the handler the game's own code
+# runs and asks the IOP (cdvdfsv, never loaded here) over SIF RPC, and waits forever: sceCdLayerSearchFile binds
+# 0x80000597 at boot. Each one moves from entry_points to stubs, under the runtime's name.
+STUB_ALIASES = {
+    "sceCdLayerSearchFile": "sceCdSearchFile",  # (file, name, layer): the runtime reads only file and name
+}
+
+
+def cmd_stubfix(a):
+    text = open(a.config).read()
+    moved = []
+    for name, handler in STUB_ALIASES.items():
+        m = re.search(r'^\s*"%s@(0x[0-9A-Fa-f]+)",?\s*\n' % re.escape(name), text, re.M)
+        if not m:
+            continue
+        text = text[:m.start()] + text[m.end():]
+        text = re.sub(r"^(stubs = \[\s*\n)", lambda s: s.group(1) + '  "%s@%s",\n' % (handler, m.group(1)), text, count=1, flags=re.M)
+        moved.append("%s -> %s@%s" % (name, handler, m.group(1)))
+    open(a.config, "w").write(text)
+    print("stubs: " + (", ".join(moved) if moved else "nothing to change"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -448,6 +470,7 @@ def main():
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
     s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
     s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.set_defaults(fn=cmd_ovlelf)
+    s = sub.add_parser("stubfix"); s.add_argument("config"); s.set_defaults(fn=cmd_stubfix)
     s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.set_defaults(fn=cmd_fnmap)
     a = ap.parse_args()
     sys.exit(a.fn(a) or 0)

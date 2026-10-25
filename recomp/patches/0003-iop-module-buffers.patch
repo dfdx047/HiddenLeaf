@@ -1,0 +1,267 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index 4977102..b738d89 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -67,6 +67,7 @@ namespace ps2x::iop::detail
+         void terminateThreadsInRange(uint32_t base, uint32_t size);
+ 
+         [[nodiscard]] size_t threadCount() const noexcept { return m_threads.size(); }
++        [[nodiscard]] const std::map<int, IopThread> &threads() const noexcept { return m_threads; }
+ 
+     private:
+         struct Semaphore
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index e5f63a9..54679f4 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -180,6 +180,17 @@ namespace ps2x::iop::detail
+                 pendingDmaInterrupts[dma->irq] = totalCycles + dma->delayCycles;
+         }
+ 
++        static bool isMemoryRangeImpl(uint32_t address, size_t size)
++        {
++            const bool physicalSegment = address < IopMemory::RamSize;
++            const bool cachedSegment = address >= 0x80000000u && address < 0x80200000u;
++            const bool uncachedSegment = address >= 0xA0000000u && address < 0xA0200000u;
++            if (!physicalSegment && !cachedSegment && !uncachedSegment)
++                return false;
++            const uint32_t physical = IopMemory::physicalAddress(address);
++            return physical <= IopMemory::RamSize && size <= IopMemory::RamSize - physical;
++        }
++
+         bool readRam(uint32_t address, void *destination, size_t size) const
+         {
+             return memory.readRam(address, destination, size);
+@@ -652,13 +663,38 @@ namespace ps2x::iop::detail
+             return loadImage(std::string(path), image, arguments, argumentSize);
+         }
+ 
++        bool readBufferImage(uint32_t guestAddress, std::vector<uint8_t> &image)
++        {
++            const bool fromIop = isMemoryRangeImpl(guestAddress, 4u) &&
++                                 IopModuleLoader::readElf([this](uint32_t a, void *d, size_t n)
++                                                          { return isMemoryRangeImpl(a, n) && memory.readRam(a, d, n); },
++                                                          guestAddress, image);
++            return fromIop || IopModuleLoader::readElfFromGuest(host, guestAddress, image);
++        }
++
++        std::string bufferModuleName(uint32_t guestAddress)
++        {
++            std::vector<uint8_t> image;
++            return readBufferImage(guestAddress, image) ? IopModuleLoader::iopModuleName(image) : std::string{};
++        }
++
+         ModuleLoadResult loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+         {
++            // The SDK's sceSifLoadModuleBuffer takes an IOP address: the game copies the IRX there with
++            // sceSifSetDma (into IOP RAM) first. Read it from IOP RAM; fall back to EE RAM for callers that pass an EE buffer.
+             std::vector<uint8_t> image;
+-            if (!IopModuleLoader::readElfFromGuest(host, guestAddress, image))
++            if (!readBufferImage(guestAddress, image))
++            {
++                std::ostringstream bad;
++                bad << "[IOP] no IRX ELF at buffer 0x" << std::hex << guestAddress;
++                log(LogLevel::Warning, bad.str());
+                 return {true, -1, -1};
++            }
+             std::ostringstream tag;
+             tag << "buffer@0x" << std::hex << guestAddress;
++            const std::string modName = IopModuleLoader::iopModuleName(image);
++            if (!modName.empty())
++                tag << ":" << modName;
+             return loadImage(tag.str(), image, arguments, argumentSize);
+         }
+ 
+@@ -729,6 +765,11 @@ namespace ps2x::iop::detail
+         return m_impl->loadModule(path, arguments, argumentSize);
+     }
+ 
++    std::string IopEmulator::bufferModuleName(uint32_t guestAddress)
++    {
++        return m_impl->bufferModuleName(guestAddress);
++    }
++
+     ModuleLoadResult IopEmulator::loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+     {
+         return m_impl->loadModuleBuffer(guestAddress, arguments, argumentSize);
+@@ -817,6 +858,21 @@ namespace ps2x::iop::detail
+         return static_cast<uint32_t>(m_impl->modules.size());
+     }
+ 
++    std::vector<std::string> IopEmulator::threadDump() const
++    {
++        static const char *const kStates[] = {"dormant", "ready", "running", "sleep", "delay", "sema", "evflag", "suspended", "dead"};
++        std::vector<std::string> rows;
++        for (const auto &[id, t] : m_impl->kernel.threads())
++        {
++            std::ostringstream row;
++            const auto state = static_cast<size_t>(t.state);
++            row << "[IOP] thread " << id << " " << (state < 9 ? kStates[state] : "?") << std::hex << " entry=0x" << t.entry
++                << " pc=0x" << t.cpu.pc << " ra=0x" << t.cpu.gpr[31] << std::dec << " wait=" << t.waitId << " prio=" << t.priority;
++            rows.push_back(row.str());
++        }
++        return rows;
++    }
++
+     uint32_t IopEmulator::threadCount() const noexcept
+     {
+         return static_cast<uint32_t>(m_impl->kernel.threadCount());
+diff --git a/ps2xIOP/src/emulator/iop_emulator.h b/ps2xIOP/src/emulator/iop_emulator.h
+index 01b48df..986945a 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.h
++++ b/ps2xIOP/src/emulator/iop_emulator.h
+@@ -22,6 +22,7 @@ namespace ps2x::iop::detail
+ 
+         void reset();
+         [[nodiscard]] ModuleLoadResult loadModule(std::string_view path, const void *arguments, uint32_t argumentSize);
++        [[nodiscard]] std::string bufferModuleName(uint32_t guestAddress);
+         [[nodiscard]] ModuleLoadResult loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize);
+         [[nodiscard]] bool stopModule(int32_t moduleId, int32_t *result);
+         void runEeCycles(uint64_t eeCycles) noexcept;
+@@ -40,6 +41,7 @@ namespace ps2x::iop::detail
+         [[nodiscard]] uint64_t instructions() const noexcept;
+         [[nodiscard]] uint32_t loadedModuleCount() const noexcept;
+         [[nodiscard]] uint32_t threadCount() const noexcept;
++        [[nodiscard]] std::vector<std::string> threadDump() const;
+         [[nodiscard]] uint32_t rpcServerCount() const noexcept;
+ 
+     private:
+diff --git a/ps2xIOP/src/emulator/services/iop_module_loader.cpp b/ps2xIOP/src/emulator/services/iop_module_loader.cpp
+index 80e59d6..75b555e 100644
+--- a/ps2xIOP/src/emulator/services/iop_module_loader.cpp
++++ b/ps2xIOP/src/emulator/services/iop_module_loader.cpp
+@@ -1,3 +1,4 @@
++#include <functional>
+ #include "iop_module_loader.h"
+ 
+ #include "../core/iop_memory.h"
+@@ -321,9 +322,14 @@ namespace ps2x::iop::detail
+     }
+ 
+     bool IopModuleLoader::readElfFromGuest(IopHost &host, uint32_t guestAddress, std::vector<uint8_t> &bytes)
++    {
++        return readElf([&host](uint32_t a, void *d, size_t n) { return host.readGuest(a, d, n); }, guestAddress, bytes);
++    }
++
++    bool IopModuleLoader::readElf(const std::function<bool(uint32_t, void *, size_t)> &read, uint32_t guestAddress, std::vector<uint8_t> &bytes)
+     {
+         Elf32Ehdr header{};
+-        if (!host.readGuest(guestAddress, &header, sizeof(header)) || !validElfHeader(header))
++        if (!read(guestAddress, &header, sizeof(header)) || !validElfHeader(header))
+             return false;
+ 
+         uint64_t required = sizeof(header);
+@@ -334,7 +340,7 @@ namespace ps2x::iop::detail
+             return false; // Should we log an error here? TODO check later
+ 
+         bytes.resize(static_cast<size_t>(required));
+-        if (!host.readGuest(guestAddress, bytes.data(), bytes.size()))
++        if (!read(guestAddress, bytes.data(), bytes.size()))
+             return false;
+ 
+         if (header.shnum != 0u && header.shentsize >= sizeof(Elf32Shdr))
+@@ -364,7 +370,7 @@ namespace ps2x::iop::detail
+             return false;
+ 
+         bytes.resize(static_cast<size_t>(required));
+-        return host.readGuest(guestAddress, bytes.data(), bytes.size());
++        return read(guestAddress, bytes.data(), bytes.size());
+     }
+ 
+     IopImageLoadResult IopModuleLoader::load(std::span<const uint8_t> image, IopMemory &memory, uint32_t moduleCursor)
+@@ -558,4 +564,28 @@ namespace ps2x::iop::detail
+         result.error = IopImageLoadError::None;
+         return result;
+     }
++
++    std::string IopModuleLoader::iopModuleName(std::span<const uint8_t> image)
++    {
++        // The IRX's own name, from its .iopmod section (type 0x70000080): the name starts at byte 0x1a.
++        if (image.size() < 0x34u)
++            return {};
++        auto u32 = [&](size_t at) -> uint32_t
++        { return at + 4u <= image.size() ? (uint32_t)image[at] | (uint32_t)image[at + 1] << 8 | (uint32_t)image[at + 2] << 16 | (uint32_t)image[at + 3] << 24 : 0u; };
++        auto u16 = [&](size_t at) -> uint32_t
++        { return at + 2u <= image.size() ? (uint32_t)image[at] | (uint32_t)image[at + 1] << 8 : 0u; };
++        const uint32_t shoff = u32(0x20u), shentsize = u16(0x2eu), shnum = u16(0x30u);
++        for (uint32_t i = 0; i < shnum && shentsize >= 40u; ++i)
++        {
++            const size_t sh = (size_t)shoff + (size_t)i * shentsize;
++            if (sh + 40u > image.size() || u32(sh + 4u) != 0x70000080u)
++                continue;
++            const size_t offset = u32(sh + 16u), size = u32(sh + 20u);
++            std::string name;
++            for (size_t at = offset + 0x1au; at < offset + size && at < image.size() && image[at] != 0u; ++at)
++                name.push_back((char)image[at]);
++            return name;
++        }
++        return {};
++    }
+ }
+diff --git a/ps2xIOP/src/emulator/services/iop_module_loader.h b/ps2xIOP/src/emulator/services/iop_module_loader.h
+index 6cd9ef6..c7e12ed 100644
+--- a/ps2xIOP/src/emulator/services/iop_module_loader.h
++++ b/ps2xIOP/src/emulator/services/iop_module_loader.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <string>
++#include <functional>
+ #include <cstdint>
+ #include <span>
+ #include <string_view>
+@@ -43,6 +45,8 @@ namespace ps2x::iop::detail
+     public:
+         [[nodiscard]] static bool readWholeHostFile(IopHost &host, std::string_view guestPath, std::vector<uint8_t> &bytes);
+         [[nodiscard]] static bool readElfFromGuest(IopHost &host, uint32_t guestAddress, std::vector<uint8_t> &bytes);
++        [[nodiscard]] static bool readElf(const std::function<bool(uint32_t, void *, size_t)> &read, uint32_t address, std::vector<uint8_t> &bytes);
++        [[nodiscard]] static std::string iopModuleName(std::span<const uint8_t> image);
+         [[nodiscard]] static IopImageLoadResult load(std::span<const uint8_t> image, IopMemory &memory, uint32_t moduleCursor);
+     };
+ }
+diff --git a/ps2xIOP/src/iop_subsystem.cpp b/ps2xIOP/src/iop_subsystem.cpp
+index b498155..1eb8383 100644
+--- a/ps2xIOP/src/iop_subsystem.cpp
++++ b/ps2xIOP/src/iop_subsystem.cpp
+@@ -147,7 +147,31 @@ namespace ps2x::iop
+ 
+     ModuleLoadResult IopSubsystem::loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+     {
+-        return m_impl->emulator.loadModuleBuffer(guestAddress, arguments, argumentSize);
++        // A buffer load names its module only inside the IRX (.iopmod). Modules the EE side already provides as HLE
++        // (pad, memory card) stay HLE, as with a path load of the same module; the rest run for real.
++        std::string key = m_impl->emulator.bufferModuleName(guestAddress);
++        for (char &c : key)
++            c = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
++        if (key == "sound_device_library")
++            key = "libsd";
++        const bool hleOnly = key == "sio2man" || key == "padman" || key == "mcman" || key == "mcserv" ||
++                             key == "xsio2man" || key == "xpadman" || key == "xmcman";
++        if (hleOnly)
++        {
++            ModuleLoadResult hle = m_impl->moduleManager.loadHle("rom0:" + key);
++            if (hle.moduleId > 0)
++            {
++                m_impl->rebuildRoutes();
++                return hle;
++            }
++        }
++        ModuleLoadResult physical = m_impl->emulator.loadModuleBuffer(guestAddress, arguments, argumentSize);
++        if (physical.moduleId > 0 && !key.empty())
++        {
++            m_impl->moduleManager.observePhysicalLoad(physical.moduleId, "cdrom0:\\MODULES\\" + key + ".IRX;1");
++            m_impl->rebuildRoutes();
++        }
++        return physical;
+     }
+ 
+     bool IopSubsystem::stopModule(int32_t moduleId, int32_t *result)
+@@ -258,6 +282,8 @@ namespace ps2x::iop
+         snapshot.emulatorThreads = m_impl->emulator.threadCount();
+         snapshot.emulatorRpcServers = m_impl->emulator.rpcServerCount();
+         snapshot.diagnostics = m_impl->loadOutcomes;
++        for (std::string &row : m_impl->emulator.threadDump())
++            snapshot.diagnostics.push_back(std::move(row));
+         if (!m_impl->lastError.empty())
+         {
+             snapshot.diagnostics.push_back(m_impl->lastError);
