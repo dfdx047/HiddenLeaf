@@ -1,0 +1,20 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+index 56a978e..5f35fda 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+@@ -313,6 +313,15 @@ namespace ps2_stubs
+             }
+         }
+ 
++        // Hidden Leaf: every read with HL_CD_LOG=1 (where the game reads the disc, and into what)
++        static const bool s_cdLog = std::getenv("HL_CD_LOG") != nullptr;
++        if (s_cdLog)
++        {
++            std::cerr << "[sceCdRead] lbn=0x" << std::hex << selected.lbn << " sectors=0x" << selected.sectors
++                      << " buf=0x" << selected.buf << " ra=0x" << getRegU32(ctx, 31) << " sp=0x" << getRegU32(ctx, 29)
++                      << std::dec << " args=" << selected.tag << (ok ? "" : " FAILED") << std::endl;
++        }
++
+         if (ok)
+         {
+             g_cdStreamingLbn = selected.lbn + selected.sectors;
