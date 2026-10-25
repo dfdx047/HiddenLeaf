@@ -64,7 +64,7 @@ def one(name, binpath, outdir, dest):
     with open(os.path.join(dest, "un5_%s_table.cpp" % name), "w") as w:
         w.write('#include "ps2_runtime.h"\n#include "%s"\n\n' % header)
         w.write("PS2Runtime::RecompiledFunction un5_%s_table[%du] = {};\n" % (name, slots))
-        w.write("const uint32_t un5_%s_base = 0x%xu;\nconst uint32_t un5_%s_slots = %du;\n\n" % (name, base, name, slots))
+        w.write("extern const uint32_t un5_%s_base = 0x%xu;\nextern const uint32_t un5_%s_slots = %du;\n\n" % (name, base, name, slots))
         w.write("namespace {\nstruct Init_%s {\n    Init_%s() {\n" % (name, name))
         for slot, fn in entries:
             w.write("        un5_%s_table[%s] = %s_%s;\n" % (name, slot, name, fn))

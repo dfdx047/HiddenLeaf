@@ -12,29 +12,30 @@
 #include <cstring>
 #include <iostream>
 
-namespace
+// (at namespace scope: the overlays' tables are defined in their own files, un5_<name>_table.cpp)
+struct SigWindow
 {
-    struct SigWindow
-    {
-        uint32_t offset;
-        uint8_t bytes[32];
-    };
+    uint32_t offset;
+    uint8_t bytes[32];
+};
 
-    struct Un5Overlay
-    {
-        const char *name;
-        uint32_t id;
-        uint32_t addr;
-        uint32_t codeSize;
-        PS2Runtime::RecompiledFunction *table;
-        const uint32_t *tableBase;
-        const uint32_t *tableSlots;
-        SigWindow sig[3];
-        int sigCount;
-    };
+struct Un5Overlay
+{
+    const char *name;
+    uint32_t id;
+    uint32_t addr;
+    uint32_t codeSize;
+    PS2Runtime::RecompiledFunction *table;
+    const uint32_t *tableBase;
+    const uint32_t *tableSlots;
+    SigWindow sig[3];
+    int sigCount;
+};
 
 #include "un5_overlay_list.inc"
 
+namespace
+{
     constexpr size_t kOverlayCount = sizeof(kOverlays) / sizeof(kOverlays[0]);
     const Un5Overlay *g_resident[4] = {}; // the last one found per load address (up to four addresses)
     uint32_t g_residentAddr[4] = {};
