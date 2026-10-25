@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a shuriken with a falling leaf (drawn for the app; no artwork of the series) -->
+    <path android:fillColor="#FFDCE2EA" android:strokeColor="#FF2B3040" android:strokeWidth="1.4" android:pathData="M48.70,48.70 Q46.48,35.17 54.00,28.00 L59.30,48.70 L54.00,54.00 Z M59.30,48.70 Q72.83,46.48 80.00,54.00 L59.30,59.30 L54.00,54.00 Z M59.30,59.30 Q61.52,72.83 54.00,80.00 L48.70,59.30 L54.00,54.00 Z M48.70,59.30 Q35.17,61.52 28.00,54.00 L48.70,48.70 L54.00,54.00 Z"/>
+    <path android:fillColor="#FF2B3040" android:pathData="M54,49.5 a4.5,4.5 0 1,0 0.01,0 Z"/>
+    <path android:fillColor="#FF2FA24A" android:pathData="M66,74 Q76,62 90,64 Q84,80 66,74 Z"/>
+    <path android:strokeColor="#FF1B6B31" android:strokeWidth="1.2" android:pathData="M68,73.2 L86,65.6"/>
+</vector>

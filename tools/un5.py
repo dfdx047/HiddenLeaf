@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""
+Hidden Leaf: tools for the recompilation of Naruto Shippuden: Ultimate Ninja 5 (PS2, SLES-55605).
+
+Nothing of the game is kept in the repository: these tools read the player's own ISO and write what they make
+outside the tree (or into build/, which git ignores).
+
+  un5.py verify   <iso>                  which release or mod an ISO is (by SHA-256)
+  un5.py extract  <iso> <dir>            copies the boot files (SYSTEM.CNF, the ELF, PRG/, MODULES/, small DATA/ .BIN)
+  un5.py overlays <dir-or-files...>      the CodeWarrior overlays (MWo3) of PRG/: id, load address, sizes
+  un5.py diff     <base-iso> <mod-iso> [-o pack.json]
+                                         function by function, what a mod changes in the code (ELF and overlays):
+                                         the list of functions its code pack has to carry
+  un5.py unpack   <elf> <out>            unpacks an ELF packed with SjCRUNCH (the Brazilian version's)
+
+Functions are found here by their ends (jr ra + delay slot): an approximation, good enough to size a mod's changes.
+The function map the recompiler uses comes from Ghidra (docs/plano.md).
+"""
+import argparse
+import hashlib
+import json
+import os
+import re
+import struct
+import sys
+
+SECTOR = 2048
+
+BASE_SERIAL = "SLES-55605"
+BASE_ELF = "SLES_556.05"
+BASE_ELF_SHA256 = "20a43677397731a2a20899336d1165ace5b436906b9b89be90fb10f4558dd19d"
+BASE_OVERLAYS = {
+    "PRG/BTL.BIN": "7e8518da7bd4957af18cb0ababe67f0e9b37c42c6551375201b15997f0a3dfe3",
+    "PRG/ADV.BIN": "7e2af55362141bb1b055247cd7ef7edae290f3c0095701bc51467f096a2d00b8",
+    "PRG/ETC.BIN": "bdb6bda1f9d335047586a263e478486c8e7924b91fa972b6f3e58caec5ea0778",
+    "PRG/TEXTENG.BIN": "3e42d2ddffe770b05dd41e2c5937380133e255c9ce32ca2f037e34c65a8e571e",
+    "PRG/TEXTFRN.BIN": "485d44d2866e9e985d2d84b4796bd8daa573567d44b8913b9fbccffaafc836b0",
+    "PRG/TEXTGER.BIN": "84de40f3def485b80863370723e462a7b23ebb6a4b5e6a088b4897f78005222d",
+    "PRG/TEXTITA.BIN": "110a915c3043214a6c2a9bd2ca3cb33284629126f91b76db6e525a9fd7b20b03",
+    "PRG/TEXTSPA.BIN": "72ec1bb3aead2764bdc096a1a757c6969d1573c99954df6711e0a0495418e927",
+}
+KNOWN_MODS = {
+    "47c40141a3e1aeb0c96bc28e8dc311938b284d54fd21f4d8ba953c2e16234809": ("un6-a35", "Ultimate Ninja 6 (Alpha 3.5)"),
+    "20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056": ("un6-a11x", "Ultimate Ninja 6 (Alpha 1.1X)"),
+    "7c3517aa09c0c3e34742b89ee19a2de5f71753380ee198e8861a8030cfcf8e51": ("un5-br", "Versao Brasileira"),
+}
+
+JR_RA = b"\x08\x00\xe0\x03"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# ISO 9660
+
+class Iso:
+    """A read-only ISO 9660 image: files by path ("PRG/BTL.BIN"), without ";1"."""
+
+    def __init__(self, path):
+        self.f = open(path, "rb")
+        self.files = {}
+        pvd = self._read(16 * SECTOR, SECTOR)
+        if pvd[0] != 1 or pvd[1:6] != b"CD001":
+            raise SystemExit(f"{path}: not an ISO 9660 image")
+        lba, size = struct.unpack_from("<I", pvd, 156 + 2)[0], struct.unpack_from("<I", pvd, 156 + 10)[0]
+        self._walk(lba, size, "", 0)
+
+    def _read(self, off, n):
+        self.f.seek(off)
+        return self.f.read(n)
+
+    def _walk(self, lba, size, d, depth):
+        if depth > 8:
+            return
+        data = self._read(lba * SECTOR, size)
+        pos = 0
+        while pos + 34 <= len(data):
+            ln = data[pos]
+            if ln == 0:
+                pos = (pos // SECTOR + 1) * SECTOR
+                continue
+            extent, nbytes = struct.unpack_from("<I", data, pos + 2)[0], struct.unpack_from("<I", data, pos + 10)[0]
+            flags, nlen = data[pos + 25], data[pos + 32]
+            raw = data[pos + 33:pos + 33 + nlen]
+            pos += ln
+            if nlen == 1 and raw in (b"\x00", b"\x01"):
+                continue
+            name = raw.decode("latin-1").split(";")[0]
+            if name.endswith(".") and not flags & 2:
+                name = name[:-1]
+            p = f"{d}/{name}" if d else name
+            if flags & 2:
+                self._walk(extent, nbytes, p, depth + 1)
+            elif p.upper() in self.files:
+                self.files[p.upper()][1] += nbytes
+            else:
+                self.files[p.upper()] = [extent * SECTOR, nbytes]
+
+    def read(self, path):
+        off, n = self.files[path.upper()]
+        return self._read(off, n)
+
+    def sha256(self, path):
+        off, n = self.files[path.upper()]
+        h = hashlib.sha256()
+        self.f.seek(off)
+        while n > 0:
+            b = self.f.read(min(n, 1 << 20))
+            h.update(b)
+            n -= len(b)
+        return h.hexdigest()
+
+    def boot(self):
+        cnf = self.read("SYSTEM.CNF").decode("latin-1")
+        m = re.search(r"BOOT2\s*=\s*cdrom0:\\?([^;\r\n]+)", cnf, re.I)
+        return m.group(1).strip().split("\\")[-1].upper() if m else None
+
+
+def is_boot_file(path, size):
+    u = path.upper()
+    return (u == "SYSTEM.CNF" or re.match(r"^S[LC][A-Z]{2}_\d{3}\.\d{2}$", u) is not None or u.startswith("PRG/")
+            or u.startswith("MODULES/") or (u.startswith("DATA/") and u.endswith(".BIN") and size <= 2 << 20))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# code: ELF segments and MWo3 overlays
+
+def elf_text(data):
+    """The ELF's loaded bytes with a file part: [(vaddr, bytes)]."""
+    if data[:4] != b"\x7fELF":
+        raise SystemExit("not an ELF")
+    phoff, = struct.unpack_from("<I", data, 0x1C)
+    phentsize, phnum = struct.unpack_from("<HH", data, 0x2A)
+    out = []
+    for i in range(phnum):
+        ptype, off, vaddr, _paddr, filesz = struct.unpack_from("<IIIII", data, phoff + i * phentsize)
+        if ptype == 1 and filesz:
+            out.append((vaddr, data[off:off + filesz]))
+    return out
+
+
+def mwo3(data):
+    """A CodeWarrior overlay: header of 0x40 bytes, then text and data. Returns a dict, or None."""
+    if data[:4] != b"MWo3":
+        return None
+    oid, addr, text, dat, bss, end, bss_end = struct.unpack_from("<7I", data, 4)
+    return dict(id=oid, addr=addr, text=text, data=dat, bss=bss, end=end, bss_end=bss_end, body=data[0x40:])
+
+
+def functions(blob, base):
+    """Approximate functions of a code blob: split after every jr ra and its delay slot. {start: bytes}."""
+    starts = [0] + [i + 8 for i in range(0, len(blob) - 3, 4) if blob[i:i + 4] == JR_RA]
+    return {base + s: blob[s:e] for s, e in zip(starts, starts[1:] + [len(blob)]) if e > s}
+
+
+def code_regions(iso):
+    """{name: (load address, code bytes)} for the boot ELF and every overlay of PRG/."""
+    out = {}
+    boot = iso.boot()
+    for vaddr, seg in elf_text(iso.read(boot)):
+        out[f"{boot}@{vaddr:08x}"] = (vaddr, seg)
+    for p in sorted(iso.files):
+        if p.startswith("PRG/"):
+            o = mwo3(iso.read(p))
+            if o:
+                out[p] = (o["addr"], o["body"])
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# commands
+
+def cmd_verify(a):
+    iso = Iso(a.iso)
+    boot = iso.boot()
+    if not boot or boot not in iso.files:
+        raise SystemExit("no PS2 boot program (SYSTEM.CNF)")
+    sha = iso.sha256(boot)
+    print(f"boot program  {boot}  sha256 {sha}")
+    if sha == BASE_ELF_SHA256:
+        bad = [p for p, want in BASE_OVERLAYS.items() if p not in iso.files or iso.sha256(p) != want]
+        if bad:
+            print(f"European release, but overlays differ: {', '.join(bad)} (a mod over the original program?)")
+            return 1
+        print(f"base: Naruto Shippuden: Ultimate Ninja 5, European release ({BASE_SERIAL}), unmodified")
+        return 0
+    if sha in KNOWN_MODS:
+        print(f"mod: {KNOWN_MODS[sha][1]} ({KNOWN_MODS[sha][0]}) - import the European ISO as the base, this one as a mod")
+        return 2
+    print("unknown program: another release, a damaged image, or a mod this tool does not know")
+    return 3
+
+
+def cmd_extract(a):
+    iso = Iso(a.iso)
+    n = 0
+    for p, (off, size) in sorted(iso.files.items()):
+        if not is_boot_file(p, size):
+            continue
+        out = os.path.join(a.dir, p)
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        with open(out, "wb") as f:
+            f.write(iso.read(p))
+        n += 1
+        print(f"{size:>10}  {p}")
+    print(f"{n} files in {a.dir}")
+
+
+def cmd_overlays(a):
+    paths = []
+    for x in a.paths:
+        paths += [os.path.join(x, f) for f in sorted(os.listdir(x))] if os.path.isdir(x) else [x]
+    for p in paths:
+        with open(p, "rb") as f:
+            o = mwo3(f.read())
+        if not o:
+            print(f"{os.path.basename(p):14} (not an overlay)")
+            continue
+        body = o["body"]
+        fn = len(functions(body[:o["text"] + o["data"]], o["addr"]))
+        print(f"{os.path.basename(p):14} id {o['id']}  load {o['addr']:08x}  text {o['text']:06x}  data {o['data']:06x}"
+              f"  bss {o['bss']:05x}  end {o['end']:08x}  ~{fn} functions")
+
+
+def cmd_diff(a):
+    base, mod = Iso(a.base), Iso(a.mod)
+    rb, rm = code_regions(base), code_regions(mod)
+    # the boot program may be renamed by the mod (SLUS_556.06): match ELF segments by address
+    def key(k):
+        return k.split("@", 1)[1] if "@" in k else k
+    rbk = {key(k): v for k, v in rb.items()}
+    report = {"base_elf_sha256": base.sha256(base.boot()), "mod_elf_sha256": mod.sha256(mod.boot()),
+              "mod_boot": mod.boot(), "regions": []}
+    total_changed = total_new = 0
+    for name, (addr, blob) in rm.items():
+        b = rbk.get(key(name))
+        fm = functions(blob, addr)
+        if b is None or b[0] != addr:
+            entry = {"region": name, "load": f"{addr:08x}", "status": "new", "functions": len(fm)}
+            total_new += len(fm)
+        else:
+            fb = functions(b[1], addr)
+            changed = sorted(s for s, code in fm.items() if fb.get(s) != code)
+            entry = {"region": name, "load": f"{addr:08x}", "status": "changed" if changed else "same",
+                     "functions": len(fm), "changed": len(changed), "changed_at": [f"{s:08x}" for s in changed]}
+            total_changed += len(changed)
+        report["regions"].append(entry)
+        print(f"{name:28} {entry['status']:8} {entry['functions']:6} functions"
+              + (f", {entry['changed']} changed" if "changed" in entry else ""))
+    print(f"total: {total_changed} changed, {total_new} new (the code pack's functions)")
+    if a.o:
+        with open(a.o, "w") as f:
+            json.dump(report, f, indent=1)
+        print(f"written: {a.o}")
+
+
+def cmd_unpack(a):
+    """SjCRUNCH v0.3 (Sjeep, 2002): the packed program is LZO1X blocks behind the unpacker; header in .data."""
+    try:
+        import lzo  # python-lzo
+    except ImportError:
+        raise SystemExit("needs python-lzo (pip install python-lzo; liblzo2-dev to build it)")
+    d = open(a.elf, "rb").read()
+    if b"SjCRUNCH" not in d:
+        raise SystemExit("not packed with SjCRUNCH")
+    # .data of the unpacker starts with the signature; the header the unpacker reads is 0xf30 bytes in
+    data_off = d.index(b"SjCRUNCH v0.3")
+    h = data_off + 0xF30
+    dest, entry = struct.unpack_from("<II", d, h + 8)
+    p = h + 0x10 + 0x20
+    out = bytearray()
+    while True:
+        ul, cl = struct.unpack_from("<II", d, p)
+        if ul == 0:
+            break
+        blk = d[p + 8:p + 8 + cl]
+        out += lzo.decompress(blk, False, ul) if cl < ul else blk[:ul]
+        p += 8 + cl
+    with open(a.out, "wb") as f:
+        f.write(out)
+    print(f"unpacked {len(out):#x} bytes, loads at {dest:08x}, entry {entry:08x} -> {a.out}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("verify"); s.add_argument("iso"); s.set_defaults(fn=cmd_verify)
+    s = sub.add_parser("extract"); s.add_argument("iso"); s.add_argument("dir"); s.set_defaults(fn=cmd_extract)
+    s = sub.add_parser("overlays"); s.add_argument("paths", nargs="+"); s.set_defaults(fn=cmd_overlays)
+    s = sub.add_parser("diff"); s.add_argument("base"); s.add_argument("mod"); s.add_argument("-o"); s.set_defaults(fn=cmd_diff)
+    s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
+    a = ap.parse_args()
+    sys.exit(a.fn(a) or 0)
+
+
+if __name__ == "__main__":
+    main()

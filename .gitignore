@@ -1,0 +1,44 @@
+# --- Nothing of the game goes into this repository ---------------------------------------------------------------
+# disc images and their pieces: every player brings their own
+*.iso
+*.ISO
+*.cso
+*.chd
+*.zso
+*.bin
+*.BIN
+*.CVM
+*.cvm
+*.AFS
+*.afs
+*.PSS
+*.pss
+*.IRX
+*.irx
+*.IMG
+SYSTEM.CNF
+SLES_*
+SLUS_*
+SLPS_*
+SLPM_*
+/PRG/
+/DATA/
+/MODULES/
+# the code generated from the player's ELF (the recompiler writes it here)
+/recomp/generated/
+/recomp/game/
+
+# --- builds ---------------------------------------------------------------------------------------------------------
+/build/
+*.apk
+*.aab
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.kotlin/
+*.iml
+__pycache__/
+*.pyc
+.DS_Store
