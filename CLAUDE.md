@@ -27,7 +27,8 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 recomp/build.sh ~/Downloads/"Naruto UN5"/"Naruto Shippuden - Ultimate Ninja 5 (Europe) (En,Fr,De,Es,It).iso" --run
 ```
 
-Dependências (Arch/CachyOS): `base-devel cmake ninja p7zip libx11 libxrandr libxinerama libxcursor libxi mesa alsa-lib`.
+Dependências (Arch/CachyOS): `base-devel cmake ninja p7zip libx11 libxrandr libxinerama libxcursor libxi mesa alsa-lib ffmpeg`
+(o FFmpeg decodifica os filmes PSS).
 O log da execução vai para `build/run.log`.
 
 ## Estado (2026-10-25)

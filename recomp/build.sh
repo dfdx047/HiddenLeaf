@@ -17,7 +17,7 @@
 #
 # Needs: git, cmake (3.21+), ninja, a C++20 compiler (GCC 13+ or Clang 17+), python3, 7z; for the window, the X11/GL
 # development headers raylib uses (Arch/CachyOS: base-devel cmake ninja p7zip libx11 libxrandr libxinerama
-# libxcursor libxi mesa alsa-lib).
+# libxcursor libxi mesa alsa-lib ffmpeg; FFmpeg decodes the movies).
 set -euo pipefail
 
 PS2RECOMP_URL=https://github.com/ran-j/PS2Recomp
@@ -114,7 +114,7 @@ cp "$here"/recomp/runtime/*.cpp "$rt/src/runner/"
 no_lto=ON; [ "${HL_LTO:-0}" = "1" ] && no_lto=OFF
 cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-rt" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS2X_BUILD_RECOMP=OFF -DPS2X_BUILD_ANALYZER=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF \
-    -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_FFMPEG=OFF -DPS2X_DISABLE_IPO="$no_lto" \
+    -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_FFMPEG=ON -DPS2X_DISABLE_IPO="$no_lto" \
     -DCMAKE_CXX_FLAGS="-march=native" -DCMAKE_C_FLAGS="-march=native"
 cmake --build "$B/PS2Recomp/build-rt" -j"$jobs"
 runner=$(find "$B/PS2Recomp/build-rt" -name ps2EntryRunner -type f | head -1)
