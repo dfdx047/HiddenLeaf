@@ -1,0 +1,58 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index 4832d8f..22d898c 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -478,6 +478,12 @@ namespace ps2x::iop::detail
+         return (mode & 1u) != 0u ? (event.bits & bits) != 0u : (event.bits & bits) == bits;
+     }
+ 
++    bool IopKernel::eventFlagReady(int id, uint32_t bits, uint32_t mode) const
++    {
++        const auto event = m_eventFlags.find(id);
++        return event == m_eventFlags.end() || eventSatisfied(event->second, bits, mode);
++    }
++
+     void IopKernel::wakeEventWaiters(EventFlag &event)
+     {
+         for (auto &[threadId, thread] : m_threads)
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index b738d89..dd050f2 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -66,6 +66,9 @@ namespace ps2x::iop::detail
+         void cleanupDeadThreads();
+         void terminateThreadsInRange(uint32_t base, uint32_t size);
+ 
++        [[nodiscard]] bool hasCurrentThread() const noexcept { return m_currentThread != nullptr; }
++        [[nodiscard]] bool eventFlagReady(int id, uint32_t bits, uint32_t mode) const;
++
+         [[nodiscard]] size_t threadCount() const noexcept { return m_threads.size(); }
+         [[nodiscard]] const std::map<int, IopThread> &threads() const noexcept { return m_threads; }
+ 
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 92bb668..03dae25 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -295,6 +295,22 @@ namespace ps2x::iop::detail
+             }
+             if (iequals(call.library, "thevent"))
+             {
++                // WaitEventFlag outside any IOP thread (an RPC server called straight from the EE) cannot block: let
++                // the DMA it waits for finish first (Ultimate Ninja 5: libsd's sceSdVoiceTransStatus from SNDBASE's
++                // RPC, else the next sceSdVoiceTrans finds the channel busy and modhsyn fails the bank transfer)
++                if (call.ordinal == 10u && !kernel.hasCurrentThread() && !servicingDmaInterrupts)
++                {
++                    for (int i = 0; i < 64 && !pendingDmaInterrupts.empty() &&
++                                    !kernel.eventFlagReady(static_cast<int>(cpu.gpr[4]), cpu.gpr[5], cpu.gpr[6]);
++                         ++i)
++                    {
++                        uint64_t due = pendingDmaInterrupts.begin()->second;
++                        for (const auto &[irq, cycle] : pendingDmaInterrupts)
++                            due = std::min(due, cycle);
++                        totalCycles = std::max(totalCycles, due);
++                        servicePendingDmaInterrupts();
++                    }
++                }
+                 return kernel.dispatchEventImport(call.ordinal, cpu)
+                            ? ImportDisposition::Handled
+                            : ImportDisposition::Missing;
