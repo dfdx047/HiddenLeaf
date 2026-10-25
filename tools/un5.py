@@ -12,6 +12,8 @@ outside the tree (or into build/, which git ignores).
                                          function by function, what a mod changes in the code (ELF and overlays):
                                          the list of functions its code pack has to carry
   un5.py unpack   <elf> <out>            unpacks an ELF packed with SjCRUNCH (the Brazilian version's)
+  un5.py prepelf  <elf> <out>            the ELF for the recompiler: its one big section split into code and data
+  un5.py ovlelf   <overlay.BIN> <out>    an overlay (MWo3) as an ELF at its load address, code and data apart
 
 Functions are found here by their ends (jr ra + delay slot): an approximation, good enough to size a mod's changes.
 The function map the recompiler uses comes from Ghidra (docs/plano.md).
@@ -279,6 +281,93 @@ def cmd_unpack(a):
     print(f"unpacked {len(out):#x} bytes, loads at {dest:08x}, entry {entry:08x} -> {a.out}")
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# ELFs for the recompiler
+
+# Where the code of the European ELF is (the linker put it, the data and two islands of code in one section):
+#   0x100000-0x3d5760   the game's code
+#   0x40f848-0x410d68   kernel-mode code the game copies into the kernel (lui 0x8007...): data for the recompiler
+#   0x5e3a00-0x5e7208   the static constructors (their table follows at 0x5e7210)
+CODE_RANGES = {
+    BASE_ELF_SHA256: [(0x100000, 0x3D5760), (0x5E3A00, 0x5E7208)],
+}
+
+SHF_WRITE, SHF_ALLOC, SHF_EXEC = 1, 2, 4
+
+
+def write_sections(data, sections):
+    """A new section table for an ELF32 image, appended at its end: sections = [(name, type, flags, addr, offset, size)]."""
+    names = bytearray(b"\0")
+    entries = [(0,) * 10]
+    for name, stype, flags, addr, off, size in sections:
+        entries.append((len(names), stype, flags, addr, off, size, 0, 0, 16 if flags & SHF_EXEC else 4, 0))
+        names += name.encode() + b"\0"
+    shstr_name = len(names)
+    names += b".shstrtab\0"
+    out = bytearray(data)
+    out += b"\0" * ((4 - len(out) % 4) % 4)
+    str_off = len(out)
+    out += names
+    out += b"\0" * ((4 - len(out) % 4) % 4)
+    entries.append((shstr_name, 3, 0, 0, str_off, len(names), 0, 0, 1, 0))
+    shoff = len(out)
+    for e in entries:
+        out += struct.pack("<IIIIIIIIII", *e)
+    struct.pack_into("<I", out, 0x20, shoff)
+    struct.pack_into("<HHH", out, 0x2E, 40, len(entries), len(entries) - 1)
+    return bytes(out)
+
+
+def cmd_prepelf(a):
+    data = open(a.elf, "rb").read()
+    sha = hashlib.sha256(data).hexdigest()
+    ranges = CODE_RANGES.get(sha)
+    if ranges is None:
+        raise SystemExit("unknown ELF (sha256 %s): no code ranges for it" % sha)
+    phoff, = struct.unpack_from("<I", data, 0x1C)
+    _t, off, vaddr, _p, filesz, memsz = struct.unpack_from("<IIIIII", data, phoff)
+    secs = []
+    cur = vaddr
+    n = 0
+    for lo, hi in ranges:
+        if cur < lo:
+            secs.append((".data%d" % n, 1, SHF_ALLOC | SHF_WRITE, cur, off + cur - vaddr, lo - cur)); n += 1
+        secs.append((".text%d" % n, 1, SHF_ALLOC | SHF_EXEC, lo, off + lo - vaddr, hi - lo)); n += 1
+        cur = hi
+    end = vaddr + filesz
+    if cur < end:
+        secs.append((".data%d" % n, 1, SHF_ALLOC | SHF_WRITE, cur, off + cur - vaddr, end - cur))
+    if memsz > filesz:
+        secs.append((".bss", 8, SHF_ALLOC | SHF_WRITE, end, off + filesz, memsz - filesz))
+    with open(a.out, "wb") as f:
+        f.write(write_sections(data, secs))
+    for s in secs:
+        print("%-8s %08x-%08x %s" % (s[0], s[3], s[3] + s[5], "code" if s[2] & SHF_EXEC else "data"))
+
+
+def cmd_ovlelf(a):
+    raw = open(a.ovl, "rb").read()
+    o = mwo3(raw)
+    if not o:
+        raise SystemExit("not an MWo3 overlay")
+    body = raw[0x40:0x40 + o["text"] + o["data"]]
+    # ELF header + one program header, then the body
+    hdr = bytearray(52 + 32)
+    hdr[0:16] = b"\x7fELF\x01\x01\x01" + b"\0" * 9
+    struct.pack_into("<HHIIIIIHHHHHH", hdr, 16, 2, 8, 1, o["addr"], 52, 0, 0x20924001, 52, 32, 1, 40, 0, 0)
+    body_off = 0x80
+    struct.pack_into("<IIIIIIII", hdr, 52, 1, body_off, o["addr"], o["addr"], len(body), len(body) + o["bss"], 7, 0x10)
+    data = bytes(hdr) + b"\0" * (body_off - len(hdr)) + body
+    secs = [(".text", 1, SHF_ALLOC | SHF_EXEC, o["addr"], body_off, o["text"])]
+    if o["data"]:
+        secs.append((".data", 1, SHF_ALLOC | SHF_WRITE, o["addr"] + o["text"], body_off + o["text"], o["data"]))
+    if o["bss"]:
+        secs.append((".bss", 8, SHF_ALLOC | SHF_WRITE, o["addr"] + o["text"] + o["data"], body_off + len(body), o["bss"]))
+    with open(a.out, "wb") as f:
+        f.write(write_sections(data, secs))
+    print("overlay id %d at %08x: code %#x, data %#x, bss %#x -> %s" % (o["id"], o["addr"], o["text"], o["data"], o["bss"], a.out))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -287,6 +376,8 @@ def main():
     s = sub.add_parser("overlays"); s.add_argument("paths", nargs="+"); s.set_defaults(fn=cmd_overlays)
     s = sub.add_parser("diff"); s.add_argument("base"); s.add_argument("mod"); s.add_argument("-o"); s.set_defaults(fn=cmd_diff)
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
+    s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
+    s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.set_defaults(fn=cmd_ovlelf)
     a = ap.parse_args()
     sys.exit(a.fn(a) or 0)
 

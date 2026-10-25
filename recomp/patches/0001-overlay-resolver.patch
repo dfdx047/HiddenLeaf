@@ -1,0 +1,52 @@
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 4b9242c..908c5b2 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -551,4 +551,9 @@ extern const uint32_t g_ps2RecompiledFunctionTableEnd;
+ extern const uint32_t g_ps2RecompiledFunctionTableSlotCount;
+ extern PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[];
+ 
++// Code the game loads at run time (overlays): a game module sets this to find the recompiled function for a PC
++// outside the generated table, from what is in guest memory now. Returns nullptr when there is none.
++using PS2OverlayResolver = PS2Runtime::RecompiledFunction (*)(PS2Runtime *runtime, uint32_t address);
++extern PS2OverlayResolver g_ps2OverlayResolver;
++
+ #endif // PS2_RUNTIME_H
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..dacf296 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1109,10 +1109,17 @@ bool PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
+     return replaceFunction(address, func);
+ }
+ 
++// Code the game loads at run time (overlays): asked when the generated table has no function for a PC.
++PS2OverlayResolver g_ps2OverlayResolver = nullptr;
++
+ bool PS2Runtime::hasFunction(uint32_t address) const
+ {
+     uint32_t slot = 0u;
+-    return generatedFunctionTableSlot(address, slot) && g_ps2RecompiledFunctionTable[slot] != nullptr;
++    if (generatedFunctionTableSlot(address, slot) && g_ps2RecompiledFunctionTable[slot] != nullptr)
++    {
++        return true;
++    }
++    return g_ps2OverlayResolver != nullptr && g_ps2OverlayResolver(const_cast<PS2Runtime *>(this), address) != nullptr;
+ }
+ 
+ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
+@@ -1148,6 +1155,14 @@ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
+         }
+     }
+ 
++    if (g_ps2OverlayResolver != nullptr)
++    {
++        if (RecompiledFunction fn = g_ps2OverlayResolver(this, address))
++        {
++            return fn;
++        }
++    }
++
+     std::cerr << "Error: No exact recompiled function for guest PC 0x" << std::hex << address
+               << " tableBase=0x" << g_ps2RecompiledFunctionTableBase
+               << " tableEnd=0x" << g_ps2RecompiledFunctionTableEnd
