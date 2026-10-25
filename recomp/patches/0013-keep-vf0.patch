@@ -1,0 +1,42 @@
+diff --git a/ps2xRecomp/src/lib/code_generator.cpp b/ps2xRecomp/src/lib/code_generator.cpp
+index 68b0984..058dba8 100644
+--- a/ps2xRecomp/src/lib/code_generator.cpp
++++ b/ps2xRecomp/src/lib/code_generator.cpp
+@@ -223,14 +223,23 @@ namespace ps2recomp
+ 
+     CodeGenerator::~CodeGenerator() = default;
+ 
++    // vf0 is hardwired to (0,0,0,1): a write to it (lqc2 $vf0 when the SDK restores the VU0 state, an op with fd = 0)
++    // is lost on the PS2, so the value is put back right after it
++    static std::string keepVf0(std::string code)
++    {
++        if (code.find("ctx->vu0_vf[0] =") != std::string::npos)
++            code += " ctx->vu0_vf[0] = _mm_set_ps(1.0f, 0.0f, 0.0f, 0.0f);";
++        return code;
++    }
++
+     std::string CodeGenerator::translateInstruction(const Instruction &inst)
+     {
+-        return InstructionTranslator(*this).translate(inst, {});
++        return keepVf0(InstructionTranslator(*this).translate(inst, {}));
+     }
+ 
+     std::string CodeGenerator::translateInstruction(const Instruction &inst, const MemoryAccessHint &memoryHint)
+     {
+-        return InstructionTranslator(*this).translate(inst, memoryHint);
++        return keepVf0(InstructionTranslator(*this).translate(inst, memoryHint));
+     }
+ 
+     std::string CodeGenerator::translateSpecialInstruction(const Instruction &inst)
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index ccb8fff..e9b254c 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -149,6 +149,7 @@ struct alignas(16) R5900Context
+         std::memset(this, 0, sizeof(*this));
+ 
+         // Initialize VU0 registers
++        vu0_vf[0] = _mm_set_ps(1.0f, 0.0f, 0.0f, 0.0f); // vf0 is hardwired to (0,0,0,1), in every thread
+         vu0_q = 1.0f; // Q register usually initialized to 1.0
+ 
+         // Reset COP0 registers

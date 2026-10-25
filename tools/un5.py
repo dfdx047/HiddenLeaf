@@ -448,9 +448,28 @@ STUB_ALIASES = {
 }
 
 
+# SDK functions the analyzer stubs that must run as the game's own code. The libvu0 math is VU0 macro code: recompiled,
+# it keeps the PS2's float rules (no Inf or NaN, overflow clamps), which the runtime's C++ versions lose (the 2D camera's
+# sceVu0MulMatrix gave the x86 NaN, so every sprite landed at 0,0 and was clipped). Each one moves from stubs to
+# entry_points. sceVpu0Reset touches the hardware: it stays a stub.
+UNSTUB = re.compile(r"_?sceVu0\w+")
+
+
 def cmd_stubfix(a):
     text = open(a.config).read()
     moved = []
+    block = re.search(r"^stubs = \[\s*\n(.*?)^\]", text, re.M | re.S)
+    keep, own = [], []
+    for line in block.group(1).splitlines(keepends=True):
+        m = re.match(r'\s*"(\w+)@(0x[0-9A-Fa-f]+)"', line)
+        if m and UNSTUB.fullmatch(m.group(1)):
+            own.append('  "%s@%s",\n' % (m.group(1), m.group(2)))
+        else:
+            keep.append(line)
+    if own:
+        text = text[:block.start(1)] + "".join(keep) + text[block.end(1):]
+        text = re.sub(r"^(entry_points = \[\s*\n)", lambda s: s.group(1) + "".join(own), text, count=1, flags=re.M)
+        moved.append("%d sceVu0 functions recompiled" % len(own))
     for name, handler in STUB_ALIASES.items():
         m = re.search(r'^\s*"%s@(0x[0-9A-Fa-f]+)",?\s*\n' % re.escape(name), text, re.M)
         if not m:

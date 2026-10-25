@@ -55,11 +55,12 @@ git -C "$B/PS2Recomp" checkout -q -f "$PS2RECOMP_COMMIT"
 for p in "$here"/recomp/patches/*.patch; do
     git -C "$B/PS2Recomp" apply "$p" && echo "patch: $(basename "$p")"
 done
-if [ ! -x "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" ]; then
+if [ ! -f "$B/PS2Recomp/build-tools/build.ninja" ]; then
     cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-tools" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF
-    cmake --build "$B/PS2Recomp/build-tools" -j"$jobs"
 fi
+# always: a patch to the recompiler must reach the generated code (ninja rebuilds only what changed)
+cmake --build "$B/PS2Recomp/build-tools" -j"$jobs"
 
 say "5. analyzer and recompiler"
 cd "$B/gen"
