@@ -1,0 +1,93 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index b50a4cf..7b72dbf 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -1,6 +1,9 @@
+ #include "Common.h"
+ #include "Pad.h"
+ 
++#include <chrono>
++#include <string>
++
+ namespace ps2_stubs
+ {
+     namespace
+@@ -192,6 +195,70 @@ namespace ps2_stubs
+             }
+         }
+ 
++        // Hidden Leaf: HL_AUTOPRESS="5:CROSS,8:START" presses each button on port 0 for 0.25 s at that many seconds
++        // after the first pad read, to get through menus without a controller
++        struct AutoPress
++        {
++            double at;
++            uint16_t mask;
++        };
++
++        const std::vector<AutoPress> &autoPresses()
++        {
++            static const std::vector<AutoPress> presses = []
++            {
++                static const std::unordered_map<std::string, uint16_t> names = {
++                    {"SELECT", kPadBtnSelect}, {"L3", kPadBtnL3}, {"R3", kPadBtnR3}, {"START", kPadBtnStart},
++                    {"UP", kPadBtnUp}, {"RIGHT", kPadBtnRight}, {"DOWN", kPadBtnDown}, {"LEFT", kPadBtnLeft},
++                    {"L2", kPadBtnL2}, {"R2", kPadBtnR2}, {"L1", kPadBtnL1}, {"R1", kPadBtnR1},
++                    {"TRIANGLE", kPadBtnTriangle}, {"CIRCLE", kPadBtnCircle}, {"CROSS", kPadBtnCross},
++                    {"SQUARE", kPadBtnSquare}};
++                std::vector<AutoPress> out;
++                const char *env = std::getenv("HL_AUTOPRESS");
++                std::stringstream list(env ? env : "");
++                std::string item;
++                while (std::getline(list, item, ','))
++                {
++                    const size_t colon = item.find(':');
++                    const auto it = colon == std::string::npos ? names.end() : names.find(item.substr(colon + 1));
++                    if (it == names.end())
++                    {
++                        std::cerr << "[autopress] ignored: " << item << std::endl;
++                        continue;
++                    }
++                    out.push_back({std::atof(item.substr(0, colon).c_str()), it->second});
++                }
++                return out;
++            }();
++            return presses;
++        }
++
++        void applyAutoPress(PadInputState &state, int port)
++        {
++            const std::vector<AutoPress> &presses = autoPresses();
++            if (presses.empty() || port != 0)
++            {
++                return;
++            }
++            static const auto start = std::chrono::steady_clock::now();
++            static size_t announced = 0;
++            const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
++            for (size_t i = 0; i < presses.size(); ++i)
++            {
++                if (now < presses[i].at || now >= presses[i].at + 0.25)
++                {
++                    continue;
++                }
++                setButton(state, presses[i].mask, true);
++                if (i >= announced)
++                {
++                    announced = i + 1;
++                    std::cerr << "[autopress] " << presses[i].at << " s: mask 0x" << std::hex << presses[i].mask
++                              << std::dec << std::endl;
++                }
++            }
++        }
++
+         void resetPadStateLocked()
+         {
+             for (PadPortState &portState : g_padPorts)
+@@ -313,6 +380,7 @@ namespace ps2_stubs
+                     applyGamepadState(state);
+                     applyKeyboardState(state, portState.analogMode);
+                 }
++                applyAutoPress(state, port);
+             }
+ 
+             fillPadStatus(outData, state, portState);
