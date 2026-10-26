@@ -1,0 +1,72 @@
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 698cf0a..2cd0fd9 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -393,6 +393,7 @@ private:
+     void scheduleEvent(uint64_t deadlineCycle, std::chrono::steady_clock::time_point hostDeadline, EeEvent event);
+     void updateNextDeadline();
+     [[nodiscard]] bool hasReadyAtOrAbovePriority(int priority) const;
++    [[nodiscard]] bool guestInterruptsMasked() const;
+     void skipIdleCycles();
+     void renewTimeSlice();
+     void copyMainContextToRuntime();
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 0ff7685..b9c2b17 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -176,7 +176,10 @@ void EeScheduler::run()
+ 
+     while (!m_stopRequested.load(std::memory_order_acquire))
+     {
+-        processPendingEvents();
++        if (!guestInterruptsMasked())
++        {
++            processPendingEvents();
++        }
+         if (m_stopRequested.load(std::memory_order_acquire))
+         {
+             break;
+@@ -388,6 +391,10 @@ void EeScheduler::run()
+             throw;
+         }
+ 
++        if (guestInterruptsMasked())
++        {
++            continue;
++        }
+         processPendingEvents();
+         if (m_rescheduleRequested && m_currentThreadId != 0)
+         {
+@@ -433,8 +440,16 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+ {
+     accountCycles(cycles);
+ 
+-    if (m_checkpointPending.load(std::memory_order_acquire) ||
+-        m_stopRequested.load(std::memory_order_acquire))
++    if (m_stopRequested.load(std::memory_order_acquire))
++    {
++        return true;
++    }
++    if (guestInterruptsMasked())
++    {
++        // between DI and EI the EE takes no interrupt, so nothing switches threads: pending work waits for EI
++        return false;
++    }
++    if (m_checkpointPending.load(std::memory_order_acquire))
+     {
+         return true;
+     }
+@@ -2185,6 +2200,13 @@ bool EeScheduler::hasReadyAtOrAbovePriority(int priority) const
+     return false;
+ }
+ 
++bool EeScheduler::guestInterruptsMasked() const
++{
++    // Status.EIE (bit 16) is what the game's DI/EI clear and set around its critical sections
++    const GuestThread *running = currentThread();
++    return running != nullptr && !m_insideInterrupt && (running->activeContext().cop0_status & 0x10000u) == 0u;
++}
++
+ void EeScheduler::skipIdleCycles()
+ {
+     // in steps, so an event raised meanwhile (the IOP runs inside accountCycles, EE timers) stops the skip
