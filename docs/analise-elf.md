@@ -16,6 +16,25 @@ funções são aproximadas (fim de função por `jr ra`); o mapa real sai do Ghi
 (`BOOT2 = cdrom0:\SLUS_556.06;1`, `VMODE = NTSC`). O A35 é só português do Brasil: a tabela de textos tem só
 `TextBra.bin`.
 
+### A ISO base (Redump)
+
+A base é a ISO europeia do Redump: 1926234112 bytes, SHA-1 `50eedd72f0a8ee95b16c6e4e7a6b259743925012`.
+`tools/un5.py verify` (e, por ele, o `build.sh`) e o importador do launcher conferem esse SHA-1 depois do ELF e dos
+overlays, e recusam uma imagem que não bate.
+
+Até 2026-10-26 usamos outra ISO com o mesmo nome e o mesmo tamanho (SHA-1 `1e56bddfb2536741152bd88348340a9caa9fd3e8`).
+`un5.py diff` entre ela e a do Redump: ELF e os 8 overlays iguais (0 funções mudadas). Comparando setor a setor, só
+2 setores diferem, os dois em `MODULES/IOPRP300.IMG`, no módulo `CDVDMAN` da imagem IOPRP (+0x73d0 e +0x9ca0):
+onde o original lê o tipo do disco do registrador do CDVD (`lui v0,0xbf40; ori v0,0x200f; lbu v0,0(v0)`), a ISO ruim
+tem `li v0,0x12` (sempre "CD de PS2"). É o patch de DVD para CD, para gravar a imagem numa mídia CD-R. Todos os
+outros arquivos (`DATA/DATA.CVM` incluído) são iguais. O runtime não carrega a IOPRP (`sceSifRebootIop` só reinicia
+o transporte do IOP, e o CDVD é HLE), então o código recompilado e os dados que o jogo lê são os mesmos com as duas
+ISOs.
+
+| Arquivo | SHA-256 Redump | SHA-256 com o patch de DVD para CD |
+|---|---|---|
+| `MODULES/IOPRP300.IMG` | `8e11fc76bbdd5770a47a56549d861c0caebc9f9190a1cf936990dcff9e5a86c5` | `f329ac928b49f203626f5271c91f420591eeabc26988f0f3dff068f49f3ef2bb` |
+
 ## Layout de memória
 
 - ELF: carrega em `0x100000`, 0x517a80 bytes no arquivo (memsz 0x5c6d00); código até ~`0x5e71fc`, depois dados.

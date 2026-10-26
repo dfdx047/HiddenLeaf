@@ -24,7 +24,7 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 ## Rodar no PC (CachyOS)
 
 ```
-recomp/build.sh ~/Downloads/"Naruto UN5"/"Naruto Shippuden - Ultimate Ninja 5 (Europe) (En,Fr,De,Es,It).iso" --run
+recomp/build.sh ~/Downloads/Minerva_Myrient/Redump/"Sony - PlayStation 2"/"Naruto Shippuden - Ultimate Ninja 5 (Europe) (En,Fr,De,Es,It).iso" --run
 ```
 
 Dependências (Arch/CachyOS): `base-devel cmake ninja p7zip libx11 libxrandr libxinerama libxcursor libxi mesa alsa-lib ffmpeg`
