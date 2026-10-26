@@ -5,7 +5,7 @@ Hidden Leaf: tools for the recompilation of Naruto Shippuden: Ultimate Ninja 5 (
 Nothing of the game is kept in the repository: these tools read the player's own ISO and write what they make
 outside the tree (or into build/, which git ignores).
 
-  un5.py verify   <iso>                  which release or mod an ISO is (by SHA-256)
+  un5.py verify   <iso>                  which release or mod an ISO is (by SHA-256); the base must match Redump (SHA-1)
   un5.py extract  <iso> <dir>            copies the boot files (SYSTEM.CNF, the ELF, PRG/, MODULES/, small DATA/ .BIN)
   un5.py overlays <dir-or-files...>      the CodeWarrior overlays (MWo3) of PRG/: id, load address, sizes
   un5.py diff     <base-iso> <mod-iso> [-o pack.json]
@@ -35,6 +35,8 @@ SECTOR = 2048
 BASE_SERIAL = "SLES-55605"
 BASE_ELF = "SLES_556.05"
 BASE_ELF_SHA256 = "20a43677397731a2a20899336d1165ace5b436906b9b89be90fb10f4558dd19d"
+# the whole European ISO as Redump lists it (1926234112 bytes)
+BASE_ISO_SHA1 = "50eedd72f0a8ee95b16c6e4e7a6b259743925012"
 BASE_OVERLAYS = {
     "PRG/BTL.BIN": "7e8518da7bd4957af18cb0ababe67f0e9b37c42c6551375201b15997f0a3dfe3",
     "PRG/ADV.BIN": "7e2af55362141bb1b055247cd7ef7edae290f3c0095701bc51467f096a2d00b8",
@@ -233,13 +235,27 @@ def cmd_verify(a):
         if bad:
             print(f"European release, but overlays differ: {', '.join(bad)} (a mod over the original program?)")
             return 1
-        print(f"base: Naruto Shippuden: Ultimate Ninja 5, European release ({BASE_SERIAL}), unmodified")
+        sha1 = file_sha1(a.iso)
+        print(f"image         sha1 {sha1}")
+        if sha1 != BASE_ISO_SHA1:
+            print(f"European program, but the image is not the Redump dump (sha1 {BASE_ISO_SHA1}): some other file on it"
+                  " is damaged or patched. Dump the disc again, or use an image that matches Redump.")
+            return 4
+        print(f"base: Naruto Shippuden: Ultimate Ninja 5, European release ({BASE_SERIAL}), unmodified (Redump)")
         return 0
     if sha in KNOWN_MODS:
         print(f"mod: {KNOWN_MODS[sha][1]} ({KNOWN_MODS[sha][0]}) - import the European ISO as the base, this one as a mod")
         return 2
     print("unknown program: another release, a damaged image, or a mod this tool does not know")
     return 3
+
+
+def file_sha1(path):
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while b := f.read(1 << 22):
+            h.update(b)
+    return h.hexdigest()
 
 
 def cmd_extract(a):
