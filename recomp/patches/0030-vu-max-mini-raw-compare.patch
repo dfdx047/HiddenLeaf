@@ -1,0 +1,146 @@
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+index 6974254..d3e8c26 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+@@ -1,6 +1,7 @@
+ #include "runtime/ps2_vu1.h"
+ #include "ps2_vu1_detail.h"
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <cstring>
+ #include <limits>
+@@ -16,6 +17,30 @@ namespace
+             return std::numeric_limits<int32_t>::min();
+         return static_cast<int32_t>(scaled);
+     }
++
++    // MAX and MINI compare the raw words, like the VU (and PCSX2's fp_max/fp_min): denormals and integers kept in VF
++    // registers pass through unchanged. Microprograms copy integer vertex colors with MAX vfd, vfs, vfs.
++    float vuMax(float a, float b)
++    {
++        int32_t ia = 0, ib = 0;
++        std::memcpy(&ia, &a, sizeof(ia));
++        std::memcpy(&ib, &b, sizeof(ib));
++        const int32_t r = (ia < 0 && ib < 0) ? std::min(ia, ib) : std::max(ia, ib);
++        float result = 0.0f;
++        std::memcpy(&result, &r, sizeof(result));
++        return result;
++    }
++
++    float vuMin(float a, float b)
++    {
++        int32_t ia = 0, ib = 0;
++        std::memcpy(&ia, &a, sizeof(ia));
++        std::memcpy(&ib, &b, sizeof(ib));
++        const int32_t r = (ia < 0 && ib < 0) ? std::max(ia, ib) : std::min(ia, ib);
++        float result = 0.0f;
++        std::memcpy(&result, &r, sizeof(result));
++        return result;
++    }
+ }
+ 
+ // ============================================================================
+@@ -99,9 +124,9 @@ void VU1Interpreter::execUpper(uint32_t instr)
+     case 0x12:
+     case 0x13: // MAXbc
+     {
+-        float bc = broadcast(vt, op & 3);
++        const float bc = m_state.vf[ft][op & 3];
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > bc) ? vs[c] : bc;
++            result[c] = vuMax(m_state.vf[fs][c], bc);
+         applyDest(vd, result, dest);
+         return;
+     }
+@@ -110,9 +135,9 @@ void VU1Interpreter::execUpper(uint32_t instr)
+     case 0x16:
+     case 0x17: // MINIbc
+     {
+-        float bc = broadcast(vt, op & 3);
++        const float bc = m_state.vf[ft][op & 3];
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < bc) ? vs[c] : bc;
++            result[c] = vuMin(m_state.vf[fs][c], bc);
+         applyDest(vd, result, dest);
+         return;
+     }
+@@ -134,7 +159,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x1D: // MAXi
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > i) ? vs[c] : i;
++            result[c] = vuMax(m_state.vf[fs][c], m_state.i);
+         applyDest(vd, result, dest);
+         return;
+     case 0x1E: // MULi
+@@ -144,7 +169,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x1F: // MINIi
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < i) ? vs[c] : i;
++            result[c] = vuMin(m_state.vf[fs][c], m_state.i);
+         applyDest(vd, result, dest);
+         return;
+     case 0x20: // ADDq
+@@ -204,7 +229,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x2B: // MAX
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > vt[c]) ? vs[c] : vt[c];
++            result[c] = vuMax(m_state.vf[fs][c], m_state.vf[ft][c]);
+         applyDest(vd, result, dest);
+         return;
+     case 0x2C: // SUB
+@@ -226,7 +251,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x2F: // MINI
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < vt[c]) ? vs[c] : vt[c];
++            result[c] = vuMin(m_state.vf[fs][c], m_state.vf[ft][c]);
+         applyDest(vd, result, dest);
+         return;
+ 
+diff --git a/ps2xTest/src/ps2_vu1_tests.cpp b/ps2xTest/src/ps2_vu1_tests.cpp
+index 0754b69..c57efa8 100644
+--- a/ps2xTest/src/ps2_vu1_tests.cpp
++++ b/ps2xTest/src/ps2_vu1_tests.cpp
+@@ -309,6 +309,38 @@ void register_ps2_vu1_tests()
+                      "ITOF0 should convert negative fixed-point source bits");
+         });
+ 
++        tc.Run("MAX and MINI compare raw words and keep integer bit patterns", [](TestCase &t)
++        {
++            Vu1Fixture fx;
++            t.IsTrue(fx.initialize(), "VU1 fixture should initialize");
++
++            writeVuInstructionPair(fx.code, 0u, 0u, makeVuUpper(0x2Bu, 0xFu, 1u, 1u, 3u)); // MAX.xyzw vf3, vf1, vf1
++            writeVuInstructionPair(fx.code, 1u, 0u, makeVuUpper(0x2Bu, 0xFu, 2u, 1u, 4u)); // MAX.xyzw vf4, vf1, vf2
++            writeVuInstructionPair(fx.code, 2u, 0u, makeVuUpper(0x2Fu, 0xFu, 2u, 1u, 5u)); // MINI.xyzw vf5, vf1, vf2
++
++            VU1Interpreter vu1;
++            // an integer vertex color (0x80, a denormal as a float) and signed values
++            const int32_t a[4] = {0x80, 0x40, -2, static_cast<int32_t>(0xBF800000u)}; // w = -1.0f
++            const int32_t b[4] = {0x7F, 0x41, -3, static_cast<int32_t>(0xC0000000u)}; // w = -2.0f
++            std::memcpy(vu1.state().vf[1], a, sizeof(a));
++            std::memcpy(vu1.state().vf[2], b, sizeof(b));
++            vu1.execute(fx.code, PS2_VU1_CODE_SIZE,
++                        fx.data, PS2_VU1_DATA_SIZE, fx.gs, &fx.mem,
++                        0u, 0u, 0u, 8u);
++
++            int32_t copy[4]{}, max[4]{}, min[4]{};
++            std::memcpy(copy, vu1.state().vf[3], sizeof(copy));
++            std::memcpy(max, vu1.state().vf[4], sizeof(max));
++            std::memcpy(min, vu1.state().vf[5], sizeof(min));
++            t.Equals(copy[0], 0x80, "MAX vfd, vfs, vfs must copy an integer color unchanged");
++            t.Equals(copy[1], 0x40, "MAX must not flush denormal bit patterns");
++            t.Equals(max[0], 0x80, "MAX picks the larger denormal");
++            t.Equals(max[1], 0x41, "MAX picks the larger denormal (ft)");
++            t.Equals(max[3], static_cast<int32_t>(0xBF800000u), "MAX of -1.0 and -2.0 is -1.0");
++            t.Equals(min[0], 0x7F, "MINI picks the smaller denormal");
++            t.Equals(min[3], static_cast<int32_t>(0xC0000000u), "MINI of -1.0 and -2.0 is -2.0");
++        });
++
+         tc.Run("MTIR decodes fsf as a component selector", [](TestCase &t)
+         {
+             Vu1Fixture fx;
