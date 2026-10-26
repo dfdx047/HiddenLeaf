@@ -52,8 +52,11 @@ if [ ! -d "$B/PS2Recomp/.git" ]; then
 fi
 git -C "$B/PS2Recomp" fetch -q origin
 git -C "$B/PS2Recomp" checkout -q -f "$PS2RECOMP_COMMIT"
+# checkout -f keeps untracked files, and a file a patch creates would then already exist (the build dirs stay)
+git -C "$B/PS2Recomp" clean -fdq -e /build-tools/ -e /build-rt/
 for p in "$here"/recomp/patches/*.patch; do
-    git -C "$B/PS2Recomp" apply "$p" && echo "patch: $(basename "$p")"
+    git -C "$B/PS2Recomp" apply "$p" || { echo "patch failed: $(basename "$p")" >&2; exit 1; }
+    echo "patch: $(basename "$p")"
 done
 if [ ! -f "$B/PS2Recomp/build-tools/build.ninja" ]; then
     cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-tools" -G Ninja -DCMAKE_BUILD_TYPE=Release \
