@@ -1,0 +1,14 @@
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 3b2b076..6c9454d 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -499,6 +499,9 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+             std::snprintf(name, sizeof(name), "hl_frames/ram_%06llu.bin", static_cast<unsigned long long>(currentTick));
+             std::ofstream(name, std::ios::binary).write(reinterpret_cast<const char *>(rt->memory().getRDRAM()), PS2_RAM_SIZE);
+             std::cerr << "[hl_ram] " << name << std::endl;
++            // and the GS local memory as the GS lays it out (4 MB, swizzled), in hl_frames/vram_<tick>.bin
++            std::snprintf(name, sizeof(name), "hl_frames/vram_%06llu.bin", static_cast<unsigned long long>(currentTick));
++            std::ofstream(name, std::ios::binary).write(reinterpret_cast<const char *>(rt->memory().getGSVRAM()), PS2_GS_VRAM_SIZE);
+         }
+     }
+     if (shotRequested || (s_frameDumpEvery != 0u && currentTick % s_frameDumpEvery == 0u))
