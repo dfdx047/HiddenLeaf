@@ -69,8 +69,13 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 
 - Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE e
   CyberConnect2) → carga do `DATA.CVM` → `\PSS\NARUTO10.PSS` (o "10th") → abertura em anime `\PSS\OPENING.PSS` →
-  **tela de título com a cena 3D** (a abertura em tempo real do Naruto no manto da Kyuubi, desde o patch 0025; ver
-  "Tela de título" abaixo) → sem START, volta ao `NARUTO10.PSS` (modo de atração). Sem áudio.
+  tela de título, **ainda sem a cena 3D** (ver "Tela de título" abaixo): com START no filme, só o efeito de transição
+  (zoom radial) roda sobre o último quadro do filme por ~12–27 s e o jogo volta ao `NARUTO10.PSS` (modo de atração).
+  O Naruto no manto da Kyuubi e o logo no fim são do próprio `OPENING.PSS`, não da cena em tempo real. Sem áudio.
+- Com START de novo durante a transição (`hl_pad`), o jogo faz a carga automática do memory card (modo 1, ver
+  "Memory card") e mostra "No … data found … Please insert memory card (PS2) with … data" → ✕ → "Return to title
+  screen? (null)Yes(null)". → (o texto fica vermelho) e ✕ escolhem continuar: outra transição parada e, ~27 s depois,
+  o modo de atração. O menu principal também não desenha.
 - Numa execução de 2026-10-25 (`build/runs/run_2315.log`) o jogo carregou o **`BTL.BIN`** (`[un5] overlay btl (id 1)
   resident`) e mostrou os menus em janela ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…",
   "Return to title screen?") e depois voltou ao "10th". O log só tem `HL_AUTOPRESS` com CROSS aos 15 s, então ou
@@ -91,10 +96,17 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
-### Tela de título (2026-10-26): resolvido pelo patch 0025
+### Tela de título (2026-10-26): o 0025 corrigiu uma causa, a cena ainda não desenha
 
-Sintoma era: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a
+Sintoma: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a
 tela fica no último quadro do filme.
+
+**Correção de 2026-10-26 (tarde):** o primeiro relatório dizia que o 0025 resolvia o título. Errado: os PNGs daquele
+relatório (`build/runs/title_2026-10-26.png`, ticks 3536–4689 do `di2.log`) eram do `OPENING.PSS` tocando de novo no
+modo de atração. Com o 0025, o VIF1 recebe a cena **uma vez**: logo depois do START, um quadro sai com 0xc2e40 bytes
+(33 `MSCAL`, 186 `MSCNT`, `UNPACK` V2/V3/V4) e deixa traços escuros da geometria no quadro; todos os outros ficam
+em 0x2c48 bytes (13 tags, só `MPG`, nada para desenhar), como antes do 0025. Próximo passo: por que a cena sai da
+lista depois do primeiro quadro (item 3 do "Falta", e o `HL_FLOAT_LOG` nesse intervalo).
 
 **Causa:** o escalonador do runtime ignorava o `Status.EIE`, então trocava de thread (interrupção, fatia de tempo)
 dentro das regiões entre `DI` e `EI` do jogo. O heap do jogo (`0x118640`, lista livre em `0x618250`, entradas
@@ -104,7 +116,7 @@ dentro das regiões entre `DI` e `EI` do jogo. O heap do jogo (`0x118640`, lista
 bytes em `0xbd5a80`) que a troca de modo de vídeo (`0x1058f0` → `0x102220` → `0x1037a0`) aloca a cada cena. A lista
 sobrescrevia as matrizes da câmera (`+0x40`, `+0x100`, `+0x140` com `0x30000080`…), a divisão de perspectiva
 (`0x10ae58`, em `sub_0010A6B0`) dividia por zero e nada passava do recorte, então o VIF1 só recebia o `MPG` e nunca o
-`MSCAL`. Com o `DI` respeitado (0025), a cena aparece. Itens 0 e 1 do "Falta" foram feitos antes (0021–0023, carga do
+`MSCAL`. Com o `DI` respeitado (0025), a cena passa a ser enviada, mas só num quadro (ver acima). Itens 0 e 1 do "Falta" foram feitos antes (0021–0023, carga do
 `title.ccs` conferida: o trecho descomprimido bate 100 % com o arquivo).
 
 Notas da investigação (para referência):
@@ -149,7 +161,7 @@ Notas da investigação (para referência):
 ### Gráficos (o que já funciona)
 
 - O jogo usa a cadeia DMA do VIF1 (CHCR 0x145, TTE=1), PATH2 DIRECT/DIRECTHL; os filmes e os menus não usam o VU1 (a
-  cena 3D do título usa, desde o 0025). Por quadro: texturas
+  cena 3D do título usa, e desde o 0025 é enviada num quadro só). Por quadro: texturas
   (512x512 PSMT8 dbp 0x3c00 + CLUT 0x3be0, 256x256 T4 dbp 0x3800), contexto (FRAME_1 fbp 0, ALPHA_1=0x44) e o blit final
   (8 sprites de 64 px, tbp 0 → FRAME_2 fbp 0x70). DISPFB1 = 0x1070 (fbp 0x70, 512 de largura, CT32).
 - Patch 0011 corrige o VIF1: o IMAGE que fica devendo dados é completado pelo próximo DIRECT, não pelos bytes crus.
@@ -209,7 +221,14 @@ pede para criar os dados).
 
 Depois disso:
 
-- O menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar os dados).
+- O menu principal: bloqueado pela mesma falta de cena 3D (ver "Onde o jogo está").
+- **Memory card** (achado em 2026-10-26): depois do título, a máquina de estados `0x1efe60` chama `0x1e9d00(menu, 1)`
+  e o 1 põe o gerenciador (`*(gp-0x1fc)`) no modo de carga (`+0x54 = 1`). A checagem `0x1c6c10` (`sceMcGetDir` de
+  `/BESLES-55605NARUTO5`) devolve 4 (sem dados; 3 se faltar espaço) e, no modo 1, as duas viram a mensagem 41 ("Please
+  insert … with … data"); fora do modo 1 seria a 12 ("Create new … data?"). O texto vem de `0x3d3800(id)`: tabela
+  `0x6c6890 + idioma*0xc0 + id*4` (montada pelo construtor `0x5e6810` a partir do `TEXTENG.BIN`). Ou seja, a mensagem
+  é a do jogo para carga sem dados, não erro do runtime. O `GetInfo` do runtime nunca devolve -1 (cartão novo);
+  testado, não muda nada aqui.
 - A fatia de tempo do escalonador (`checkpointDue`, `kDefaultTimeSliceCycles`) reveza threads de mesma prioridade; o
   kernel do PS2 não faz isso. Fica como suspeito se aparecer outra corrida.
 - Semântica de float que o `HL_FLOAT_LOG` mostrou diferente do PS2, sem efeito visível por enquanto: `CVT.W.S` arredonda

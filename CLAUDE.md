@@ -53,10 +53,11 @@ O log da execução vai para `build/run.log`.
 ## Próximos passos
 
 O estado detalhado do boot (onde o jogo está, endereços, variáveis `HL_*` de depuração) fica em `docs/plano.md`,
-seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg) e desenha a cena 3D da
-tela de título (patch 0025: o `DI` do jogo agora segura interrupções e trocas de thread). 50 vsyncs/s (PAL, 0027) no título. Sem áudio.
+seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg) e chega à tela de título,
+que **ainda não desenha a cena 3D**: desde o patch 0025 (o `DI` do jogo segura interrupções e trocas de thread) a cena
+vai ao VU1 num quadro só. 50 vsyncs/s (PAL, 0027). Sem áudio.
 
-1. Menu principal com `HL_AUTOPRESS` (ver "Falta" em `docs/plano.md`).
+1. Cena 3D do título (e do menu): sai da lista de desenho depois do primeiro quadro (ver "Tela de título" em `docs/plano.md`).
 2. Áudio: SPU2 do ARMSX2 num patch (ver `docs/plano.md`, Decisões).
 3. Gráficos no Android: o renderizador do GS do ARMSX2.
 4. `TouchBridge.nativeScene()` no host Android: 1 menu, 2 luta (`BTL.BIN` residente), 3 campanha (`ADV.BIN`).
