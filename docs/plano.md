@@ -119,6 +119,8 @@ O que se sabe do título depois do 0025 (gdb, 2026-10-26):
 - A câmera da cena (`0xb3ec90`, e a cópia `0xbf5260` via `0x1c01b0`) é atualizada todo quadro por `0x1e5740` →
   `0x10e430` → `0x10dd00`, com campos válidos, mas o desenho não a usa.
 - Rodízio de threads de mesma prioridade desligado (teste): nada muda. Primeiro `GetInfo` = -1: nada muda.
+- Com a ISO do Redump no lugar da que tinha o patch de DVD para CD (`docs/analise-elf.md`): igual, só a transição
+  sobre o último quadro do filme. A ISO não era a causa.
 
 Próximo passo: achar por onde os objetos da cena (câmera `0xb3ec90`) deveriam entrar nas 8 camadas (item 3 do
 "Falta") e se a câmera padrão com lixo é que barra (testar zerando o bloco da câmera em `0x10a360`).
