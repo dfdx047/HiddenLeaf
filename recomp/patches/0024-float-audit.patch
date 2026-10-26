@@ -1,0 +1,232 @@
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0485d50..0f91229 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -156,6 +156,24 @@ static inline uint32_t ps2_plzcw32(uint32_t x)
+ #define PS2_FLOAT_NOINLINE __attribute__((noinline))
+ #endif
+ 
++// Hidden Leaf: with HL_FLOAT_LOG=1, the float operations whose PS2 result needs care are counted by the host address
++// in the recompiled function (an operand or result with exponent 255, a zero divisor, a compare with an exponent-255
++// operand, which the host sees as Inf or NaN, and a cvt.w.s the host rounds where the EE truncates); the counts go to
++// the log every 300 vsyncs (hl_float_report). where == nullptr takes the caller of hl_float_note
++enum class HlFloatEvent : uint8_t
++{
++    Exp255,
++    DivZero,
++    Compare255,
++    CvtRound,
++    CvtRange,
++    VuDivZero,
++    VuSqrtNeg,
++    Count
++};
++void hl_float_note(HlFloatEvent kind, const void *where = nullptr);
++void hl_float_report(uint64_t vsyncTick);
++
+ constexpr uint32_t PS2_FLOAT_MAX_BITS = 0x7FFFFFFFu;
+ constexpr uint32_t PS2_FLOAT_EXP_MASK = 0x7F800000u;
+ constexpr uint32_t PS2_FLOAT_SIGN_MASK = 0x80000000u;
+@@ -167,6 +185,29 @@ inline bool ps2_fspecial(float x)
+     return t != 0u && (t - 0x00800000u) >= 0x7F000000u;
+ }
+ 
++inline bool ps2_fexp255(float x)
++{
++    return (std::bit_cast<uint32_t>(x) & 0x7F800000u) == 0x7F800000u;
++}
++
++// HL_FLOAT_LOG: a compare with an exponent-255 operand (Inf or NaN to the host, a big number to the PS2)
++inline void ps2_fcmp_audit(float a, float b)
++{
++    if (ps2_fexp255(a) | ps2_fexp255(b))
++        hl_float_note(HlFloatEvent::Compare255);
++}
++
++// HL_FLOAT_LOG: cvt.w.s as the runtime does it (nearest), noted where the EE's truncation gives another value
++inline int32_t ps2_cvt_w_s_audit(float a)
++{
++    const int32_t r = static_cast<int32_t>(nearbyintf(a));
++    if ((std::bit_cast<uint32_t>(a) & 0x7F800000u) >= 0x4F000000u)
++        hl_float_note(HlFloatEvent::CvtRange);
++    else if (static_cast<float>(r) != truncf(a))
++        hl_float_note(HlFloatEvent::CvtRound);
++    return r;
++}
++
+ inline double ps2_to_double(float x)
+ {
+     uint32_t b = std::bit_cast<uint32_t>(x);
+@@ -204,6 +245,8 @@ PS2_FLOAT_NOINLINE inline float ps2_fadd_slow(float a, float b)
+     const float r = a + b;
+     if (!(ps2_fspecial(a) | ps2_fspecial(b) | ps2_fspecial(r)))
+         return r;
++    if (ps2_fexp255(a) | ps2_fexp255(b) | ps2_fexp255(r))
++        hl_float_note(HlFloatEvent::Exp255, __builtin_return_address(0));
+     return ps2_from_double(ps2_to_double(a) + ps2_to_double(b));
+ }
+ 
+@@ -213,6 +256,8 @@ PS2_FLOAT_NOINLINE inline float ps2_fsub_slow(float a, float b)
+     const float r = a - b;
+     if (!(ps2_fspecial(a) | ps2_fspecial(b) | ps2_fspecial(r)))
+         return r;
++    if (ps2_fexp255(a) | ps2_fexp255(b) | ps2_fexp255(r))
++        hl_float_note(HlFloatEvent::Exp255, __builtin_return_address(0));
+     return ps2_from_double(ps2_to_double(a) - ps2_to_double(b));
+ }
+ 
+@@ -222,6 +267,8 @@ PS2_FLOAT_NOINLINE inline float ps2_fmul_slow(float a, float b)
+     const float r = a * b;
+     if (!(ps2_fspecial(a) | ps2_fspecial(b) | ps2_fspecial(r)))
+         return r;
++    if (ps2_fexp255(a) | ps2_fexp255(b) | ps2_fexp255(r))
++        hl_float_note(HlFloatEvent::Exp255, __builtin_return_address(0));
+     return ps2_from_double(ps2_to_double(a) * ps2_to_double(b));
+ }
+ 
+@@ -231,10 +278,15 @@ PS2_FLOAT_NOINLINE inline float ps2_fdiv_slow(float a, float b)
+     const uint32_t ua = std::bit_cast<uint32_t>(a);
+     const uint32_t ub = std::bit_cast<uint32_t>(b);
+     if ((ub & PS2_FLOAT_EXP_MASK) == 0u)
++    {
++        hl_float_note(HlFloatEvent::DivZero, __builtin_return_address(0));
+         return std::bit_cast<float>(((ua ^ ub) & PS2_FLOAT_SIGN_MASK) | PS2_FLOAT_MAX_BITS);
++    }
+     const float r = a / b;
+     if (!(ps2_fspecial(a) | ps2_fspecial(b) | ps2_fspecial(r)))
+         return r;
++    if (ps2_fexp255(a) | ps2_fexp255(b) | ps2_fexp255(r))
++        hl_float_note(HlFloatEvent::Exp255, __builtin_return_address(0));
+     return ps2_from_double(ps2_to_double(a) / ps2_to_double(b));
+ }
+ 
+@@ -324,6 +376,7 @@ PS2_FLOAT_NOINLINE inline __m128 ps2_vslow(__m128 a, __m128 b, Ps2VecOp op)
+     alignas(16) float la[4], lb[4], lr[4];
+     _mm_store_ps(la, a);
+     _mm_store_ps(lb, b);
++    hl_float_note(HlFloatEvent::Exp255, __builtin_return_address(0));
+     for (int i = 0; i < 4; ++i)
+     {
+         switch (op)
+@@ -853,23 +906,23 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+ #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
+ #define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+ #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
+-#define FPU_CVT_W_S(a) ((int32_t)nearbyintf((float)(a)))
++#define FPU_CVT_W_S(a) ps2_cvt_w_s_audit((float)(a))
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_EQ_S(a, b) ((float)(a) == (float)(b))
++#define FPU_C_EQ_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) == (float)(b))
+ #define FPU_C_UEQ_S(a, b) ((float)(a) == (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_OLT_S(a, b) ((float)(a) < (float)(b))
++#define FPU_C_OLT_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) < (float)(b))
+ #define FPU_C_ULT_S(a, b) ((float)(a) < (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_OLE_S(a, b) ((float)(a) <= (float)(b))
++#define FPU_C_OLE_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) <= (float)(b))
+ #define FPU_C_ULE_S(a, b) ((float)(a) <= (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+ #define FPU_C_SF_S(a, b) (0)
+ #define FPU_C_NGLE_S(a, b) (isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_SEQ_S(a, b) ((float)(a) == (float)(b))
++#define FPU_C_SEQ_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) == (float)(b))
+ #define FPU_C_NGL_S(a, b) ((float)(a) == (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_LT_S(a, b) ((float)(a) < (float)(b))
++#define FPU_C_LT_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) < (float)(b))
+ #define FPU_C_NGE_S(a, b) ((float)(a) < (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+-#define FPU_C_LE_S(a, b) ((float)(a) <= (float)(b))
++#define FPU_C_LE_S(a, b) (ps2_fcmp_audit((float)(a), (float)(b)), (float)(a) <= (float)(b))
+ #define FPU_C_NGT_S(a, b) ((float)(a) <= (float)(b) || isnan((float)(a)) || isnan((float)(b)))
+ 
+ // QFSRV: Quadword Funnel Shift Right Variable
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 27c7c0a..0ff7685 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1951,6 +1951,10 @@ void EeScheduler::processEvent(const EeEvent &event)
+         break;
+     case EeEventType::VBlankStart:
+         ++m_vsyncTick;
++        if (m_vsyncTick % 300u == 0u)
++        {
++            hl_float_report(m_vsyncTick);
++        }
+         m_runtime.memory().gs().vsyncTick.store(m_vsyncTick, std::memory_order_release);
+         if ((m_vsyncTick & 1u) != 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/Kernel/HlFloatLog.cpp b/ps2xRuntime/src/lib/Kernel/HlFloatLog.cpp
+new file mode 100644
+index 0000000..41a92cf
+--- /dev/null
++++ b/ps2xRuntime/src/lib/Kernel/HlFloatLog.cpp
+@@ -0,0 +1,70 @@
++// Hidden Leaf: HL_FLOAT_LOG=1 (see hl_float_note in ps2_runtime_macros.h). Only the EE executor reaches these.
++#include "ps2_runtime_macros.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <cstdlib>
++#include <unordered_map>
++#include <vector>
++
++extern "C" char __executable_start;
++
++namespace
++{
++    const char *const kNames[] = {"exp255", "div0", "cmp255", "cvt-round", "cvt-range", "vu-div0", "vu-sqrt-neg"};
++
++    struct Site
++    {
++        uint64_t count = 0;
++        uint64_t sinceReport = 0;
++    };
++
++    bool enabled()
++    {
++        static const bool s_enabled = std::getenv("HL_FLOAT_LOG") != nullptr;
++        return s_enabled;
++    }
++
++    // key: host offset in the executable << 4 | kind
++    std::unordered_map<uint64_t, Site> &sites()
++    {
++        static std::unordered_map<uint64_t, Site> s_sites;
++        return s_sites;
++    }
++}
++
++PS2_FLOAT_NOINLINE void hl_float_note(HlFloatEvent kind, const void *where)
++{
++    if (!enabled())
++        return;
++    if (where == nullptr)
++        where = __builtin_return_address(0);
++    const uint64_t offset = reinterpret_cast<uintptr_t>(where) - reinterpret_cast<uintptr_t>(&__executable_start);
++    Site &site = sites()[(offset << 4) | static_cast<uint64_t>(kind)];
++    ++site.count;
++    ++site.sinceReport;
++}
++
++void hl_float_report(uint64_t vsyncTick)
++{
++    if (!enabled())
++        return;
++    uint64_t totals[static_cast<size_t>(HlFloatEvent::Count)]{};
++    std::vector<std::pair<uint64_t, uint64_t>> recent;
++    for (auto &[key, site] : sites())
++    {
++        totals[key & 0xFu] += site.count;
++        if (site.sinceReport != 0u)
++            recent.emplace_back(site.sinceReport, key);
++    }
++    std::sort(recent.rbegin(), recent.rend());
++    std::fprintf(stderr, "[float] vsync %llu totals:", static_cast<unsigned long long>(vsyncTick));
++    for (size_t i = 0; i < static_cast<size_t>(HlFloatEvent::Count); ++i)
++        std::fprintf(stderr, " %s=%llu", kNames[i], static_cast<unsigned long long>(totals[i]));
++    std::fprintf(stderr, "; %zu sites since the last report\n", recent.size());
++    for (size_t i = 0; i < recent.size() && i < 24u; ++i)
++        std::fprintf(stderr, "[float]   %s at +0x%llx: %llu\n", kNames[recent[i].second & 0xFu],
++                     static_cast<unsigned long long>(recent[i].second >> 4), static_cast<unsigned long long>(recent[i].first));
++    for (auto &[key, site] : sites())
++        site.sinceReport = 0u;
++}
