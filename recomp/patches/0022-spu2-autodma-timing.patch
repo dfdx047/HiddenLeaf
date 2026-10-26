@@ -1,0 +1,29 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 25e9b36..9ca0025 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -1,4 +1,5 @@
+ #include "iop_memory.h"
++#include "../iop_emulator_const.h"
+ 
+ #include <algorithm>
+ #include <cstring>
+@@ -269,9 +270,17 @@ namespace ps2x::iop::detail
+         const uint32_t wordsPerBlock = std::max<uint32_t>(blockControl & 0xFFFFu, 1u);
+         const uint32_t blockCount = std::max<uint32_t>(blockControl >> 16u, 1u);
+         const uint64_t transferWords = static_cast<uint64_t>(wordsPerBlock) * blockCount;
++        // Hidden Leaf: in AutoDMA (the core's ADMAS bit, streamed PCM such as CRI ADX) the SPU2 takes the buffer as
++        // it plays it, one word (a stereo sample) per 48 kHz tick. Finishing at bus speed made libsd's interrupt and
++        // the ADX server run ~170 times too often, keeping the IOP busy all the time
++        const uint32_t admasAddress = 0x1F9001B0u + (secondCore ? 0x400u : 0u);
++        uint32_t admas = 0u;
++        if (const auto current = m_hardware.find(admasAddress); current != m_hardware.end())
++            admas = current->second & 0xFFFFu;
++        const bool autoDma = (admas & (secondCore ? 2u : 1u)) != 0u;
+         m_dmaStart = DmaStart{
+             secondCore ? kDmaSpu1Irq : kDmaSpu0Irq,
+-            std::max<uint64_t>(transferWords * 2u, 64u),
++            autoDma ? transferWords * (kIopClockHz / 48'000u) : std::max<uint64_t>(transferWords * 2u, 64u),
+         };
+     }
+ 
