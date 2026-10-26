@@ -1,0 +1,55 @@
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index f247ff9..698cf0a 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -393,6 +393,7 @@ private:
+     void scheduleEvent(uint64_t deadlineCycle, std::chrono::steady_clock::time_point hostDeadline, EeEvent event);
+     void updateNextDeadline();
+     [[nodiscard]] bool hasReadyAtOrAbovePriority(int priority) const;
++    void skipIdleCycles();
+     void renewTimeSlice();
+     void copyMainContextToRuntime();
+     void publishDebugContext(const R5900Context &context);
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index ad0f001..27c7c0a 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -832,6 +832,14 @@ int EeScheduler::rotateReadyQueue(int priority, bool interruptSafe)
+     GuestThread *self = currentThread();
+     if (self && self->currentPriority == priority)
+     {
++        // Hidden Leaf: with no other thread ready, the one that yields runs again at once. UN5's idle thread
++        // (0x1007d0) does nothing but yield, ~24 cycles a turn and a transfer (a C++ exception) each; it keeps
++        // running instead, and the EE clock moves on to the next event as an idle EE does in waitForEvent
++        if (!interruptSafe && !m_insideInterrupt && !hasReadyAtOrAbovePriority(kPriorityCount - 1))
++        {
++            skipIdleCycles();
++            return KE_OK;
++        }
+         enqueueReady(*self);
+         m_currentThreadId = 0;
+         m_rescheduleRequested = true;
+@@ -2173,6 +2181,23 @@ bool EeScheduler::hasReadyAtOrAbovePriority(int priority) const
+     return false;
+ }
+ 
++void EeScheduler::skipIdleCycles()
++{
++    // in steps, so an event raised meanwhile (the IOP runs inside accountCycles, EE timers) stops the skip
++    constexpr uint64_t kStep = 8192u;
++    uint64_t target = m_nextDeadlineCycle.load(std::memory_order_acquire);
++    const uint64_t timerCycles = m_runtime.memory().cyclesUntilNextEeTimerInterrupt();
++    if (timerCycles != std::numeric_limits<uint64_t>::max() && (target == 0u || m_eeCycle + timerCycles < target))
++    {
++        target = m_eeCycle + timerCycles;
++    }
++    while (target > m_eeCycle && !m_checkpointPending.load(std::memory_order_acquire) &&
++           !m_stopRequested.load(std::memory_order_acquire))
++    {
++        accountCycles(static_cast<uint32_t>(std::min<uint64_t>(target - m_eeCycle, kStep)));
++    }
++}
++
+ void EeScheduler::renewTimeSlice()
+ {
+     m_sliceEndCycle = m_eeCycle + kDefaultTimeSliceCycles;
