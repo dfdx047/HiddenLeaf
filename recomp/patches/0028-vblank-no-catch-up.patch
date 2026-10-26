@@ -1,0 +1,19 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 5e598f4..a0d6b0d 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1967,8 +1967,13 @@ void EeScheduler::processDueDeadlines()
+                 scheduleEvent(scheduled.deadlineCycle + kVBlankDurationCycles,
+                               scheduled.hostDeadline + kVBlankDuration,
+                               EeEvent{EeEventType::VBlankEnd, 0, m_vsyncTick + 1u});
++                // Hidden Leaf: a vblank that came late in host time (a slow stretch: loading, the first frames of a
++                // scene) does not bring the next ones sooner; with the lag kept, the game ran above 50 Hz until it
++                // caught up (~53 vsyncs/s for minutes after the boot)
++                const auto nextHostDeadline = std::max(scheduled.hostDeadline + m_vblankPeriod,
++                                                       std::chrono::steady_clock::now());
+                 scheduleEvent(scheduled.deadlineCycle + m_vblankPeriodCycles,
+-                              scheduled.hostDeadline + m_vblankPeriod,
++                              nextHostDeadline,
+                               EeEvent{EeEventType::VBlankStart, 0, 0});
+             }
+             processEvent(scheduled.event);

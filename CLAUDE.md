@@ -54,7 +54,7 @@ O log da execução vai para `build/run.log`.
 
 O estado detalhado do boot (onde o jogo está, endereços, variáveis `HL_*` de depuração) fica em `docs/plano.md`,
 seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg) e desenha a cena 3D da
-tela de título (patch 0025: o `DI` do jogo agora segura interrupções e trocas de thread). ~52 vsyncs/s. Sem áudio.
+tela de título (patch 0025: o `DI` do jogo agora segura interrupções e trocas de thread). 50 vsyncs/s (PAL, 0027) no título. Sem áudio.
 
 1. Menu principal com `HL_AUTOPRESS` (ver "Falta" em `docs/plano.md`).
 2. Áudio: SPU2 do ARMSX2 num patch (ver `docs/plano.md`, Decisões).

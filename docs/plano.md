@@ -183,7 +183,7 @@ antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
 0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
 bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
-segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes);
+segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes), 0028 vblank atrasado não adianta os próximos (sem ele o jogo ficava em ~53/s depois do boot);
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
