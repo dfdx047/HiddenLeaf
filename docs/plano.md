@@ -71,8 +71,19 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   CyberConnect2) → carga do `DATA.CVM` → `\PSS\NARUTO10.PSS` (o "10th") → abertura em anime `\PSS\OPENING.PSS` →
   tela de título → (START) carrega o **`BTL.BIN`** (`[un5] overlay btl (id 1) resident`) e mostra os menus em janela
   ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…", "Return to title screen?"). Tudo com imagem
-  certa, sem áudio. Falta o PNG da tela de título: com `HL_AUTOPRESS="15:CROSS"` a abertura dura mais de 4500 vsyncs;
-  rodar uns 8 min com `HL_FRAME_DUMP=100` (ou um START no meio da abertura e o dump logo depois).
+  certa, sem áudio.
+- **A tela de título não é desenhada** (com a abertura pulada por START ou terminando sozinha por volta do vsync 6500):
+  o jogo lê ~388 KB do `DATA.CVM` (`lbn 0x131ffd`, em anel de 4 × 64 KB em `0xbee700`, parece arquivo comprimido),
+  toca o som do título (`SOUND.AFS` de `lbn 0x100004` a `0x10013c`, 3 buffers em `0x63ad40`) e, ~1000 vsyncs depois,
+  volta ao `NARUTO10.PSS` (modo de atração). Enquanto isso a tela fica no último quadro do filme. A cadeia DMA do
+  título (13 tags, 0x2c48 bytes) é: 8 × `MPG` (microcódigo do VU1 em 0x300–0x791, sem `MSCAL`), `BASE`/`OFFSET`/
+  `MSKPATH3`, o blit final (`DIRECTHL` 0x33 qwords) e as 8 camadas da lista de desenho, cada uma só com
+  `FLUSHA` + `DIRECT` de `SCISSOR_1`: **nenhum objeto entra nas camadas**. O VIF e o GS fazem o que recebem; o
+  problema é do lado do jogo. É a primeira cena 3D (CCS) do boot (filmes e menus são 2D). Suspeitas: o `title.ccs`
+  (tabela de cena em `0x5c78a0`, tratadores de estado `0x1e47d4`/`0x1e4854`/`0x1e48d4` sobre o objeto em `+0x1c`)
+  carregado errado, ou o recorte de visibilidade descartando tudo (contas do VU0).
+- No ritmo atual (~10–12 vsyncs/s com dumps) a abertura leva ~9 min; `HL_AUTOPRESS="15:CROSS,130:START"` cai no meio
+  dela e pula para o título.
 - Nos menus aparecem `(null)` em volta de "Yes": provavelmente ícones de botão que o texto procura por nome.
 - gp = `0x617ef0`. Laço principal `0x1C5DA0`; tarefas = threads (8 = sequência de boot `0x1E6B20`, 13 = loader).
 - **Filmes (libmpeg da Sony, stubs do runtime em `Stubs/MPEG.cpp`).** Thread de stream `sub_00104020` (lê o CD em
@@ -101,8 +112,8 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 | Variável | O quê |
 |---|---|
 | `HL_FRAME_DUMP=N` | a cada N vsyncs grava `hl_frames/frame_*.ppm` (quadro exibido), `_vram.ppm` (VRAM inteira 1024x1024 CT32) e `_ctx0/1.ppm` (o FRAME de cada contexto), mais a linha `[frame-dump]` no log (0012) |
-| `HL_GIF_LOG=N` | os N primeiros pacotes GIF (caminho, tamanho, GIFtag; A+D com reg=valor) (0012) |
-| `HL_VIF_LOG=N` | os N primeiros códigos VIF1 (`[vif1] +off/size code op num imm`) (0012) |
+| `HL_GIF_LOG=N` | os N primeiros pacotes GIF (caminho, tamanho, GIFtag; A+D com reg=valor) (0012); `N@S` começa S segundos depois do primeiro pacote e grava os pacotes inteiros em `hl_gif.bin` (u32 caminho, u32 tamanho, bytes) (0020) |
+| `HL_VIF_LOG=N` | os N primeiros códigos VIF1 (`[vif1] +off/size code op num imm`) (0012); `N@S` começa S segundos depois (0020) |
 | `HL_DMA_LOG=1` | cada cadeia DMA (`[dma-chain] ch chcr tags bytes next lastTag`) (0012) |
 | `HL_RPC_LOG=1` | cada chamada SIF RPC (0008) |
 | `HL_IOP_TRACE=pc,pc` | registradores do IOP nesses PCs, em hexa (0009) |
@@ -120,14 +131,15 @@ escreve; watchpoint condicional em `ctx->pc` é lento demais. Patches novos: ger
 `b3c382b` fnmap (delay slot do `jr ra`); patches 0004 log do sceCdRead, 0005 dump do EE, 0006 pilha do main abaixo das
 pilhas de callback, 0007 leitura de CD do IOP em qualquer RAM, 0008 log de RPC, 0009 trace do IOP, 0010 DMA do SPU2
 antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 0013 vf0 fixo, 0014 HL_AUTOPRESS,
-0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes;
+0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
+0020 logs de GIF e VIF com atraso;
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
 ### Falta
 
-1. PNG da tela de título; depois seguir o menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar
-   os dados).
+1. A tela de título vazia (ver "Onde o jogo está"): achar por que nenhum objeto da cena entra nas camadas; depois o
+   PNG do título e o menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar os dados).
 2. Os `(null)` dos menus.
 3. Áudio: SPU2 do ARMSX2 (ver Decisões).
 4. Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).

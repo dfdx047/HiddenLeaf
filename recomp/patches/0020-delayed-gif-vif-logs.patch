@@ -1,0 +1,98 @@
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -3,6 +3,8 @@
+ #include "runtime/gs/gs_frontend.h"
+ #include "ps2_log.h"
+ #include <atomic>
++#include <chrono>
++#include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+ #include <iostream>
+@@ -1970,15 +1972,40 @@
+     if (!data || sizeBytes < 16)
+         return;
+ 
+-    // Hidden Leaf: HL_GIF_LOG=N prints the first N packets (path, size, PATH3 mask, first GIFtag)
+-    static const uint64_t s_gifLogLimit = []
++    // Hidden Leaf: HL_GIF_LOG=N prints the first N packets (path, size, PATH3 mask, first GIFtag);
++    // HL_GIF_LOG=N@S starts S seconds after the first packet and also writes the packets whole to hl_gif.bin
++    // (u32 path, u32 size, the bytes)
++    static uint64_t s_gifLogDelay = 0;
++    static const uint64_t s_gifLogLimit = []() -> uint64_t
+     {
+         const char *value = std::getenv("HL_GIF_LOG");
+-        return value != nullptr ? std::strtoull(value, nullptr, 10) : 0ull;
++        if (value == nullptr)
++            return 0ull;
++        char *end = nullptr;
++        const uint64_t limit = std::strtoull(value, &end, 10);
++        if (end != nullptr && *end == '@')
++            s_gifLogDelay = std::strtoull(end + 1, nullptr, 10);
++        return limit;
+     }();
++    static const auto s_gifFirst = std::chrono::steady_clock::now();
++    static std::FILE *s_gifRaw = nullptr;
+     static std::atomic<uint64_t> s_gifLogged{0};
+-    if (s_gifLogLimit != 0u && s_gifLogged.fetch_add(1, std::memory_order_relaxed) < s_gifLogLimit)
+-    {
++    if (s_gifLogLimit != 0u &&
++        std::chrono::steady_clock::now() - s_gifFirst >= std::chrono::seconds(s_gifLogDelay) &&
++        s_gifLogged.fetch_add(1, std::memory_order_relaxed) < s_gifLogLimit)
++    {
++        if (s_gifLogDelay != 0u)
++        {
++            if (s_gifRaw == nullptr)
++                s_gifRaw = std::fopen("hl_gif.bin", "wb");
++            if (s_gifRaw != nullptr)
++            {
++                const uint32_t header[2] = {static_cast<uint32_t>(pathId), sizeBytes};
++                std::fwrite(header, sizeof(header), 1, s_gifRaw);
++                std::fwrite(data, 1, sizeBytes, s_gifRaw);
++                std::fflush(s_gifRaw);
++            }
++        }
+         uint64_t tagLo = 0;
+         uint64_t tagHi = 0;
+         std::memcpy(&tagLo, data, sizeof(tagLo));
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,5 +1,6 @@
+ // Based on Blackline Interactive implementation
+ #include "runtime/ps2_memory.h"
++#include <chrono>
+ #include <cstdlib>
+ #include <cstring>
+ #include <iostream>
+@@ -364,14 +365,25 @@
+         uint8_t num = (cmd >> 16) & 0xFF;
+         const bool irq = (cmd & 0x80000000u) != 0u;
+ 
+-        // Hidden Leaf: HL_VIF_LOG=N prints the first N VIF1 codes (offset in the transfer, code, opcode, num, imm)
+-        static const uint64_t s_vifLogLimit = []
++        // Hidden Leaf: HL_VIF_LOG=N prints the first N VIF1 codes (offset in the transfer, code, opcode, num, imm);
++        // HL_VIF_LOG=N@S starts S seconds after the first code
++        static uint64_t s_vifLogDelay = 0;
++        static const uint64_t s_vifLogLimit = []() -> uint64_t
+         {
+             const char *value = std::getenv("HL_VIF_LOG");
+-            return value != nullptr ? std::strtoull(value, nullptr, 10) : 0ull;
++            if (value == nullptr)
++                return 0ull;
++            char *end = nullptr;
++            const uint64_t limit = std::strtoull(value, &end, 10);
++            if (end != nullptr && *end == '@')
++                s_vifLogDelay = std::strtoull(end + 1, nullptr, 10);
++            return limit;
+         }();
++        static const auto s_vifFirst = std::chrono::steady_clock::now();
+         static uint64_t s_vifLogged = 0u;
+-        if (s_vifLogLimit != 0u && s_vifLogged++ < s_vifLogLimit)
++        if (s_vifLogLimit != 0u &&
++            std::chrono::steady_clock::now() - s_vifFirst >= std::chrono::seconds(s_vifLogDelay) &&
++            s_vifLogged++ < s_vifLogLimit)
+         {
+             std::cerr << "[vif1] +0x" << std::hex << (pos - 4u) << "/0x" << sizeBytes << " code=0x" << cmd << " op=0x"
+                       << static_cast<unsigned>(opcode) << " num=0x" << static_cast<unsigned>(num) << " imm=0x" << imm
