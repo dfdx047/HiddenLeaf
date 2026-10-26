@@ -55,10 +55,12 @@ O log da execução vai para `build/run.log`.
 
 O estado detalhado do boot (onde o jogo está, endereços, variáveis `HL_*` de depuração) fica em `docs/plano.md`,
 seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg) e chega à tela de título,
-que **desenha desde o patch 0029** (`VSQI` do VU0), mas a ~1 quadro do jogo por segundo: o rasterizador de software do
-GS não dá conta dos triângulos texturizados de tela cheia. 50 vsyncs/s (PAL, 0027). Sem áudio.
+que **desenha desde o patch 0029** (`VSQI` do VU0) e com as cores certas desde o 0030 (`MAX`/`MINI` do VU1), mas ainda
+ampliada pela malha do pós-efeito do título e lenta: o rasterizador de software do GS não dá conta dos triângulos
+texturizados de tela cheia. 50 vsyncs/s (PAL, 0027). Sem áudio.
 
-1. Velocidade do GS na tela de título (ver "Tela de título" em `docs/plano.md`); depois, o menu principal.
+1. Tela de título: a malha do pós-efeito maior que a tela e a velocidade do GS (ver "Tela de título" em
+   `docs/plano.md`); depois, o menu principal.
 2. Áudio: SPU2 do ARMSX2 num patch (ver `docs/plano.md`, Decisões).
 3. Gráficos no Android: o renderizador do GS do ARMSX2.
 4. `TouchBridge.nativeScene()` no host Android: 1 menu, 2 luta (`BTL.BIN` residente), 3 campanha (`ADV.BIN`).

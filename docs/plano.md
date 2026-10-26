@@ -96,7 +96,31 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
-### Tela de título (2026-10-26): desenha desde o 0029, mas a ~1 quadro do jogo por segundo
+### Tela de título (2026-10-26): cores certas desde o 0030; falta a malha do pós-efeito e a velocidade
+
+**0030, cor e alpha zerados:** com o 0029 a cena saía escura e falhada. No log das primitivas do GS, ~18 mil dos
+triângulos que o VU1 manda por quadro chegavam com RGBA = 0 (invisíveis, alpha 0). O microprograma do VU1 que desenha a
+cena (o de `0x000`, por lote a partir de `0x049`/`0x066`) lê a cor da entrada como inteiros (`LQ.xyzw vf7, 1(vi2)`,
+0..255) e a copia para a saída com `MAX.xyzw vf10, vf7, vf7`. Inteiros pequenos são denormais como float; o
+interpretador do VU1 passava os operandos de `MAX`/`MINI` pelo `normalizeOperand` (denormal vira 0). A VU compara as
+palavras cruas (o PCSX2 também: `fp_max`/`fp_min` com inteiros). O 0030 faz `MAX`, `MAXbc`, `MAXi`, `MINI`, `MINIbc` e
+`MINIi` compararem as palavras como o PCSX2, com um teste no `ps2_vu1_tests.cpp` (falha nos 5 casos de denormal sem a
+correção). O `VMAX`/`VMINI` do VU0 recompilado usa `_mm_max_ps`, que já preserva denormais.
+
+**Câmera `+0x274` (0,75 no PCSX2, 1,0 no recomp) não é bug:** é o patch de widescreen do próprio PCSX2
+(`resources/patches.zip`, `SLES-55605_C071D4C1.pnach`: `patch=1,EE,20B3EF14,extended,3F400000`, com
+`EnableWideScreenPatches = true` no `PCSX2.ini`). Para comparar câmeras, desligar os patches de widescreen no PCSX2.
+
+**Agora:** personagens, fundo, botões e textos com as cores do PCSX2. O que ainda difere: todo quadro termina com um
+pós-efeito (copia o quadro para fbp 384 com 17 sprites, máscaras, um quad preto de tela cheia cujo alpha cai de 128 a
+0 em ~5 s depois que o título aparece, e por fim uma malha de 288 triângulos com a cópia como textura). Mesmo depois do
+fade, essa malha fica maior que a tela (de (-9, -78) a ~(521, 530) em vez de (0, 0)–(512, 448)), então a imagem sai
+ampliada e o logo fica grande, com rastros. Próximo passo: de onde vêm os vértices dessa malha (lote do VU1 com a
+textura tbp 12288) e o que o PCSX2 tem nesse ponto (com o widescreen desligado). Velocidade: a lógica roda a ~9
+quadros/s (contador do título), o rasterizador do GS continua sendo o gargalo, e o título cai no modo de atração em
+~100 s.
+
+### 0029, matriz de mundo zerada
 
 **Causa (achada comparando com o PCSX2):** o recompilador traduzia `VSQI`/`VSQD` do VU0 com os campos trocados (o VF
 vinha de `it` e o VI de `fs`). `0x19fec0` monta a matriz de mundo de cada objeto da cena (`+0x00`) a partir da local
@@ -114,10 +138,9 @@ câmera da cena está em `0xb3eca0` no PCSX2 e em `0xb3ec90` no recomp), então 
 dois lados. A primeira diferença foi `title/30+0` (matriz de mundo: escala 1,075 e posição (-3, 10) no PCSX2, zeros
 no recomp); o watchpoint nela levou a `0x19fec0` ← `0x194390` ← `0x1bff50` ← `0x1e5740`.
 
-**Agora:** a cena do título é desenhada (personagens, logo, "New Game"/"Load Game", fundo), mas o jogo anda a ~1
-quadro por segundo nela: ~85 % do tempo está no rasterizador de software do GS (`GSCpuBackend::DrawTriangle`,
-`SampleTexture`, `LookupCLUT`, `WritePixel`; amostragem com o gdb, sem `perf` instalado), com os triângulos
-texturizados de tela cheia que o VU1 manda. A transição do START (zoom e fade) leva minutos.
+Depois do 0029 a cena do título passou a ser desenhada, mas escura (ver 0030 acima) e lenta: ~85 % do tempo no
+rasterizador de software do GS (`GSCpuBackend::DrawTriangle`, `SampleTexture`, `LookupCLUT`, `WritePixel`; amostragem
+com o gdb, sem `perf` instalado), com os triângulos texturizados de tela cheia que o VU1 manda.
 
 ### Antes do 0029 (histórico)
 
@@ -220,7 +243,7 @@ Notas da investigação (para referência):
 | `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
 | `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
 | `HL_FLOAT_LOG=1` | a cada 300 vsyncs, quantas diferenças de float PS2 × IEEE houve (expoente 255, divisão por zero, comparação, arredondamento do CVT.W.S, DIV/SQRT do VU0) e em que ponto do executável (deslocamento a partir de `__executable_start`, `addr2line`) (0024) |
-| arquivos `hl_shot`, `hl_ram`, `hl_pad` | criados no diretório de execução enquanto o jogo roda (o runtime lê e apaga): `hl_shot` grava um quadro como o `HL_FRAME_DUMP`; `hl_ram` grava os 32 MB da RAM do EE em `hl_frames/ram_<tick>.bin`; `hl_pad` com botões (`UP UP CROSS`, `WAIT` = pausa) aperta cada um por 6 vsyncs e solta por 6 (0026) |
+| arquivos `hl_shot`, `hl_ram`, `hl_pad` | criados no diretório de execução enquanto o jogo roda (o runtime lê e apaga): `hl_shot` grava um quadro como o `HL_FRAME_DUMP`; `hl_ram` grava os 32 MB da RAM do EE em `hl_frames/ram_<tick>.bin` e os 4 MB da VRAM do GS, no layout do GS, em `vram_<tick>.bin` (0031; o `GS.bin` do savestate do PCSX2 tem a VRAM no mesmo layout a partir do byte 425, mas no renderizador de hardware os framebuffers não estão nela); `hl_pad` com botões (`UP UP CROSS`, `WAIT` = pausa) aperta cada um por 6 vsyncs e solta por 6 (0026) |
 
 Depurar com gdb: `rdram = $rdi`, `ctx = $rsi`, `r[n]` em `$rsi+n*16`, `pc` em `$rsi+512`; rodar sob gdb (ptrace_scope
 bloqueia attach), interromper com `pkill -INT -x ps2EntryRunner`. Watchpoint de hardware em `$rdi+endereço` acha quem
@@ -235,7 +258,7 @@ antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
 0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
 bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
-segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes), 0028 vblank atrasado não adianta os próximos (sem ele o jogo ficava em ~53/s depois do boot), 0029 `VSQI`/`VSQD` do VU0 com os campos certos e na memória de dados do VU0 (`vi0` fixo; a cena do título passa a desenhar);
+segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes), 0028 vblank atrasado não adianta os próximos (sem ele o jogo ficava em ~53/s depois do boot), 0029 `VSQI`/`VSQD` do VU0 com os campos certos e na memória de dados do VU0 (`vi0` fixo; a cena do título passa a desenhar), 0030 `MAX`/`MINI` do VU1 comparam as palavras cruas (cores da cena), 0031 `hl_ram` grava também a VRAM do GS;
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
@@ -274,7 +297,10 @@ Depois disso:
 - Semântica de float que o `HL_FLOAT_LOG` mostrou diferente do PS2, sem efeito visível por enquanto: `CVT.W.S` arredonda
   em vez de truncar (215 funções), `VDIV` por zero dá 0 (no PS2, ±máximo), `VSQRT` usa `max(0,x)` (no PS2, `|x|`),
   `VRSQRT` ignora `fs`. Os 29 div0 no início do título vêm da câmera montada antes de o jogo preencher os campos.
-- A imagem sai com 512 de largura numa janela de 640 (faixa preta à direita).
+- A imagem sai com 512 de largura numa janela de 640 (faixa preta à direita). O jogo monta o `DISPLAY1` com MAGH = 0
+  e DW = 511 (`gfx+0x2c8`, `0x0002027c`/`0x001ff1ff`); no PCSX2 sai MAGH = 4 e DW = 2559 (`0x02048290`/`0x001ff9ff`) e
+  o `PMODE` com MMOD/AMOD (`0x7f67` contra `0x7f07`). Ainda não investigado (suspeita: o parâmetro de modo de saída
+  que a libgraph guarda no `sceGsResetGraph`).
 - ~~O vsync é de 60 Hz, mas o jogo é PAL~~: feito no 0027 (50 Hz quando o jogo pede PAL).
 - Os `(null)` dos menus.
 - Áudio: SPU2 do ARMSX2 (ver Decisões).
