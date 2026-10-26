@@ -1,0 +1,143 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 9dcce37..cd7b5f2 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -1,7 +1,11 @@
+ #include "Common.h"
+ #include "Pad.h"
++#include "runtime/ee_scheduler.h"
+ 
+ #include <chrono>
++#include <cstdio>
++#include <deque>
++#include <fstream>
+ #include <string>
+ 
+ namespace ps2_stubs
+@@ -234,8 +238,81 @@ namespace ps2_stubs
+             return presses;
+         }
+ 
+-        void applyAutoPress(PadInputState &state, int port)
++        // Hidden Leaf: a file named hl_pad in the working directory ("UP UP CROSS") is read and removed; each button is
++        // then held for 6 vsyncs and released for 6, so menus can be driven while the game runs
++        void applyPadFile(PadInputState &state, PS2Runtime *runtime)
+         {
++            static std::deque<uint16_t> queue;
++            static uint64_t phaseStart = 0u;
++            static bool holding = false;
++            if (runtime == nullptr)
++            {
++                return;
++            }
++            const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
++            static uint64_t lastCheck = ~0ull;
++            if (tick != lastCheck)
++            {
++                lastCheck = tick;
++                std::ifstream file("hl_pad");
++                if (file)
++                {
++                    std::string word;
++                    while (file >> word)
++                    {
++                        static const std::unordered_map<std::string, uint16_t> names = {
++                            {"SELECT", kPadBtnSelect}, {"START", kPadBtnStart}, {"UP", kPadBtnUp},
++                            {"RIGHT", kPadBtnRight}, {"DOWN", kPadBtnDown}, {"LEFT", kPadBtnLeft}, {"L2", kPadBtnL2},
++                            {"R2", kPadBtnR2}, {"L1", kPadBtnL1}, {"R1", kPadBtnR1}, {"TRIANGLE", kPadBtnTriangle},
++                            {"CIRCLE", kPadBtnCircle}, {"CROSS", kPadBtnCross}, {"SQUARE", kPadBtnSquare},
++                            {"WAIT", 0u}};
++                        const auto it = names.find(word);
++                        if (it != names.end())
++                        {
++                            queue.push_back(it->second);
++                        }
++                    }
++                    file.close();
++                    std::remove("hl_pad");
++                    std::cerr << "[hl_pad] tick " << tick << ": " << queue.size() << " queued" << std::endl;
++                }
++            }
++            if (queue.empty())
++            {
++                return;
++            }
++            if (phaseStart == 0u)
++            {
++                phaseStart = tick;
++                holding = true;
++            }
++            if (holding && tick - phaseStart >= 6u)
++            {
++                holding = false;
++                phaseStart = tick;
++            }
++            else if (!holding && tick - phaseStart >= 6u)
++            {
++                queue.pop_front();
++                phaseStart = queue.empty() ? 0u : tick;
++                holding = true;
++                if (queue.empty())
++                {
++                    return;
++                }
++            }
++            if (holding && queue.front() != 0u)
++            {
++                setButton(state, queue.front(), true);
++            }
++        }
++
++        void applyAutoPress(PadInputState &state, int port, PS2Runtime *runtime)
++        {
++            if (port == 0)
++            {
++                applyPadFile(state, runtime);
++            }
+             const std::vector<AutoPress> &presses = autoPresses();
+             if (presses.empty() || port != 0)
+             {
+@@ -382,7 +459,7 @@ namespace ps2_stubs
+                     applyGamepadState(state);
+                     applyKeyboardState(state, portState.analogMode);
+                 }
+-                applyAutoPress(state, port);
++                applyAutoPress(state, port, runtime);
+             }
+ 
+             fillPadStatus(outData, state, portState);
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 9f37aac..3b2b076 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -479,7 +479,29 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+         const char *value = std::getenv("HL_FRAME_DUMP");
+         return value != nullptr ? std::strtoull(value, nullptr, 10) : 0ull;
+     }();
+-    if (s_frameDumpEvery != 0u && currentTick % s_frameDumpEvery == 0u)
++    // and a file named hl_shot in the working directory asks for one dump now (it is removed once written)
++    static uint64_t s_lastShotCheck = 0u;
++    bool shotRequested = false;
++    if (currentTick != s_lastShotCheck)
++    {
++        s_lastShotCheck = currentTick;
++        shotRequested = std::filesystem::exists("hl_shot");
++        if (shotRequested)
++        {
++            std::filesystem::remove("hl_shot");
++        }
++        // and hl_ram asks for the 32 MB of EE RAM in hl_frames/ram_<tick>.bin
++        if (std::filesystem::exists("hl_ram"))
++        {
++            std::filesystem::remove("hl_ram");
++            std::filesystem::create_directories("hl_frames");
++            char name[64]{};
++            std::snprintf(name, sizeof(name), "hl_frames/ram_%06llu.bin", static_cast<unsigned long long>(currentTick));
++            std::ofstream(name, std::ios::binary).write(reinterpret_cast<const char *>(rt->memory().getRDRAM()), PS2_RAM_SIZE);
++            std::cerr << "[hl_ram] " << name << std::endl;
++        }
++    }
++    if (shotRequested || (s_frameDumpEvery != 0u && currentTick % s_frameDumpEvery == 0u))
+     {
+         std::filesystem::create_directories("hl_frames");
+         char name[64]{};

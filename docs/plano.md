@@ -168,6 +168,7 @@ Notas da investigação (para referência):
 | `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
 | `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
 | `HL_FLOAT_LOG=1` | a cada 300 vsyncs, quantas diferenças de float PS2 × IEEE houve (expoente 255, divisão por zero, comparação, arredondamento do CVT.W.S, DIV/SQRT do VU0) e em que ponto do executável (deslocamento a partir de `__executable_start`, `addr2line`) (0024) |
+| arquivos `hl_shot`, `hl_ram`, `hl_pad` | criados no diretório de execução enquanto o jogo roda (o runtime lê e apaga): `hl_shot` grava um quadro como o `HL_FRAME_DUMP`; `hl_ram` grava os 32 MB da RAM do EE em `hl_frames/ram_<tick>.bin`; `hl_pad` com botões (`UP UP CROSS`, `WAIT` = pausa) aperta cada um por 6 vsyncs e solta por 6 (0026) |
 
 Depurar com gdb: `rdram = $rdi`, `ctx = $rsi`, `r[n]` em `$rsi+n*16`, `pc` em `$rsi+512`; rodar sob gdb (ptrace_scope
 bloqueia attach), interromper com `pkill -INT -x ps2EntryRunner`. Watchpoint de hardware em `$rdi+endereço` acha quem
@@ -182,7 +183,7 @@ antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
 0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
 bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
-segura interrupções e trocas de thread;
+segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`;
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
