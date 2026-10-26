@@ -183,7 +183,7 @@ antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
 0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
 bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
-segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`;
+segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes);
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
@@ -216,7 +216,7 @@ Depois disso:
   em vez de truncar (215 funções), `VDIV` por zero dá 0 (no PS2, ±máximo), `VSQRT` usa `max(0,x)` (no PS2, `|x|`),
   `VRSQRT` ignora `fs`. Os 29 div0 no início do título vêm da câmera montada antes de o jogo preencher os campos.
 - A imagem sai com 512 de largura numa janela de 640 (faixa preta à direita).
-- O vsync é de 60 Hz, mas o jogo é PAL (50 Hz).
+- ~~O vsync é de 60 Hz, mas o jogo é PAL~~: feito no 0027 (50 Hz quando o jogo pede PAL).
 - Os `(null)` dos menus.
 - Áudio: SPU2 do ARMSX2 (ver Decisões).
 - Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
