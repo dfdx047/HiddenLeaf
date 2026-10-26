@@ -1,0 +1,173 @@
+diff --git a/ps2xRecomp/src/lib/code_generator.cpp b/ps2xRecomp/src/lib/code_generator.cpp
+index 058dba8..b8eed92 100644
+--- a/ps2xRecomp/src/lib/code_generator.cpp
++++ b/ps2xRecomp/src/lib/code_generator.cpp
+@@ -224,11 +224,13 @@ namespace ps2recomp
+     CodeGenerator::~CodeGenerator() = default;
+ 
+     // vf0 is hardwired to (0,0,0,1): a write to it (lqc2 $vf0 when the SDK restores the VU0 state, an op with fd = 0)
+-    // is lost on the PS2, so the value is put back right after it
++    // is lost on the PS2, so the value is put back right after it. vi0 is hardwired to 0 the same way.
+     static std::string keepVf0(std::string code)
+     {
+         if (code.find("ctx->vu0_vf[0] =") != std::string::npos)
+             code += " ctx->vu0_vf[0] = _mm_set_ps(1.0f, 0.0f, 0.0f, 0.0f);";
++        if (code.find("ctx->vi[0] =") != std::string::npos)
++            code += " ctx->vi[0] = 0;";
+         return code;
+     }
+ 
+diff --git a/ps2xRecomp/src/lib/vu_translation_helpers.cpp b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+index 509fd07..1b7bd51 100644
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -765,68 +765,66 @@ namespace ps2recomp
+                            inst.rt, inst.rt);
+     }
+ 
++    // VLQI/VSQI/VLQD/VSQD move a quadword between a VF register and the VU0 data memory (4 KB, 256 quadwords; the VI
++    // register holds a quadword index, wrapped to the memory), and step the VI register after (I) or before (D).
++    // VLQx ft, (is): ft = bits 16-20, is = bits 11-15. VSQx fs, (it): fs = bits 11-15, it = bits 16-20.
++    static std::string vu0DataAddress(int vi)
++    {
++        return fmt::format("(((uint32_t)ctx->vi[{}] & 0xFFu) << 4)", vi);
++    }
++
++    static std::string vu0StepVi(int vi, int delta)
++    {
++        // vi0 is hardwired to 0 (and put back after every instruction anyway)
++        return vi == 0 ? std::string() : fmt::format("ctx->vi[{}] = (uint16_t)(ctx->vi[{}] + ({})); ", vi, vi, delta);
++    }
++
++    static std::string vu0Mask(uint8_t dest)
++    {
++        return fmt::format("_mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))", (dest & 0x1) ? -1 : 0, (dest & 0x2) ? -1 : 0,
++                           (dest & 0x4) ? -1 : 0, (dest & 0x8) ? -1 : 0);
++    }
++
++    static std::string vu0Load(const Instruction &inst, int step)
++    {
++        const int ft = inst.rt, is = inst.rd;
++        const uint8_t dest = inst.vectorInfo.vectorField;
++        return fmt::format("{{ {}uint8_t *vu0d = runtime->memory().getVU0Data(); "
++                           "__m128 res = _mm_castsi128_ps(_mm_loadu_si128(reinterpret_cast<const __m128i *>(vu0d + {}))); "
++                           "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, {}); {}}}",
++                           step < 0 ? vu0StepVi(is, -1) : "", vu0DataAddress(is), ft, ft, vu0Mask(dest),
++                           step > 0 ? vu0StepVi(is, 1) : "");
++    }
++
++    static std::string vu0Store(const Instruction &inst, int step)
++    {
++        const int fs = inst.rd, it = inst.rt;
++        const uint8_t dest = inst.vectorInfo.vectorField;
++        return fmt::format("{{ {}uint8_t *vu0d = runtime->memory().getVU0Data(); __m128i *slot = reinterpret_cast<__m128i *>(vu0d + {}); "
++                           "__m128 res = _mm_blendv_ps(_mm_castsi128_ps(_mm_loadu_si128(slot)), ctx->vu0_vf[{}], {}); "
++                           "_mm_storeu_si128(slot, _mm_castps_si128(res)); {}}}",
++                           step < 0 ? vu0StepVi(it, -1) : "", vu0DataAddress(it), fs, vu0Mask(dest),
++                           step > 0 ? vu0StepVi(it, 1) : "");
++    }
++
+     std::string CodeGenerator::translateVU_VLQI(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128 res = _mm_castsi128_ps(READ128(addr)); "
+-                           "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+-                           "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); "
+-                           "ctx->vi[{}] = (ctx->vi[{}] + 1) & 0x3FF; }}",
+-                           vis,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           inst.rt, inst.rt,
+-                           vis, vis);
++        return vu0Load(inst, 1);
+     }
+ 
+     std::string CodeGenerator::translateVU_VSQI(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128i old_val = READ128(addr); "
+-                           "__m128 res = _mm_blendv_ps(_mm_castsi128_ps(old_val), ctx->vu0_vf[{}], _mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))); "
+-                           "WRITE128(addr, _mm_castps_si128(res)); "
+-                           "ctx->vi[{}] = (ctx->vi[{}] + 1) & 0x3FF; }}",
+-                           vis,
+-                           inst.rt,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           vis, vis);
++        return vu0Store(inst, 1);
+     }
+ 
+     std::string CodeGenerator::translateVU_VLQD(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ ctx->vi[{}] = (ctx->vi[{}] - 1) & 0x3FF; "
+-                           "uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128 res = _mm_castsi128_ps(READ128(addr)); "
+-                           "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+-                           "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+-                           vis, vis,
+-                           vis,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           inst.rt, inst.rt);
++        return vu0Load(inst, -1);
+     }
+ 
+     std::string CodeGenerator::translateVU_VSQD(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ ctx->vi[{}] = (ctx->vi[{}] - 1) & 0x3FF; "
+-                           "uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128i old_val = READ128(addr); "
+-                           "__m128 res = _mm_blendv_ps(_mm_castsi128_ps(old_val), ctx->vu0_vf[{}], _mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))); "
+-                           "WRITE128(addr, _mm_castps_si128(res)); }}",
+-                           vis, vis,
+-                           vis,
+-                           inst.rt,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0);
++        return vu0Store(inst, -1);
+     }
+ 
+     std::string CodeGenerator::translateVU_VRGET(const Instruction &inst)
+diff --git a/ps2xTest/src/code_generator_tests.cpp b/ps2xTest/src/code_generator_tests.cpp
+index 463b6cf..990df82 100644
+--- a/ps2xTest/src/code_generator_tests.cpp
++++ b/ps2xTest/src/code_generator_tests.cpp
+@@ -1464,6 +1464,30 @@ void register_code_generator_tests()
+             t.IsTrue(out.find("ctx->vi[20]") == std::string::npos, "S2 VLQI must not use rs(format) as VI index");
+         });
+ 
++        tc.Run("VU0 S2 VSQI stores fs (rd) at the VI in it (rt), in VU0 data memory", [](TestCase &t) {
++            // vsqi.xyzw $vf0, ($vi1++) (0x4be1037d): fs = 0, it = 1
++            Instruction inst{};
++            inst.opcode = OPCODE_COP2;
++            inst.rs = COP2_CO | 0xF;
++            inst.rt = 1;
++            inst.rd = 0;
++            inst.function = 0x3D;
++            inst.vectorInfo.vectorField = 0xF;
++
++            uint32_t upper = (VU0_S2_VSQI >> 2) & 0x1F;
++            uint32_t lower = VU0_S2_VSQI & 0x3;
++            inst.raw = (upper << 6) | lower;
++
++            CodeGenerator gen({}, {});
++            std::string out = gen.translateInstruction(inst);
++
++            t.IsTrue(out.find("ctx->vu0_vf[0]") != std::string::npos, "S2 VSQI source VF should come from rd");
++            t.IsTrue(out.find("ctx->vi[1] = (uint16_t)(ctx->vi[1] + (1))") != std::string::npos, "S2 VSQI should step the VI in rt");
++            t.IsTrue(out.find("ctx->vu0_vf[1]") == std::string::npos, "S2 VSQI must not store rt as the VF");
++            t.IsTrue(out.find("getVU0Data()") != std::string::npos, "S2 VSQI should store into VU0 data memory");
++            t.IsTrue(out.find("ctx->vi[0] = (uint16_t)") == std::string::npos, "S2 VSQI must not step vi0");
++        });
++
+         tc.Run("JAL to known function emits call and check", [](TestCase &t) {
+             Function func;
+             func.name = "jal_test";
