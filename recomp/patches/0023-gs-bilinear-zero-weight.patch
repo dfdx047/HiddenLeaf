@@ -1,0 +1,24 @@
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index 5b5c07c..c39d8f9 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -1130,10 +1130,16 @@ uint32_t GSCpuBackend::SampleTexture(const GSDrawState &state, float s, float t,
+     const float fx = sampleU - static_cast<float>(u0);
+     const float fy = sampleV - static_cast<float>(v0);
+ 
++    // Hidden Leaf: a texel with weight 0 does not change the result, so it is not read; a 1:1 blit (texel centres
++    // on pixel centres, as UN5's frame copy) reads one texel instead of four
+     const uint32_t c00 = samplePoint(u0, v0);
+-    const uint32_t c10 = samplePoint(u1, v0);
+-    const uint32_t c01 = samplePoint(u0, v1);
+-    const uint32_t c11 = samplePoint(u1, v1);
++    if (fx == 0.0f && fy == 0.0f)
++    {
++        return c00;
++    }
++    const uint32_t c10 = fx != 0.0f ? samplePoint(u1, v0) : c00;
++    const uint32_t c01 = fy != 0.0f ? samplePoint(u0, v1) : c00;
++    const uint32_t c11 = fx == 0.0f ? c01 : (fy == 0.0f ? c10 : samplePoint(u1, v1));
+ 
+     const uint8_t r = lerpChannel(static_cast<uint8_t>(c00 & 0xFFu),
+                                   static_cast<uint8_t>(c10 & 0xFFu),
