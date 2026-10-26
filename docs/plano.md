@@ -69,8 +69,8 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 
 - Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE e
   CyberConnect2) → carga do `DATA.CVM` → `\PSS\NARUTO10.PSS` (o "10th") → abertura em anime `\PSS\OPENING.PSS` →
-  **tela de título, que não é desenhada** (ver "Tela de título" abaixo) → sem START, volta ao `NARUTO10.PSS` (modo
-  de atração). Tudo com imagem certa até aí, sem áudio.
+  **tela de título com a cena 3D** (a abertura em tempo real do Naruto no manto da Kyuubi, desde o patch 0025; ver
+  "Tela de título" abaixo) → sem START, volta ao `NARUTO10.PSS` (modo de atração). Sem áudio.
 - Numa execução de 2026-10-25 (`build/runs/run_2315.log`) o jogo carregou o **`BTL.BIN`** (`[un5] overlay btl (id 1)
   resident`) e mostrou os menus em janela ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…",
   "Return to title screen?") e depois voltou ao "10th". O log só tem `HL_AUTOPRESS` com CROSS aos 15 s, então ou
@@ -91,10 +91,23 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
-### Tela de título (2026-10-26): o que já se sabe
+### Tela de título (2026-10-26): resolvido pelo patch 0025
 
-Sintoma: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a tela
-fica no último quadro do filme. Igual com a abertura pulada por START e com ela terminando sozinha (vsync ~6500).
+Sintoma era: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a
+tela fica no último quadro do filme.
+
+**Causa:** o escalonador do runtime ignorava o `Status.EIE`, então trocava de thread (interrupção, fatia de tempo)
+dentro das regiões entre `DI` e `EI` do jogo. O heap do jogo (`0x118640`, lista livre em `0x618250`, entradas
+`0x1176c0`/`0x1178e0`/`0x117c70`) se protege só com `DI` (`0x168b60`/`0x168bb0`); com threads entrando no meio dele
+(retomadas em `0x1186cc` com pilhas de threads diferentes), saíram blocos sobrepostos: a câmera do título
+(`0xbd5a40`, 0x2c0 bytes, criada por `0x10a360` ← `0x21a160`) caiu em cima da lista de tags DMA (REF, 0x100 × 16
+bytes em `0xbd5a80`) que a troca de modo de vídeo (`0x1058f0` → `0x102220` → `0x1037a0`) aloca a cada cena. A lista
+sobrescrevia as matrizes da câmera (`+0x40`, `+0x100`, `+0x140` com `0x30000080`…), a divisão de perspectiva
+(`0x10ae58`, em `sub_0010A6B0`) dividia por zero e nada passava do recorte, então o VIF1 só recebia o `MPG` e nunca o
+`MSCAL`. Com o `DI` respeitado (0025), a cena aparece. Itens 0 e 1 do "Falta" foram feitos antes (0021–0023, carga do
+`title.ccs` conferida: o trecho descomprimido bate 100 % com o arquivo).
+
+Notas da investigação (para referência):
 
 - **Sequência no log** (`HL_CD_LOG=1`), logo depois do fim/pulo da abertura: 7 leituras do `DATA.CVM` (`lbn 0x131ffd`
   a `0x1320bd`, 0x20 setores cada, ~388 KB, em anel de 4 × 64 KB em `0xbee700`/`0xbfe700`/`0xc0e700`/`0xc1e700`;
@@ -135,8 +148,8 @@ fica no último quadro do filme. Igual com a abertura pulada por START e com ela
 
 ### Gráficos (o que já funciona)
 
-- O jogo usa a cadeia DMA do VIF1 (CHCR 0x145, TTE=1), PATH2 DIRECT/DIRECTHL; os filmes e os menus não usam o VU1 (o
-  título sobe microcódigo com `MPG`, mas nunca chama). Por quadro: texturas
+- O jogo usa a cadeia DMA do VIF1 (CHCR 0x145, TTE=1), PATH2 DIRECT/DIRECTHL; os filmes e os menus não usam o VU1 (a
+  cena 3D do título usa, desde o 0025). Por quadro: texturas
   (512x512 PSMT8 dbp 0x3c00 + CLUT 0x3be0, 256x256 T4 dbp 0x3800), contexto (FRAME_1 fbp 0, ALPHA_1=0x44) e o blit final
   (8 sprites de 64 px, tbp 0 → FRAME_2 fbp 0x70). DISPFB1 = 0x1070 (fbp 0x70, 512 de largura, CT32).
 - Patch 0011 corrige o VIF1: o IMAGE que fica devendo dados é completado pelo próximo DIRECT, não pelos bytes crus.
@@ -154,6 +167,7 @@ fica no último quadro do filme. Igual com a abertura pulada por START e com ela
 | `HL_AUTOPRESS="15:CROSS,140:START"` | aperta botões sozinho (segundos desde a 1ª leitura do controle:botão, 0,25 s cada) (0014) |
 | `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
 | `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
+| `HL_FLOAT_LOG=1` | a cada 300 vsyncs, quantas diferenças de float PS2 × IEEE houve (expoente 255, divisão por zero, comparação, arredondamento do CVT.W.S, DIV/SQRT do VU0) e em que ponto do executável (deslocamento a partir de `__executable_start`, `addr2line`) (0024) |
 
 Depurar com gdb: `rdram = $rdi`, `ctx = $rsi`, `r[n]` em `$rsi+n*16`, `pc` em `$rsi+512`; rodar sob gdb (ptrace_scope
 bloqueia attach), interromper com `pkill -INT -x ps2EntryRunner`. Watchpoint de hardware em `$rdi+endereço` acha quem
@@ -166,13 +180,15 @@ escreve; watchpoint condicional em `ctx->pc` é lento demais. Patches novos: ger
 pilhas de callback, 0007 leitura de CD do IOP em qualquer RAM, 0008 log de RPC, 0009 trace do IOP, 0010 DMA do SPU2
 antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 0013 vf0 fixo, 0014 HL_AUTOPRESS,
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
-0020 logs de GIF e VIF com atraso;
+0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
+bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
+segura interrupções e trocas de thread;
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
 ### Falta
 
-**Próximo, nesta ordem** (combinado com o desenvolvedor em 2026-10-26):
+**Feito em 2026-10-26** (a lista abaixo fica como registro; o 2 explicou, ver "Tela de título"):
 
 0. **Velocidade primeiro.** 1000 vsyncs levando minutos é lento demais. `perf record -g` por 30 s na tela de título e
    dizer onde está o tempo (logs ligados? lookup de função lento? GS? IOP?). Corrigir o que for barato antes de
@@ -192,6 +208,14 @@ pede para criar os dados).
 
 Depois disso:
 
+- O menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar os dados).
+- A fatia de tempo do escalonador (`checkpointDue`, `kDefaultTimeSliceCycles`) reveza threads de mesma prioridade; o
+  kernel do PS2 não faz isso. Fica como suspeito se aparecer outra corrida.
+- Semântica de float que o `HL_FLOAT_LOG` mostrou diferente do PS2, sem efeito visível por enquanto: `CVT.W.S` arredonda
+  em vez de truncar (215 funções), `VDIV` por zero dá 0 (no PS2, ±máximo), `VSQRT` usa `max(0,x)` (no PS2, `|x|`),
+  `VRSQRT` ignora `fs`. Os 29 div0 no início do título vêm da câmera montada antes de o jogo preencher os campos.
+- A imagem sai com 512 de largura numa janela de 640 (faixa preta à direita).
+- O vsync é de 60 Hz, mas o jogo é PAL (50 Hz).
 - Os `(null)` dos menus.
 - Áudio: SPU2 do ARMSX2 (ver Decisões).
 - Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
