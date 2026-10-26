@@ -13,6 +13,9 @@ object KnownVersions {
     const val BASE_ELF = "SLES_556.05"
     const val BASE_ELF_SHA256 = "20a43677397731a2a20899336d1165ace5b436906b9b89be90fb10f4558dd19d"
 
+    /** The whole European ISO as Redump lists it (1926234112 bytes): a base that does not match is not imported. */
+    const val BASE_ISO_SHA1 = "50eedd72f0a8ee95b16c6e4e7a6b259743925012"
+
     /** The European overlays (PRG/, CodeWarrior MWo3 format): their code is in the engine too. */
     val BASE_OVERLAYS = mapOf(
         "PRG/BTL.BIN" to "7e8518da7bd4957af18cb0ababe67f0e9b37c42c6551375201b15997f0a3dfe3",

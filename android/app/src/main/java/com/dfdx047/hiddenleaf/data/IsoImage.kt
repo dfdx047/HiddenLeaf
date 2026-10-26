@@ -26,6 +26,9 @@ class IsoImage(private val channel: FileChannel) : Closeable {
         walk(lba, size, "", 0)
     }
 
+    /** The size of the image file in bytes. */
+    val length: Long get() = channel.size()
+
     fun find(path: String): Entry? = files.firstOrNull { it.path.equals(path, ignoreCase = true) }
 
     fun read(offset: Long, length: Int): ByteArray {

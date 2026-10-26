@@ -32,7 +32,8 @@ sealed interface InstallState {
  *     the address (iso_uri.txt); the engine reads the big archives (DATA/DATA.CVM, the AFS files) from it;
  *  2. the boot program and the overlays are checked by SHA-256 against the release the engine was recompiled from:
  *     the engine's code is that program, so another one cannot run. An image of a mod (Ultimate Ninja 6, the
- *     Brazilian version) is recognised and the player is told to import it on the Mods page instead;
+ *     Brazilian version) is recognised and the player is told to import it on the Mods page instead. Then the
+ *     whole image is checked by SHA-1 against Redump's dump, so a damaged or patched file elsewhere is caught too;
  *  3. only the small files are copied (SYSTEM.CNF, the ELF, PRG/, MODULES/, the small DATA/ .BIN files) to runtime/data/.
  */
 class GameDataInstaller(
@@ -95,7 +96,7 @@ class GameDataInstaller(
     private suspend fun verify(iso: IsoImage, report: (InstallState.Working) -> Unit) {
         val boot = bootName(iso) ?: throw Stop(context.getString(R.string.err_not_ps2))
         val elf = iso.find(boot) ?: throw Stop(context.getString(R.string.err_not_ps2))
-        report(InstallState.Working(context.getString(R.string.step_checking), 0.3f, context.getString(R.string.detail_checksums)))
+        report(InstallState.Working(context.getString(R.string.step_checking), 0.05f, context.getString(R.string.detail_checksums)))
         coroutineContext.ensureActive()
         val elfSha = sha256(iso, elf)
         KnownVersions.modByElf(elfSha)?.let { throw Stop(context.getString(R.string.err_is_mod, it.name)) }
@@ -110,8 +111,13 @@ class GameDataInstaller(
             val e = iso.find(path) ?: throw Stop(context.getString(R.string.err_missing_file, path))
             if (sha256(iso, e) != want) throw Stop(context.getString(R.string.err_base_modified))
             i++
-            report(InstallState.Working(context.getString(R.string.step_checking), 0.3f + 0.7f * i / KnownVersions.BASE_OVERLAYS.size, path))
+            report(InstallState.Working(context.getString(R.string.step_checking), 0.05f + 0.1f * i / KnownVersions.BASE_OVERLAYS.size, path))
         }
+        // the program is the right one; the rest of the disc (the data, the IOP modules) has to be Redump's dump
+        val sha1 = imageSha1(iso) { percent ->
+            report(InstallState.Working(context.getString(R.string.step_checking), 0.15f + 0.85f * percent / 100, context.getString(R.string.detail_image_checksum, percent)))
+        }
+        if (sha1 != KnownVersions.BASE_ISO_SHA1) throw Stop(context.getString(R.string.err_base_not_redump, sha1, KnownVersions.BASE_ISO_SHA1))
     }
 
     private suspend fun copyBoot(iso: IsoImage, report: (InstallState.Working) -> Unit): InstallState.Installed {
@@ -169,6 +175,29 @@ class GameDataInstaller(
                 md.update(buf.array(), 0, buf.limit())
                 pos += buf.limit()
                 left -= buf.limit()
+            }
+            return md.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        /** SHA-1 of the whole image file, with [progress] in percent. */
+        suspend fun imageSha1(iso: IsoImage, progress: (Int) -> Unit): String {
+            val md = MessageDigest.getInstance("SHA-1")
+            val buf = ByteBuffer.allocate(4 shl 20)
+            val total = iso.length
+            var pos = 0L
+            var shown = -1
+            while (pos < total) {
+                coroutineContext.ensureActive()
+                buf.clear()
+                buf.limit(minOf(total - pos, buf.capacity().toLong()).toInt())
+                iso.readInto(pos, buf)
+                md.update(buf.array(), 0, buf.limit())
+                pos += buf.limit()
+                val percent = (pos * 100 / total).toInt()
+                if (percent != shown) {
+                    shown = percent
+                    progress(percent)
+                }
             }
             return md.digest().joinToString("") { "%02x".format(it) }
         }
