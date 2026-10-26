@@ -63,27 +63,18 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 - [ ] Widescreen: procurar patch 16:9 da comunidade (pnach) e aplicar no runtime.
 - [ ] 60 fps: o jogo europeu é PAL (25/50); o A35 já é NTSC. Preferir quadros intermediários no renderizador.
 
-## Estado do boot (2026-10-25, branch `lab/data-cvm-boot`)
+## Estado do boot (2026-10-26, branch `lab/data-cvm-boot`)
 
 ### Onde o jogo está
 
 - Boot → **tela de idioma** (✕ escolhe ENGLISH) → logo da BANDAI NAMCO → filme `\PSS\LOGO_C.PSS` (CRIWARE e
   CyberConnect2) → carga do `DATA.CVM` → `\PSS\NARUTO10.PSS` (o "10th") → abertura em anime `\PSS\OPENING.PSS` →
-  tela de título → (START) carrega o **`BTL.BIN`** (`[un5] overlay btl (id 1) resident`) e mostra os menus em janela
-  ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…", "Return to title screen?"). Tudo com imagem
-  certa, sem áudio.
-- **A tela de título não é desenhada** (com a abertura pulada por START ou terminando sozinha por volta do vsync 6500):
-  o jogo lê ~388 KB do `DATA.CVM` (`lbn 0x131ffd`, em anel de 4 × 64 KB em `0xbee700`, parece arquivo comprimido),
-  toca o som do título (`SOUND.AFS` de `lbn 0x100004` a `0x10013c`, 3 buffers em `0x63ad40`) e, ~1000 vsyncs depois,
-  volta ao `NARUTO10.PSS` (modo de atração). Enquanto isso a tela fica no último quadro do filme. A cadeia DMA do
-  título (13 tags, 0x2c48 bytes) é: 8 × `MPG` (microcódigo do VU1 em 0x300–0x791, sem `MSCAL`), `BASE`/`OFFSET`/
-  `MSKPATH3`, o blit final (`DIRECTHL` 0x33 qwords) e as 8 camadas da lista de desenho, cada uma só com
-  `FLUSHA` + `DIRECT` de `SCISSOR_1`: **nenhum objeto entra nas camadas**. O VIF e o GS fazem o que recebem; o
-  problema é do lado do jogo. É a primeira cena 3D (CCS) do boot (filmes e menus são 2D). Suspeitas: o `title.ccs`
-  (tabela de cena em `0x5c78a0`, tratadores de estado `0x1e47d4`/`0x1e4854`/`0x1e48d4` sobre o objeto em `+0x1c`)
-  carregado errado, ou o recorte de visibilidade descartando tudo (contas do VU0).
-- No ritmo atual (~10–12 vsyncs/s com dumps) a abertura leva ~9 min; `HL_AUTOPRESS="15:CROSS,130:START"` cai no meio
-  dela e pula para o título.
+  **tela de título, que não é desenhada** (ver "Tela de título" abaixo) → sem START, volta ao `NARUTO10.PSS` (modo
+  de atração). Tudo com imagem certa até aí, sem áudio.
+- Numa execução de 2026-10-25 (`build/runs/run_2315.log`) o jogo carregou o **`BTL.BIN`** (`[un5] overlay btl (id 1)
+  resident`) e mostrou os menus em janela ("No Naruto Shippuden: Ultimate Ninja 5 data found on memory card…",
+  "Return to title screen?") e depois voltou ao "10th". O log só tem `HL_AUTOPRESS` com CROSS aos 15 s, então ou
+  houve tecla na janela, ou entrada fantasma. Não reproduzido em 2026-10-26: o START só foi apertado na abertura.
 - Nos menus aparecem `(null)` em volta de "Yes": provavelmente ícones de botão que o texto procura por nome.
 - gp = `0x617ef0`. Laço principal `0x1C5DA0`; tarefas = threads (8 = sequência de boot `0x1E6B20`, 13 = loader).
 - **Filmes (libmpeg da Sony, stubs do runtime em `Stubs/MPEG.cpp`).** Thread de stream `sub_00104020` (lê o CD em
@@ -100,9 +91,52 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
+### Tela de título (2026-10-26): o que já se sabe
+
+Sintoma: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a tela
+fica no último quadro do filme. Igual com a abertura pulada por START e com ela terminando sozinha (vsync ~6500).
+
+- **Sequência no log** (`HL_CD_LOG=1`), logo depois do fim/pulo da abertura: 7 leituras do `DATA.CVM` (`lbn 0x131ffd`
+  a `0x1320bd`, 0x20 setores cada, ~388 KB, em anel de 4 × 64 KB em `0xbee700`/`0xbfe700`/`0xc0e700`/`0xc1e700`;
+  parece arquivo comprimido sendo lido em pedaços, provavelmente o `title.ccs`); depois o som do título do
+  `SOUND.AFS` (`lbn 0x100004` a `0x10013c`, pedaços de 0xe/0xb setores em 3 buffers `0x63ad40`/`0x641d40`/`0x648d40`,
+  um a cada ~60 vsyncs); quando o som acaba, ~500 vsyncs depois, `NARUTO10.PSS`. Toda leitura sai de `ra 0x141338`.
+  Nenhum erro, nenhum overlay carregado.
+- **GS** (`HL_GIF_LOG=3000@145`, decodificado com `tools/gifdec.py`): por quadro, 8 pacotes só com
+  `SCISSOR_1=0x1bf000001ff0000` (as 8 camadas, vazias) e o blit final (`TEX0_2=0x268020000`, `FRAME_2` fbp 0x70, 8
+  sprites de tbp 0). Nenhuma primitiva da cena, nenhuma textura nova. A VRAM e os dois contextos (`HL_FRAME_DUMP`)
+  só têm o último quadro do filme.
+- **VIF1** (`HL_VIF_LOG=400@150`, `HL_DMA_LOG=1`): a cadeia do título tem 13 tags e 0x2c48 bytes (pacotes alternando
+  em `0x938b90`/`0x938bf0`): 8 × `MPG` (op 0x4a, microcódigo do VU1 em 0x300–0x791, num 0x5c…0xfc), `BASE` (0x03),
+  `OFFSET` 0x200 (0x02), `MSKPATH3` (0x13), `DIRECTHL` 0x33 qwords (o blit), e 8 × (`FLUSHA` 0x11 + `DIRECT` 2 qwords,
+  o `SCISSOR_1`). **Nunca há `MSCAL` nem `UNPACK`**: o VU1 recebe o programa, mas nada para desenhar. O runtime tem
+  interpretador de VU1 (`ps2_vu1_core.cpp`, XGKICK), então se o jogo mandasse, seria executado.
+- **Threads** (`HL_EE_DUMP=1`): todas esperando no escalonador de tarefas do jogo (`pc 0x15e9c8`, `ra 0x1d55ec` ou
+  `0x1d523c`); a 8 (sequência de boot `0x1E6B20`) também. Nada travado; o EE fica ocioso.
+- **Código do título:** a string `title.ccs` está em `0x5c78a0` (outra em `0x3e8f90`, lista de `.ccs`); logo depois,
+  em `0x5c78b0`, a tabela de saltos de `0x1e4790` (`switch` de 7 estados sobre `a1`; `a0` = objeto da cena):
+  `0x1e47d4` e `0x1e4854` tocam a animação `+0x20`/`+0x24` do objeto CCS em `+0x1c` (`0x1be060`, `0x1bf9a0`,
+  `0x1bfeb0`, `0x1c0680`, `0x1c0550`), `0x1e48d4` idem pelo quadro em `+0x90→+0xc` (`0x1bfd70`); `0x1e494c` = nada.
+  Grava o estado em `+0x18`. As tabelas em `0x5c78e0`… (`0x1e5354`…) e `0x5c7940`… (`0x1e6554`…) parecem ser os
+  `switch` da sequência de boot. Strings `ANM_title_menu01` em `0x417bf4`.
+- **`DATA.CVM`:** cabeçalho `CVMH` com `ROFSROFSBLD`; o volume ISO dentro dele não está em claro em 0x1800/0x9800
+  (provavelmente cifrado). `un5.py` ainda não lê o CVM: o teste 1 abaixo precisa disso.
+- **Velocidade:** ~10–12 vsyncs/s (2130 vsyncs em 170 s com `HL_FRAME_DUMP=30`; 6840 em 720 s com 120). A abertura
+  leva ~9 min; `HL_AUTOPRESS="15:CROSS,130:START"` cai no meio dela e pula para o título (~vsync 1750). Ainda sem
+  perf.
+- **Execuções guardadas** em `build/runs/` (ignorado): `run_long.log` (START aos 130 s, 10 min), `run_dma.log`
+  (+ `HL_DMA_LOG`/`HL_EE_DUMP`), `run_gif.log` + `hl_gif_title.bin` (pacotes GIF do título), `run_cd.log`
+  (+ `HL_CD_LOG`/`HL_RPC_LOG`), `run_vif.log` (VIF1 do título), `run_nat12.log`/`run_nat20.log` (abertura até o fim,
+  12 e 20 min), e os quadros em `hl_frames_run1…8`.
+- Rodar sem o `build.sh` (o executável já compilado; `hl_frames/` e `hl_gif.bin` saem no diretório atual):
+  `cd build/disc && HL_AUTOPRESS="15:CROSS,130:START" HL_FRAME_DUMP=60 timeout 190
+  ../PS2Recomp/build-rt/ps2xRuntime/ps2EntryRunner SLES_556.05 > ../run.log 2>&1`. Mudança só no runtime:
+  `cmake --build build/PS2Recomp/build-rt` (segundos); o `build.sh` recopia o código gerado e recompila tudo.
+
 ### Gráficos (o que já funciona)
 
-- O jogo usa só a cadeia DMA do VIF1 (CHCR 0x145, TTE=1), PATH2 DIRECT/DIRECTHL; sem VU1. Por quadro: texturas
+- O jogo usa a cadeia DMA do VIF1 (CHCR 0x145, TTE=1), PATH2 DIRECT/DIRECTHL; os filmes e os menus não usam o VU1 (o
+  título sobe microcódigo com `MPG`, mas nunca chama). Por quadro: texturas
   (512x512 PSMT8 dbp 0x3c00 + CLUT 0x3be0, 256x256 T4 dbp 0x3800), contexto (FRAME_1 fbp 0, ALPHA_1=0x44) e o blit final
   (8 sprites de 64 px, tbp 0 → FRAME_2 fbp 0x70). DISPFB1 = 0x1070 (fbp 0x70, 512 de largura, CT32).
 - Patch 0011 corrige o VIF1: o IMAGE que fica devendo dados é completado pelo próximo DIRECT, não pelos bytes crus.
@@ -138,11 +172,29 @@ overlays (addr+0x40, construtores);
 
 ### Falta
 
-1. A tela de título vazia (ver "Onde o jogo está"): achar por que nenhum objeto da cena entra nas camadas; depois o
-   PNG do título e o menu principal com `HL_AUTOPRESS` (o memory card vazio pede para criar os dados).
-2. Os `(null)` dos menus.
-3. Áudio: SPU2 do ARMSX2 (ver Decisões).
-4. Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
+**Próximo, nesta ordem** (combinado com o desenvolvedor em 2026-10-26):
+
+0. **Velocidade primeiro.** 1000 vsyncs levando minutos é lento demais. `perf record -g` por 30 s na tela de título e
+   dizer onde está o tempo (logs ligados? lookup de função lento? GS? IOP?). Corrigir o que for barato antes de
+   seguir: desligar logs que não estejam atrás de `HL_*_LOG`, cache no resolver de overlay
+   (`recomp/runtime/un5_overlays.cpp`, gancho `0001-overlay-resolver.patch`).
+1. **Carga do `title.ccs`:** logar cada arquivo aberto dentro do `DATA.CVM` (nome, LSN, tamanho no diretório) e
+   quantos bytes cada leitura devolveu. Extrair o arquivo real com `un5.py` (precisa ler o CVM, ver acima) e comparar
+   o hash. Se veio curto ou diferente, o problema é a leitura do CVM/`sceCdRead`.
+2. **NaN/infinito:** contar os NaN/Inf gerados em COP1, VU0 macro e nas `sceVu0*` durante o título, com o endereço de
+   quem gerou. Se aparecerem, aplicar o tratamento do PS2 de forma global no runtime (resultado limitado a ±FLT_MAX,
+   denormal vira 0), não caso a caso.
+3. Se 1 e 2 estiverem limpos: achar a função que põe objetos nas 8 camadas da lista de desenho (watchpoint no
+   ponteiro de escrita da camada) e seguir para trás a condição que impede de pôr.
+
+Parar no primeiro que explicar. Depois: o PNG do título e o menu principal com `HL_AUTOPRESS` (o memory card vazio
+pede para criar os dados).
+
+Depois disso:
+
+- Os `(null)` dos menus.
+- Áudio: SPU2 do ARMSX2 (ver Decisões).
+- Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
 
 ## Teste nos aparelhos
 
