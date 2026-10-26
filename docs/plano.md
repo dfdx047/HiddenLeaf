@@ -105,8 +105,23 @@ tela fica no último quadro do filme.
 relatório (`build/runs/title_2026-10-26.png`, ticks 3536–4689 do `di2.log`) eram do `OPENING.PSS` tocando de novo no
 modo de atração. Com o 0025, o VIF1 recebe a cena **uma vez**: logo depois do START, um quadro sai com 0xc2e40 bytes
 (33 `MSCAL`, 186 `MSCNT`, `UNPACK` V2/V3/V4) e deixa traços escuros da geometria no quadro; todos os outros ficam
-em 0x2c48 bytes (13 tags, só `MPG`, nada para desenhar), como antes do 0025. Próximo passo: por que a cena sai da
-lista depois do primeiro quadro (item 3 do "Falta", e o `HL_FLOAT_LOG` nesse intervalo).
+em 0x2c48 bytes (13 tags, só `MPG`, nada para desenhar), como antes do 0025.
+
+O que se sabe do título depois do 0025 (gdb, 2026-10-26):
+
+- `0x21a160` cria um contexto de desenho (`0xbd8330`) com uma câmera padrão (`0x10a360` → `0x10f4f0`, câmera em
+  `0xbd5a40`, `contexto+0x3c` aponta para ela e nada muda isso depois). `0x10f4f0` monta as matrizes (`0x10dd00`)
+  **antes** de `0x10f640` → `0x10e670` preencher os campos `+0x26c…+0x290`: as matrizes `+0x40`, `+0x100`, `+0x140`
+  saem da sobra do heap (palavras `00c80005 30000080`, da lista de tags DMA liberada que ocupava o bloco) e nunca são
+  refeitas. No PS2 o código é o mesmo; a diferença deve estar no que havia antes nesse bloco (ordem das alocações).
+- `0x10a6b0(objeto, contexto)` usa essa câmera: projeta (0, 0, z, 1) pela matriz `+0x140` e divide por w = 0
+  (`0x10ae58`). Roda 29 vezes em ~1,1 s depois do START e para; são os 29 `div0` do `HL_FLOAT_LOG`.
+- A câmera da cena (`0xb3ec90`, e a cópia `0xbf5260` via `0x1c01b0`) é atualizada todo quadro por `0x1e5740` →
+  `0x10e430` → `0x10dd00`, com campos válidos, mas o desenho não a usa.
+- Rodízio de threads de mesma prioridade desligado (teste): nada muda. Primeiro `GetInfo` = -1: nada muda.
+
+Próximo passo: achar por onde os objetos da cena (câmera `0xb3ec90`) deveriam entrar nas 8 camadas (item 3 do
+"Falta") e se a câmera padrão com lixo é que barra (testar zerando o bloco da câmera em `0x10a360`).
 
 **Causa:** o escalonador do runtime ignorava o `Status.EIE`, então trocava de thread (interrupção, fatia de tempo)
 dentro das regiões entre `DI` e `EI` do jogo. O heap do jogo (`0x118640`, lista livre em `0x618250`, entradas
