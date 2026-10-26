@@ -96,7 +96,30 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
-### Tela de título (2026-10-26): o 0025 corrigiu uma causa, a cena ainda não desenha
+### Tela de título (2026-10-26): desenha desde o 0029, mas a ~1 quadro do jogo por segundo
+
+**Causa (achada comparando com o PCSX2):** o recompilador traduzia `VSQI`/`VSQD` do VU0 com os campos trocados (o VF
+vinha de `it` e o VI de `fs`). `0x19fec0` monta a matriz de mundo de cada objeto da cena (`+0x00`) a partir da local
+(`+0x40`) subindo pelos pais (`+0x80`), com uma pilha na memória de dados do VU0: empilha os nós com
+`vsqi $vf1,($vi1++)` e fecha com `vsqi $vf0,($vi1++)`. Com os campos trocados, o terminador ia para `vi0` (que ainda
+era incrementado), a leitura seguinte pegava um ponteiro velho como pai e a matriz de mundo saía zerada (com
+`8b06af3a` em `+0x30`): os objetos do título não tinham tamanho e nada passava do recorte. O 0029 corrige os campos,
+faz os quatro (`VLQI`/`VSQI`/`VLQD`/`VSQD`) usarem a memória de dados do VU0 (4 KB, não a RAM do EE em `vi*16`) e
+mantém `vi0` em 0 depois de qualquer instrução, como o 0013 faz com o `vf0`.
+
+**Método:** savestate do PCSX2 na tela de título (mesma ISO do Redump; o `.p2s` é um zip, `7z x estado.p2s
+eeMemory.bin`), RAM do recomp gravada com `hl_ram` depois do START, e `tools/ramdiff.py` andando pelas estruturas a
+partir do objeto do título (`*(gp-0x22c)`, raízes com nome no próprio script). Os heaps não têm o mesmo layout (a
+câmera da cena está em `0xb3eca0` no PCSX2 e em `0xb3ec90` no recomp), então a comparação segue os ponteiros dos
+dois lados. A primeira diferença foi `title/30+0` (matriz de mundo: escala 1,075 e posição (-3, 10) no PCSX2, zeros
+no recomp); o watchpoint nela levou a `0x19fec0` ← `0x194390` ← `0x1bff50` ← `0x1e5740`.
+
+**Agora:** a cena do título é desenhada (personagens, logo, "New Game"/"Load Game", fundo), mas o jogo anda a ~1
+quadro por segundo nela: ~85 % do tempo está no rasterizador de software do GS (`GSCpuBackend::DrawTriangle`,
+`SampleTexture`, `LookupCLUT`, `WritePixel`; amostragem com o gdb, sem `perf` instalado), com os triângulos
+texturizados de tela cheia que o VU1 manda. A transição do START (zoom e fade) leva minutos.
+
+### Antes do 0029 (histórico)
 
 Sintoma: a fase do título roda (carrega a cena, toca o som), mas **nenhum objeto entra na lista de desenho**; a
 tela fica no último quadro do filme.
@@ -212,7 +235,7 @@ antes de WaitEventFlag sem thread, 0011 VIF1 DIRECT, 0012 dumps de depuração, 
 0015 GS sem Z com ZTE=0, 0016 ID 0x79 do controle, 0017 callbacks de stream do MPEG, 0018 MADR no fim da cadeia DMA, 0019 fim dos filmes,
 0020 logs de GIF e VIF com atraso, 0021 thread ociosa pula para o próximo evento, 0022 tempo do autoDMA do SPU2, 0023
 bilinear sem texels de peso zero (0021–0023: de ~11 para ~52 vsyncs/s no título), 0024 `HL_FLOAT_LOG`, 0025 `DI`
-segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes), 0028 vblank atrasado não adianta os próximos (sem ele o jogo ficava em ~53/s depois do boot);
+segura interrupções e trocas de thread, 0026 arquivos-gatilho `hl_shot`/`hl_ram`/`hl_pad`, 0027 vblank a 50 Hz com o modo PAL do `sceGsResetGraph`/`SetGsCrt` (também o relógio do stream de CD e o PTS dos filmes), 0028 vblank atrasado não adianta os próximos (sem ele o jogo ficava em ~53/s depois do boot), 0029 `VSQI`/`VSQD` do VU0 com os campos certos e na memória de dados do VU0 (`vi0` fixo; a cena do título passa a desenhar);
 overlays (addr+0x40, construtores);
 `un5.py stubfix` (sceVu0 recompiladas, MPEG por endereço); build com FFmpeg.
 
