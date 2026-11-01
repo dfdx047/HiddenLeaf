@@ -46,7 +46,7 @@ file(GLOB_RECURSE KERNEL_SRC CONFIGURE_DEPENDS "${L}/Kernel/*.cpp")
 add_library(ps2_runtime STATIC
     ${L}/game_overrides.cpp ${L}/gs/ps2_gif_arbiter.cpp ${L}/ps2_audio.cpp ${L}/ps2_audio_vag.cpp ${L}/gs/ps2_gs_memory.cpp
     ${L}/gs/gs_frontend.cpp ${L}/gs/gs_cpu_backend.cpp ${L}/gs/hl_gs_live.cpp ${L}/ps2_iop_host.cpp ${L}/ps2_memory.cpp ${L}/ps2_pad.cpp
-    ${L}/ps2_rom_device.cpp ${L}/ps2_vfs.cpp ${L}/hl_perf.cpp ${L}/ps2_runtime.cpp ${L}/ps2_vif1_interpreter.cpp ${L}/vu/ps2_vu1_core.cpp ${L}/vu/ps2_vu_fast.cpp
+    ${L}/ps2_rom_device.cpp ${L}/ps2_vfs.cpp ${L}/hl_perf.cpp ${L}/hl_vu_worker.cpp ${L}/ps2_runtime.cpp ${L}/ps2_vif1_interpreter.cpp ${L}/vu/ps2_vu1_core.cpp ${L}/vu/ps2_vu_fast.cpp
     ${L}/vu/ps2_vu1_upper.cpp ${L}/vu/ps2_vu1_lower.cpp ${L}/games_database.cpp ${KERNEL_SRC})
 target_include_directories(ps2_runtime PUBLIC "${RT}/include" "${L}/Kernel" "${L}/gs" "${HOST}")
 target_compile_definitions(ps2_runtime PUBLIC PS2X_IOP_RPC_TRACE=0 PS2X_ENABLE_IOP_RPC_TRACE=0)

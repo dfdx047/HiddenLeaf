@@ -1,0 +1,898 @@
+diff --git a/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h b/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
+index 2012083..24f629e 100644
+--- a/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
++++ b/ps2xRuntime/include/runtime/gs/ps2_gif_arbiter.h
+@@ -33,6 +33,7 @@ public:
+     void submit(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl = false);
+ 
+     void drain();
++    void processNow(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes);
+     bool empty() const { return m_queue.empty(); }
+ 
+ private:
+diff --git a/ps2xRuntime/include/runtime/hl_perf.h b/ps2xRuntime/include/runtime/hl_perf.h
+index 3a3c6f4..e9c2bcc 100644
+--- a/ps2xRuntime/include/runtime/hl_perf.h
++++ b/ps2xRuntime/include/runtime/hl_perf.h
+@@ -14,6 +14,7 @@ namespace hl_perf
+         kGifParse,// the runtime's own parse of the GS stream, for its registers
+         kRing,    // writing the stream for PCSX2's GS
+         kWaitGs,  // the game waiting for PCSX2's GS, which is behind
++        kWaitVu,  // the game waiting for the VU worker (hl_vu_worker)
+         kIdle,    // waiting for the next vsync or event: spare time
+         kCount
+     };
+@@ -36,6 +37,19 @@ namespace hl_perf
+         }
+     };
+ 
++    // Time another thread spends waiting for PCSX2's GS on the game's behalf (the VU worker, at a vsync)
++    void addWaitGs(uint64_t ticks);
++    uint64_t ticksNow();
++    struct WorkerWait
++    {
++        uint64_t start = g_on ? ticksNow() : 0u;
++        ~WorkerWait()
++        {
++            if (g_on)
++                addWaitGs(ticksNow() - start);
++        }
++    };
++
+     void startOnGameThread();             // the thread measured; reads HL_PERF
+     void backToEe();                      // at the dispatcher: a thread switch leaves no scope to close
+     void onVsync(uint32_t tick);          // once per guest vsync
+diff --git a/ps2xRuntime/include/runtime/hl_vu_worker.h b/ps2xRuntime/include/runtime/hl_vu_worker.h
+new file mode 100644
+index 0000000..1db58d1
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/hl_vu_worker.h
+@@ -0,0 +1,24 @@
++#pragma once
++// Hidden Leaf (Android): the VIF1 and GIF channels on their own thread (src/lib/hl_vu_worker.cpp).
++#include <cstdint>
++#include <functional>
++#include <vector>
++
++class PS2Memory;
++
++namespace hl_vuworker
++{
++    enum class Kind : uint8_t
++    {
++        Vif1, // a VIF1 transfer, already copied out of the guest's memory
++        Gif,  // a PATH3 transfer, the same
++        Call, // in order with the transfers: a vsync
++    };
++
++    bool enabled();                                 // HL_VUWORKER=0: everything on the game thread
++    bool onWorker();                                // this thread is the worker
++    void post(PS2Memory *memory, Kind kind, std::vector<uint8_t> &&data);
++    void postCall(std::function<void()> call, bool frameEnd);
++    void sync();                                    // back when the worker has done everything posted (no-op on the worker)
++    std::vector<uint8_t> takeBuffer();              // an emptied buffer to fill, with its capacity
++}
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index 39fd9b7..48442b0 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -422,6 +422,7 @@ public:
+     std::vector<PendingTransfer> m_pendingGifTransfers;
+     std::vector<PendingTransfer> m_pendingVif0Transfers;
+     std::vector<PendingTransfer> m_pendingVif1Transfers;
++    std::vector<uint8_t> m_chainSpare;
+     std::mutex m_completedDmacMutex;
+     std::vector<uint32_t> m_completedDmacCauses;
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index a1407ee..cdf820c 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1961,7 +1961,6 @@ void EeScheduler::processDueDeadlines()
+         std::chrono::steady_clock::time_point pacingDeadline{};
+         {
+             std::unique_lock lock(m_eventMutex);
+-            const auto now = std::chrono::steady_clock::now();
+             for (const ScheduledEvent &item : m_deadlines)
+             {
+                 if (item.deadlineCycle <= m_eeCycle &&
+@@ -1978,7 +1977,7 @@ void EeScheduler::processDueDeadlines()
+                 return;
+             }
+ 
+-            if (now < pacingDeadline)
++            if (std::chrono::steady_clock::now() < pacingDeadline)
+             {
+                 hl_perf::Scope idle(hl_perf::kIdle);
+                 m_eventCv.wait_until(lock, pacingDeadline, [this]()
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 8229de6..f91f6c9 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -650,6 +650,57 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
+ 
+ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ {
++#if defined(PS2X_HEADLESS_HOST)
++    // Android: PCSX2 draws from the ring, and this GS only answers the game: what it can see of a packet is SIGNAL, FINISH and
++    // LABEL, always by A+D. Same walk as below, without the vertices (5% of the game thread in a fight).
++    {
++        uint32_t off = 0u;
++        while (off + 16u <= sizeBytes)
++        {
++            const uint64_t lo = loadLE64(data + off), hi = loadLE64(data + off + 8u);
++            off += 16u;
++            const uint32_t nloop = static_cast<uint32_t>(lo & 0x7FFFu);
++            const uint32_t flg = static_cast<uint32_t>((lo >> 58) & 3u);
++            uint32_t nreg = static_cast<uint32_t>((lo >> 60) & 0xFu);
++            if (nreg == 0u)
++                nreg = 16u;
++            if (flg == GIF_FMT_PACKED)
++            {
++                bool anyAd = false;
++                for (uint32_t r = 0u; r < nreg; ++r)
++                    anyAd = anyAd || ((hi >> (r * 4u)) & 0xFu) == 0xEu;
++                const uint64_t bytes = static_cast<uint64_t>(nloop) * nreg * 16u;
++                if (!anyAd)
++                {
++                    if (off + bytes > sizeBytes)
++                        return;
++                    off += static_cast<uint32_t>(bytes);
++                    continue;
++                }
++                for (uint32_t i = 0u; i < nloop * nreg; ++i)
++                {
++                    if (off + 16u > sizeBytes)
++                        return;
++                    if (((hi >> ((i % nreg) * 4u)) & 0xFu) == 0xEu)
++                    {
++                        const uint8_t reg = data[off + 8u];
++                        if (reg == GS_REG_SIGNAL || reg == GS_REG_FINISH || reg == GS_REG_LABEL)
++                        {
++                            std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++                            writeRegisterUnlocked(reg, loadLE64(data + off));
++                        }
++                    }
++                    off += 16u;
++                }
++            }
++            else if (flg == GIF_FMT_REGLIST)
++                off += ((nloop * nreg + 1u) & ~1u) * 8u;
++            else
++                off += nloop * 16u;
++        }
++        return;
++    }
++#endif
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     if (!data || sizeBytes < 16 || !m_backend)
+         return;
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index 4b6a544..2cde527 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_vu_worker.h"
+ #include "runtime/hl_perf.h"
+ // Hidden Leaf: the live GS stream (see runtime/gs/hl_gs_live.h). The protocol is BT3-Recomp's ps2_gs_live.cpp (GPLv3), in turn
+ // from PS2Recomp's gs_dump_writer.cpp, reduced to what one process needs: the ring is plain memory.
+@@ -266,6 +267,7 @@ namespace hl_gslive
+     void writeRegister(uint8_t reg, uint64_t value)
+     {
+         uint64_t packet[4];
++        hl_vuworker::sync();
+         packet[0] = 1ull | (1ull << 15) | (1ull << 60); // NLOOP 1, EOP, PACKED, one register
+         packet[1] = 0xEull;                             // A+D
+         packet[2] = value;
+@@ -277,6 +279,7 @@ namespace hl_gslive
+ 
+     bool readFifo(uint8_t *dst, uint32_t bytes)
+     {
++        hl_vuworker::sync(); // (what the game sent before this is in the worker's queue)
+         const uint32_t qwc = (bytes + 15u) / 16u;
+         if (qwc == 0u)
+             return false;
+@@ -307,20 +310,31 @@ namespace hl_gslive
+         return false;
+     }
+ 
++    // (the registers are read now, on the game thread: the frame that shows is the one the game set at this vsync)
++    static void vsyncCommit(const std::vector<uint8_t> &regsCopy);
+     void vsync(const GSRegisters &regs)
++    {
++        std::vector<uint8_t> copy;
++        {
++            std::lock_guard<std::mutex> lock(s_mutex);
++            snapshot(regs);
++            copy = s_regs;
++        }
++        if (hl_vuworker::enabled() && !hl_vuworker::onWorker())
++            hl_vuworker::postCall([copy = std::move(copy)]() { vsyncCommit(copy); }, true);
++        else
++            vsyncCommit(copy);
++    }
++
++    static void vsyncCommit(const std::vector<uint8_t> &regsCopy)
+     {
+         ps2live::RingHeader *h = nullptr;
+         int64_t target = -1;
+         {
+             std::lock_guard<std::mutex> lock(s_mutex);
+-            snapshot(regs);
++            s_regs = regsCopy;
+             ensureStarted();
+             h = s_ring.load(std::memory_order_relaxed);
+-            if (s_frames % 250u == 0u && std::getenv("HL_GSLIVE_LOG"))
+-                std::fprintf(stderr, "[gslive] vsync %u: pmode %llx smode1 %llx smode2 %llx dispfb1 %llx display1 %llx dispfb2 %llx display2 %llx bg %llx, %lld MB so far\n", s_frames,
+-                             (unsigned long long)regs.pmode, (unsigned long long)regs.smode1, (unsigned long long)regs.smode2, (unsigned long long)regs.dispfb1,
+-                             (unsigned long long)regs.display1, (unsigned long long)regs.dispfb2, (unsigned long long)regs.display2, (unsigned long long)regs.bgcolor,
+-                             (long long)(h->writePos >> 20));
+             writeByte(kTypeRegisters);
+             writeBytes(s_regs.data(), s_regs.size());
+             writeByte(kTypeVSync);
+@@ -340,6 +354,7 @@ namespace hl_gslive
+         }
+         // bounded lag: the game waits until the host has read up to the VSync maxLag frames back
+         hl_perf::Scope waitGs(hl_perf::kWaitGs);
++        hl_perf::WorkerWait workerWait;
+         while (target >= 0 && __atomic_load_n(&h->readPos, __ATOMIC_ACQUIRE) < target)
+         {
+             if (h->consumerQuit)
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index 8e9c2db..a7544e6 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -37,6 +37,17 @@ void GifArbiter::submit(GifPathId pathId, const uint8_t *data, uint32_t sizeByte
+     m_queue.push_back(std::move(pkt));
+ }
+ 
++void GifArbiter::processNow(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
++{
++    if (!data || sizeBytes < 16 || !m_processFn)
++        return;
++#if defined(PS2X_HEADLESS_HOST)
++    hl_gslive::transfer(static_cast<int>(pathId), data, sizeBytes);
++#endif
++    hl_perf::Scope parse(hl_perf::kGifParse);
++    m_processFn(data, sizeBytes);
++}
++
+ void GifArbiter::drain()
+ {
+     if (!m_processFn)
+diff --git a/ps2xRuntime/src/lib/hl_perf.cpp b/ps2xRuntime/src/lib/hl_perf.cpp
+index 037cb73..263ce2e 100644
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -54,13 +54,15 @@ namespace hl_perf
+             uint64_t startTick = 0;
+             uint64_t ticks[kCount] = {};
+             uint64_t gsNs = 0;
++            uint64_t vuNs = 0;
+             uint64_t bytes = 0;
+             uint32_t frames = 0;
+             std::vector<float> frameMs;
+         };
+ 
+-        // CPU time of PCSX2's GS threads ("GS", and "CPU Thread" that feeds it)
+-        uint64_t gsThreadsNs()
++        // CPU time of threads by name (comm with its newline)
++        template <size_t N>
++        uint64_t threadsNs(const char *const (&names)[N])
+         {
+             uint64_t total = 0;
+ #if defined(__linux__)
+@@ -78,7 +80,10 @@ namespace hl_perf
+                     continue;
+                 const bool ok = std::fgets(comm, sizeof(comm), f) != nullptr;
+                 std::fclose(f);
+-                if (!ok || (std::strncmp(comm, "GS\n", 3) != 0 && std::strncmp(comm, "CPU Thread\n", 11) != 0))
++                bool match = false;
++                for (const char *name : names)
++                    match = match || std::strcmp(comm, name) == 0;
++                if (!ok || !match)
+                     continue;
+                 std::snprintf(path, sizeof(path), "/proc/self/task/%s/schedstat", entry->d_name);
+                 f = std::fopen(path, "r");
+@@ -93,6 +98,18 @@ namespace hl_perf
+ #endif
+             return total;
+         }
++        // PCSX2's GS threads ("GS", and "CPU Thread" that feeds it)
++        uint64_t gsThreadsNs()
++        {
++            static const char *const names[] = {"GS\n", "CPU Thread\n"};
++            return threadsNs(names);
++        }
++        // hl_vu_worker: VIF1, VU1, the GIF and the ring, when they are not on the game thread
++        uint64_t vuThreadNs()
++        {
++            static const char *const names[] = {"VuWorker\n"};
++            return threadsNs(names);
++        }
+ 
+         std::mutex s_lineMutex;
+         std::string s_line;
+@@ -103,11 +120,12 @@ namespace hl_perf
+         enum class Phase { Off, Waiting, Warm, Measuring, Done } s_phase = Phase::Off;
+         uint32_t s_from = 0;
+ 
+-        void accumulate(Window &w, const uint64_t *deltaTicks, uint64_t gsNs, uint64_t bytes)
++        void accumulate(Window &w, const uint64_t *deltaTicks, uint64_t gsNs, uint64_t vuNs, uint64_t bytes)
+         {
+             for (int i = 0; i < kCount; ++i)
+                 w.ticks[i] += deltaTicks[i];
+             w.gsNs += gsNs;
++            w.vuNs += vuNs;
+             w.bytes += bytes;
+         }
+ 
+@@ -116,13 +134,17 @@ namespace hl_perf
+             const double frames = std::max<uint32_t>(w.frames, 1u);
+             const auto ms = [&](Cat c) { return static_cast<double>(w.ticks[c]) / tpm / frames; };
+             char text[256];
+-            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f idle %.1f ms | %.2f MB/f",
+-                          fps, ms(kEe), ms(kVu0), ms(kVu1), static_cast<double>(w.gsNs) / 1e6 / frames, ms(kIop), ms(kGifParse), ms(kRing), ms(kWaitGs), ms(kIdle),
++            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f waitVU %.1f idle %.1f ms | %.2f MB/f",
++                          fps, ms(kEe), ms(kVu0), ms(kVu1) + static_cast<double>(w.vuNs) / 1e6 / frames, static_cast<double>(w.gsNs) / 1e6 / frames, ms(kIop), ms(kGifParse), ms(kRing), ms(kWaitGs), ms(kWaitVu), ms(kIdle),
+                           static_cast<double>(w.bytes) / 1048576.0 / frames);
+             return text;
+         }
+     }
+ 
++    static std::atomic<uint64_t> s_workerWaitGs{0};
++    void addWaitGs(uint64_t ticks) { s_workerWaitGs.fetch_add(ticks, std::memory_order_relaxed); }
++    uint64_t ticksNow() { return now(); }
++
+     Cat switchTo(Cat next)
+     {
+         if (!t_game)
+@@ -203,13 +225,18 @@ namespace hl_perf
+             delta[i] = s_ticks[i] - s_prev[i];
+             s_prev[i] = s_ticks[i];
+         }
++        delta[kWaitGs] += s_workerWaitGs.exchange(0, std::memory_order_relaxed);
+         const uint64_t gsNow = gsThreadsNs();
+         const uint64_t gsDelta = gsNow - s_gsLast;
+         s_gsLast = gsNow;
++        static uint64_t s_vuLast = 0;
++        const uint64_t vuNow = vuThreadNs();
++        const uint64_t vuDelta = vuNow - s_vuLast;
++        s_vuLast = vuNow;
+         const uint64_t bytes = s_bytes.exchange(0, std::memory_order_relaxed);
+-        accumulate(s_second, delta, gsDelta, bytes);
++        accumulate(s_second, delta, gsDelta, vuDelta, bytes);
+         if (s_phase == Phase::Measuring)
+-            accumulate(s_measure, delta, gsDelta, bytes);
++            accumulate(s_measure, delta, gsDelta, vuDelta, bytes);
+ 
+         const double fps = s_second.frames * 1000.0 / (static_cast<double>(t - s_secondStart) / tpm);
+         const std::string text = describe(s_second, fps, tpm);
+diff --git a/ps2xRuntime/src/lib/hl_vu_worker.cpp b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+new file mode 100644
+index 0000000..1c377a9
+--- /dev/null
++++ b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+@@ -0,0 +1,203 @@
++// Hidden Leaf (Android): a thread for what a DMA kick to VIF1 or GIF starts: VIF1 unpacks, VU1 microprograms, XGKICKs and the
++// writes to the ring of PCSX2's GS. In a fight this was 60% of the game thread, and it is parallel on the PS2 as well.
++//
++// The game sees the DMA finish at once, as before: the chain was already copied at the kick, so nothing here reads guest memory.
++// What the worker owns (VU1 memory, vif1_regs, the PATH3 mask) the game thread reaches only after sync(): PS2Memory calls it when
++// the game touches those registers or that memory. A vsync goes through the queue, so the stream keeps its order, and the game
++// may be only one frame ahead of the worker.
++#include "runtime/hl_vu_worker.h"
++#include "runtime/hl_perf.h"
++#include "runtime/ps2_memory.h"
++
++#include <condition_variable>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++#include <exception>
++#include <mutex>
++#include <thread>
++#if defined(__linux__)
++#include <sys/prctl.h>
++#endif
++
++namespace hl_vuworker
++{
++    namespace
++    {
++        struct Command
++        {
++            Kind kind = Kind::Call;
++            bool frameEnd = false;
++            PS2Memory *memory = nullptr;
++            std::vector<uint8_t> data;
++            std::function<void()> call;
++        };
++
++        constexpr uint64_t kMaxQueuedBytes = 48ull << 20;
++
++        std::mutex s_mutex;
++        std::condition_variable s_wakeWorker, s_wakeGame;
++        std::deque<Command> s_queue;
++        std::vector<std::vector<uint8_t>> s_free;
++        uint64_t s_queuedBytes = 0;
++        uint32_t s_framesQueued = 0;
++        bool s_running = false; // running a command
++        bool s_workerAsleep = false;
++        bool s_gameWaiting = false;
++        thread_local bool t_worker = false;
++
++        void execute(Command &command)
++        {
++            try
++            {
++                switch (command.kind)
++                {
++                case Kind::Vif1:
++                    command.memory->processVIF1Data(command.data.data(), static_cast<uint32_t>(command.data.size()));
++                    break;
++                case Kind::Gif:
++                    command.memory->submitGifPacket(GifPathId::Path3, command.data.data(), static_cast<uint32_t>(command.data.size()), true);
++                    break;
++                case Kind::Call:
++                    command.call();
++                    break;
++                }
++            }
++            catch (const std::exception &e)
++            {
++                std::fprintf(stderr, "[vuworker] %s\n", e.what());
++            }
++        }
++
++        void workerMain()
++        {
++            t_worker = true;
++#if defined(__linux__)
++            prctl(PR_SET_NAME, "VuWorker", 0, 0, 0);
++#endif
++            std::unique_lock lock(s_mutex);
++            for (;;)
++            {
++                if (s_queue.empty())
++                {
++                    s_running = false;
++                    if (s_gameWaiting)
++                        s_wakeGame.notify_all();
++                    // a moment awake: a kick usually follows, and waking this thread is the game thread's cost
++                    lock.unlock();
++                    for (int i = 0; i < 2000; ++i)
++                    {
++#if defined(__aarch64__)
++                        __asm__ volatile("isb");
++#endif
++                    }
++                    lock.lock();
++                    if (s_queue.empty())
++                    {
++                        s_workerAsleep = true;
++                        s_wakeWorker.wait(lock, [] { return !s_queue.empty(); });
++                        s_workerAsleep = false;
++                    }
++                }
++                Command command = std::move(s_queue.front());
++                s_queue.pop_front();
++                s_running = true;
++                lock.unlock();
++
++                execute(command);
++
++                lock.lock();
++                s_queuedBytes -= command.data.size();
++                if (command.frameEnd)
++                    --s_framesQueued;
++                if (command.data.capacity() != 0u && s_free.size() < 16u)
++                {
++                    command.data.clear();
++                    s_free.push_back(std::move(command.data));
++                }
++                if (s_gameWaiting)
++                    s_wakeGame.notify_all();
++            }
++        }
++
++        void start()
++        {
++            static std::once_flag once;
++            std::call_once(once, [] { std::thread(workerMain).detach(); });
++        }
++
++        void push(Command &&command)
++        {
++            start();
++            std::unique_lock lock(s_mutex);
++            if (s_queuedBytes > kMaxQueuedBytes || (command.frameEnd && s_framesQueued >= 1u))
++            {   // (the game is too far ahead of the worker)
++                hl_perf::Scope wait(hl_perf::kWaitVu);
++                s_gameWaiting = true;
++                const bool frameEnd = command.frameEnd;
++                s_wakeGame.wait(lock, [frameEnd] { return s_queuedBytes <= kMaxQueuedBytes && (!frameEnd || s_framesQueued < 1u); });
++                s_gameWaiting = false;
++            }
++            s_queuedBytes += command.data.size();
++            if (command.frameEnd)
++                ++s_framesQueued;
++            s_queue.push_back(std::move(command));
++            if (s_workerAsleep)
++                s_wakeWorker.notify_one();
++        }
++    }
++
++    bool enabled()
++    {
++        static const bool on = []
++        {
++            const char *v = std::getenv("HL_VUWORKER");
++            return !(v && std::strcmp(v, "0") == 0);
++        }();
++        return on;
++    }
++
++    bool onWorker() { return t_worker; }
++
++    void post(PS2Memory *memory, Kind kind, std::vector<uint8_t> &&data)
++    {
++        Command command;
++        command.kind = kind;
++        command.memory = memory;
++        command.data = std::move(data);
++        push(std::move(command));
++    }
++
++    void postCall(std::function<void()> call, bool frameEnd)
++    {
++        Command command;
++        command.kind = Kind::Call;
++        command.frameEnd = frameEnd;
++        command.call = std::move(call);
++        push(std::move(command));
++    }
++
++    void sync()
++    {
++        if (t_worker || !enabled())
++            return;
++        std::unique_lock lock(s_mutex);
++        if (s_queue.empty() && !s_running)
++            return;
++        hl_perf::Scope wait(hl_perf::kWaitVu);
++        s_gameWaiting = true;
++        s_wakeGame.wait(lock, [] { return s_queue.empty() && !s_running; });
++        s_gameWaiting = false;
++    }
++
++    std::vector<uint8_t> takeBuffer()
++    {
++        std::lock_guard lock(s_mutex);
++        if (s_free.empty())
++            return {};
++        std::vector<uint8_t> buffer = std::move(s_free.back());
++        s_free.pop_back();
++        return buffer;
++    }
++}
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 88c8711..f6b9069 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1,3 +1,9 @@
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/hl_vu_worker.h"
++#define HL_VU_SYNC() hl_vuworker::sync()
++#else
++#define HL_VU_SYNC() ((void)0)
++#endif
+ #include "runtime/ps2_memory.h"
+ #include "runtime/ps2_address.h"
+ #include "runtime/gs/gs_frontend.h"
+@@ -563,6 +569,8 @@ const uint8_t *PS2Memory::mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t
+     {
+         return ptr;
+     }
++    if (physAddr >= PS2_VU1_CODE_BASE && physAddr < PS2_VU1_DATA_BASE + PS2_VU1_DATA_SIZE)
++        HL_VU_SYNC(); // VU1's memory belongs to the worker
+     if (const uint8_t *ptr = mapRange(PS2_VU1_CODE_BASE, PS2_VU1_CODE_SIZE, m_vu1Code))
+     {
+         return ptr;
+@@ -964,6 +972,7 @@ void PS2Memory::write32(uint32_t address, uint32_t value)
+         {
+             // CSR: bits 0..1 of the low dword are write-one-to-clear status bits.
+             // Done as a single atomic RMW -- see writeCsrHalf's comment.
++            HL_VU_SYNC(); // (a FINISH still in the queue must not land after the game clears it)
+             writeCsrHalf(gs_regs.csr, off, value);
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+@@ -1023,6 +1032,7 @@ void PS2Memory::write64(uint32_t address, uint64_t value)
+         {
+             // CSR: bits 0..1 are write-one-to-clear status bits. Done as a single
+             // atomic RMW -- see writeCsrFull's comment.
++            HL_VU_SYNC();
+             writeCsrFull(gs_regs.csr, value);
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+@@ -1129,6 +1139,9 @@ void PS2Memory::write128(uint32_t address, __m128i value)
+ 
+ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+ {
++    if ((address >= 0x10003C00u && address < 0x10003E00u) || (address >= 0x10003000u && address < 0x10003100u) ||
++        (address >= 0x10005000u && address < 0x10007000u))
++        HL_VU_SYNC(); // VIF1, GIF and their FIFOs belong to the worker
+     size_t timerIndex = 0u;
+     uint32_t timerOffset = 0u;
+     if (decodeEeTimerRegister(address, timerIndex, timerOffset))
+@@ -1173,6 +1186,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+         const uint32_t regOff = (address - PS2_GS_PRIV_REG_BASE) & ~0x7u;
+         if (regOff == kGsCsrRegOffset)
+         {
++            HL_VU_SYNC(); // (a FINISH still in the queue must not land after the game clears it)
+             writeCsrHalf(gs_regs.csr, off, value);
+         }
+         else if (uint64_t *reg = gsRegPtr(gs_regs, address))
+@@ -1353,7 +1367,12 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                     // The hardware has no limit; this only stops a chain that loops forever. A UN5 fight frame has about
+                     // 12000 tags, and at 4096 the walk stopped after the scenery: no characters, HUD or banner.
+                     const int kMaxChainTags = 1 << 20;
+-                    std::vector<uint8_t> chainBuf;
++                    #if defined(PS2X_HEADLESS_HOST)
++                    std::vector<uint8_t> chainBuf = hl_vuworker::enabled() ? hl_vuworker::takeBuffer() : std::move(m_chainSpare);
++#else
++                    std::vector<uint8_t> chainBuf = std::move(m_chainSpare); // (kept: a new one per chain was mmap and page faults)
++#endif
++                    chainBuf.clear();
+ 
+                     auto appendData = [&](uint32_t srcAddr, uint32_t qwCount)
+                     {
+@@ -1705,6 +1724,54 @@ void PS2Memory::processPendingTransfers()
+         gifStat = (gifStat & ~kGifFqcMask) | (observedGifQwc << 24u);
+     }
+ 
++#if defined(PS2X_HEADLESS_HOST)
++    const bool toWorker = hl_vuworker::enabled() && !hl_vuworker::onWorker();
++    // what the transfer carries, out of the guest's memory (chains are copied at the kick already)
++    const auto takeData = [this](PendingTransfer &p) -> std::vector<uint8_t>
++    {
++        if (!p.chainData.empty())
++            return std::move(p.chainData);
++        std::vector<uint8_t> copy;
++        if (p.qwc == 0u)
++            return copy;
++        uint32_t src = 0u;
++        try
++        {
++            src = translateAddress(p.srcAddr);
++        }
++        catch (const std::exception &)
++        {
++            return copy;
++        }
++        const uint8_t *base = p.fromScratchpad ? m_scratchpad : m_rdram;
++        const uint32_t limit = p.fromScratchpad ? PS2_SCRATCHPAD_SIZE : PS2_RAM_SIZE;
++        uint32_t left = p.qwc * 16u;
++        copy.reserve(left);
++        while (left != 0u)
++        {
++            if (src >= limit)
++                src = 0u;
++            const uint32_t chunk = std::min(left, limit - src);
++            copy.insert(copy.end(), base + src, base + src + chunk);
++            left -= chunk;
++            src += chunk;
++        }
++        return copy;
++    };
++    if (toWorker)
++    {
++        for (auto &p : m_pendingGifTransfers)
++        {
++            std::vector<uint8_t> data = takeData(p);
++            if (data.empty())
++                continue;
++            m_seenGifCopy = true;
++            m_gifCopyCount.fetch_add(1, std::memory_order_relaxed);
++            hl_vuworker::post(this, hl_vuworker::Kind::Gif, std::move(data));
++        }
++    }
++    else
++#endif
+     for (size_t idx = 0; idx < m_pendingGifTransfers.size(); ++idx)
+     {
+         auto &p = m_pendingGifTransfers[idx];
+@@ -1828,6 +1895,18 @@ void PS2Memory::processPendingTransfers()
+     m_pendingVif0Transfers.clear();
+ 
+     const bool hadVif1 = !m_pendingVif1Transfers.empty();
++#if defined(PS2X_HEADLESS_HOST)
++    if (toWorker)
++    {
++        for (auto &p : m_pendingVif1Transfers)
++        {
++            std::vector<uint8_t> data = takeData(p);
++            if (!data.empty())
++                hl_vuworker::post(this, hl_vuworker::Kind::Vif1, std::move(data));
++        }
++        m_pendingVif1Transfers.clear();
++    }
++#endif
+     for (auto &p : m_pendingVif1Transfers)
+     {
+         if (!p.chainData.empty())
+@@ -1883,9 +1962,16 @@ void PS2Memory::processPendingTransfers()
+             }
+         }
+     }
++    for (auto &p : m_pendingVif1Transfers)
++        if (p.chainData.capacity() > m_chainSpare.capacity())
++            m_chainSpare = std::move(p.chainData);
+     m_pendingVif1Transfers.clear();
+ 
++#if defined(PS2X_HEADLESS_HOST)
++    if (m_gifArbiter && !toWorker) // (the worker drains its own)
++#else
+     if (m_gifArbiter)
++#endif
+         m_gifArbiter->drain();
+ 
+     static constexpr uint32_t GIF_CHANNEL = 0x1000A000;
+@@ -1971,6 +2057,7 @@ void PS2Memory::flushMaskedPath3Packets(bool drainImmediately)
+ 
+ void PS2Memory::submitGifPacket(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool drainImmediately, bool path2DirectHl)
+ {
++    HL_VU_SYNC();
+     if (!data || sizeBytes < 16)
+         return;
+ 
+@@ -2041,6 +2128,11 @@ void PS2Memory::submitGifPacket(GifPathId pathId, const uint8_t *data, uint32_t
+         flushMaskedPath3Packets(false);
+     }
+ 
++    if (m_gifArbiter && drainImmediately && m_gifArbiter->empty())
++    {
++        m_gifArbiter->processNow(pathId, data, sizeBytes); // (nothing to order it against: no copy)
++        return;
++    }
+     if (m_gifArbiter)
+         m_gifArbiter->submit(pathId, data, sizeBytes, path2DirectHl);
+     else if (m_gifPacketCallback)
+@@ -2366,6 +2458,9 @@ int PS2Memory::pollDmaRegisters()
+ 
+ uint32_t PS2Memory::readIORegister(uint32_t address)
+ {
++    if ((address >= 0x10003C00u && address < 0x10003E00u) || (address >= 0x10003000u && address < 0x10003100u) ||
++        (address >= 0x10005000u && address < 0x10007000u))
++        HL_VU_SYNC();
+     size_t timerIndex = 0u;
+     uint32_t timerOffset = 0u;
+     if (decodeEeTimerRegister(address, timerIndex, timerOffset))
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index ecf8e10..f45195c 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,6 @@
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/hl_vu_worker.h"
++#endif
+ #include "runtime/hl_perf.h"
+ #include "runtime/hl_image.h"
+ #include "ps2_runtime.h"
+@@ -776,6 +779,16 @@ bool PS2Runtime::syncCoreSubsystems()
+     m_memory.setGifArbiter(&m_gifArbiter);
+     m_memory.setVu1MscalCallback([this](uint32_t startPC, uint32_t top, uint32_t itop)
+                                  {
++#if defined(PS2X_HEADLESS_HOST)
++                                     if (hl_vuworker::onWorker())
++                                     {   // (no game thread context from here: the debug stops are off, as the game leaves them)
++                                         m_vu1.state().dBitEnabled = false;
++                                         m_vu1.state().tBitEnabled = false;
++                                         m_vu1.execute(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE, m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
++                                                       m_gs, &m_memory, startPC, top, itop, 65536);
++                                         return;
++                                     }
++#endif
+                                      R5900Context *cpuContext = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
+                                      if (!cpuContext)
+                                      {
+@@ -794,6 +807,16 @@ bool PS2Runtime::syncCoreSubsystems()
+                                          (m_vu1.state().stoppedByT ? 0x0400u : 0u); });
+     m_memory.setVu1MscntCallback([this](uint32_t top, uint32_t itop)
+                                  {
++#if defined(PS2X_HEADLESS_HOST)
++                                     if (hl_vuworker::onWorker())
++                                     {
++                                         m_vu1.state().dBitEnabled = false;
++                                         m_vu1.state().tBitEnabled = false;
++                                         m_vu1.resume(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE, m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
++                                                      m_gs, &m_memory, top, itop, 65536);
++                                         return;
++                                     }
++#endif
+                                      R5900Context *cpuContext = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
+                                      if (!cpuContext)
+                                      {
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index 59fa4d6..307a51b 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,4 +1,7 @@
+ // Based on Blackline Interactive implementation
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/hl_vu_worker.h"
++#endif
+ #include "runtime/ps2_memory.h"
+ #include <chrono>
+ #include <cstdlib>
+@@ -300,6 +303,9 @@ void PS2Memory::processVIF1Data(uint32_t srcPhys, uint32_t sizeBytes)
+ 
+ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ {
++#if defined(PS2X_HEADLESS_HOST)
++    hl_vuworker::sync();
++#endif
+     if (sizeBytes == 0u)
+         return;
+ 
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+index 84a1aae..aa80b86 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+@@ -1486,11 +1486,16 @@ bool VU1Interpreter::fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData
+     if (m_state.ebit || m_state.branchPending || m_state.haltAfterDelaySlot || pipelinesPending())
+         return false;
+ 
+-    if (!vuVerifyEnabled())
++    static const bool s_verifyVu0Only = []
++    {
++        const char *v = std::getenv("HL_VUVERIFY");
++        return v && std::strcmp(v, "vu0") == 0;
++    }();
++    if (!vuVerifyEnabled() || (s_verifyVu0Only && m_unit == Unit::VU1))
+         return fastExecute(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ 
+     // HL_VUVERIFY: the interpreter first, on copies
+-    static uint64_t s_runs = 0, s_bad = 0;
++    static uint64_t s_runs = 0, s_bad = 0, s_badVu1 = 0;
+     if (!m_verifyShadow)
+     {
+         m_verifyShadow = std::make_unique<VU1Interpreter>(m_unit);
+@@ -1517,7 +1522,8 @@ bool VU1Interpreter::fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData
+ 
+     char what[256] = {};
+     const VU1State &a = shadow.m_state, &b = m_state;
+-    // (known and harmless: near the top of the range, where the exact result overflowed, the last bits differ)
++    // (known, not fully explained: VU0's clip test at 0xC00 with 0xFFFFFFFF words as input lands 1 ulp apart near fmax, and the sign
++    // of the guard-band test after it can differ, see docs/plano.md. Data that are floats match to the bit.)
+     const auto nearMax = [](float x, float y)
+     {
+         return std::fabs(x) > 3.0e38f && std::fabs(y) > 3.0e38f && std::signbit(x) == std::signbit(y);
+@@ -1574,10 +1580,24 @@ bool VU1Interpreter::fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData
+     if (what[0])
+     {
+         ++s_bad;
+-        if (s_bad <= 60u)
++        if (m_unit == Unit::VU1)
++            ++s_badVu1;
++        if (s_bad == 1u)
++            if (FILE *dump = std::fopen("hl_vu_mismatch.bin", "wb"))
++            {   // the first one: code, data, the state at the start and the two ends
++                std::fwrite(vuCode, 1, codeSize, dump);
++                std::fwrite(dataBefore.data(), 1, dataSize, dump);
++                std::fwrite(&before, sizeof(before), 1, dump);
++                std::fwrite(&a, sizeof(a), 1, dump);
++                std::fwrite(&b, sizeof(b), 1, dump);
++                std::fclose(dump);
++                std::fprintf(stderr, "[vufast] dump: code %u data %u state %zu; vf offset %zu acc %zu vi %zu\n", codeSize, dataSize, sizeof(before),
++                             offsetof(VU1State, vf), offsetof(VU1State, acc), offsetof(VU1State, vi));
++            }
++        if (s_bad <= 60u || (m_unit == Unit::VU1 && s_badVu1 <= 60u))
+             std::fprintf(stderr, "[vufast] VU%d MISMATCH run %llu entry pc 0x%x: %s\n", m_unit == Unit::VU1 ? 1 : 0, static_cast<unsigned long long>(s_runs), before.pc, what);
+     }
+     if (s_runs % 20000u == 0u)
+-        std::fprintf(stderr, "[vufast] %llu runs verified, %llu mismatches\n", static_cast<unsigned long long>(s_runs), static_cast<unsigned long long>(s_bad));
++        std::fprintf(stderr, "[vufast] %llu runs verified, %llu mismatches (VU1: %llu)\n", static_cast<unsigned long long>(s_runs), static_cast<unsigned long long>(s_bad), static_cast<unsigned long long>(s_badVu1));
+     return true;
+ }

@@ -389,6 +389,19 @@ Depois disso:
 
 ## Fase Android (desde 2026-11-01)
 
+**60 Hz:** o jogo não oferece. Options tem Difficulty, Control, Screen (só posição X/Y), Music e Reset; a meta é 50 fps (PAL).
+
+**VuWorker (`hl_vu_worker.cpp`, patch 0044):** o disparo de DMA de VIF1/GIF era 60% da thread do jogo. A cadeia já era copiada no disparo,
+então o resto (VIF1, VU1, XGKICK, anel do GS) foi para uma thread, em fila. O jogo vê o DMA terminar na hora, como antes. Ele só alcança o que
+é da thread (memória da VU1, registradores VIF1/GIF, escrita no CSR, `readFifo`, A+D dos stubs) depois de `hl_vuworker::sync()`. O vsync entra
+na fila com os registradores lidos na hora, e o jogo fica no máximo 1 quadro à frente. `HL_VUWORKER=0` desliga.
+
+**Divergência aberta do caminho rápido (`HL_VUVERIFY`):** o teste de recorte da VU0 em 0xC00 recebe palavras `0xFFFFFFFF` como entrada (não são
+floats). Os resultados saem a 1 ulp um do outro perto de fmax, e o sinal do teste seguinte pode divergir do interpretador. Não está explicado por
+completo, e nenhum dos dois é o hardware. Nenhum defeito visível nos prints. As 60 divergências registradas nessa rodada são todas dessa classe
+(o log só guarda as 60 primeiras); falta a contagem por unidade.
+`HL_VUVERIFY=vu0` verifica só a VU0, e a primeira divergência vai para `hl_vu_mismatch.bin`.
+
 Arquitetura: `libun5.so` (runtime sem janela, `PS2X_HEADLESS_HOST`, código gerado, `recomp/android/host/`) escreve o fluxo do
 GS no formato de dump do PCSX2 num anel em memória (`ps2_live_ring.h`), lido por `libbt4gsx.so` (GS do ARMSX2 90126bdfea com
 Vulkan, o mesmo do Dragon Rage: o PCSX2 upstream não tem build Android). A ISO é lida pelo fd do launcher (`hl_image.cpp`).
@@ -413,6 +426,10 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | +flags de status | Retroid Pocket 5 | sd480p | 14,7 | 4,5 | 29,3 | 0,4 | 12,5 | 23,2 | 20,2 | 2,4 | 5,9 | 2,99 | idem |
 | 2026-11-01 | +lotes | RG Cube | sem limite | 23,8 | 5,8 | 15,9 | 0,3 | 10,6 | 17,3 | 4,8 | 1,9 | 1,0 | 3,25 | futex do anel a cada 128 KB, IOP em lotes de 1024 ciclos, sem limpar 64 KB por execução de VU; waitGS 8,5: o GS segura o Cube |
 | 2026-11-01 | +lotes | Retroid Pocket 5 | sd480p | 24,9 | 8,8 | 17,5 | 0,4 | 13,1 | 11,1 | 5,3 | 2,6 | 1,6 | 3,17 | idem; waitGS 0 |
+| 2026-11-01 | +sem desperdício no DMA | RG Cube | sem limite | 24,1 | 5,4 | 13,3 | 0,3 | 10,6 | 16,7 | 4,7 | 0,1 | 0,9 | 3,22 | buffer de cadeia reaproveitado, sem cópia no árbitro, parse do GS só SIGNAL/FINISH/LABEL, relógio só com evento vencido; waitGS 12,4: o GS limita o Cube em ~41 ms |
+| 2026-11-01 | +sem desperdício no DMA | Retroid Pocket 5 | sd480p | 28,9 | 10,4 | 14,7 | 0,4 | 12,9 | 11,5 | 5,5 | 0,6 | 1,6 | 3,26 | idem; waitGS 0 |
+| 2026-11-01 | +thread VuWorker | Retroid Pocket 5 | sd480p | 44,0 | 16,9 | 11,9 | 0,4 | 16,2 (VuWorker: VIF+VU1+GIF+anel) | 16,8 | 5,5 | - | - | 3,20 | VIF1/VU1/GIF numa thread (hl_vu_worker.cpp); waitVU 5,5; picos de 48, efeitos pesados caem a 31 (4,5 MB/f) |
+| 2026-11-01 | +thread VuWorker | RG Cube | sem limite | 24,1 | 4,9 | 12,1 | 0,4 | 16,4 (idem) | 17,8 | 5,1 | - | - | 3,25 | waitGS 23,4, waitVU 25,1: quem limita é a GPU: PerfLog do PCSX2: GPU 74%, GS 30% |
 
 A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
 
