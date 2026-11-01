@@ -21,7 +21,7 @@ done
 
 cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-    -DANDROID_STL=c++_static -DPS2R="$B/PS2Recomp" -DSDL3="$SDL3" -DFFMPEG="$FFMPEG"
+    -DANDROID_STL=c++_static -DPS2R="$B/PS2Recomp" -DSDL3="$SDL3" -DFFMPEG="$FFMPEG" -DARMSX2="$DR/port/build/bt4/ARMSX2"
 cmake --build "$out" --target un5 -j"${JOBS:-$(nproc)}"
 
 mkdir -p "$jni"

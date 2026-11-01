@@ -445,6 +445,8 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 17,7 | 10,9 | 0,4 | 15,2 | 17,3 | 4,8 | - | - | 3,20 | waitVU 1,1, idle 3,7; pares > 44 ms 22,2%, quedas a 39 fps nos efeitos pesados. GS é o maior custo |
 | 2026-11-01 | +nice -10 nas 3 threads pesadas, IOP sem chamada por acesso à RAM | RG Cube | sem limite | 50,0 | 27,3 | 8,9 | 0,3 | 13,3 | 11,3 | 2,7 | - | - | 3,17 | idle 8,6; pares > 44 ms 0,7%, pior 1% 42,0 ms |
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 16,3 | 11,2 | 0,4 | 14,8 | 17,3 | 3,7 | - | - | 3,21 | idle 4,5; pares > 44 ms 11,6%, pior 1% 64 ms. Só o nice (medido antes do IOP): 22,2% → 14,5%. `texture_preloading=1;hw_mipmap=false` não ajudou (GS 18,0, 25,1%) |
+| 2026-11-01 | +SPU2 do ARMSX2, heap do IOP, `PHMADH`/`PMADDH` | RG Cube | sem limite | 50,0 | 27,7 | 8,8 | 0,3 | 13,3 | 11,1 | 2,2 | - | - | 3,19 | idle 9,2; pares > 44 ms 0,4%, pior 1% 41,8 ms. **Velocidade cheia com som**. O relógio e a mixagem do SPU2 entram na coluna IOP |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,5 | 15,3 | 11,9 | 0,5 | 14,9 | 17,3 | 3,0 | - | - | 3,21 | idle 4,3, waitVU 1,2; pares > 44 ms 11,3%, pior 1% 67,9 ms. Som não custou fps. EE+VU1+GS = 44 ms/vsync contra 40 ms dos 2 núcleos grandes do perfil |
 
 **Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
 `1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
@@ -465,6 +467,31 @@ Variações de até uns 3% no fps e de 0,3 ms nas colunas estão dentro do ruíd
   programa que não faça isso veria stickies a menos, e o verificador só compara os bits baixos nas imagens sem leitor de sticky.
 
 A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
+
+### Áudio (2026-11-01)
+
+SPU2 do ARMSX2 (`recomp/android/spu2/hl_spu2.cpp`, os fontes de `pcsx2/SPU2` da árvore do Dragon Rage, sem cópia) sob o IOP
+do runtime: registros `0x1F900000`, DMA 4 e 7 e IRQs por `Spu2Hooks` (`iop_memory.h`). Saída por um stream SDL, 48 kHz,
+com 70 ms de folga. Só no Android: no PC `g_spu2` fica nulo e o som continua desligado. `HL_SPU2=0` desliga,
+`HL_SPU2_DUMP=<arquivo>` grava os últimos 120 s (f32, 48 kHz, estéreo), `HL_SPU2_LOG=N` loga N acessos. O som não foi
+**ouvido** por mim: conferi envelope e espectro do dump; falta o desenvolvedor ouvir no aparelho.
+
+Três defeitos que estavam escondidos pela falta de som:
+1. `sceSdVoiceTrans` fora de thread de IOP: `WaitEventFlag` não bloqueia ali, então a espera agora anda o relógio do SPU2
+   até o DMA acabar. Sem isso, `sceHSyn_VoisTrans Error` e o jogo parava antes da luta.
+2. `sceSifFreeIopHeap` (`0x166f40`, sem nome no ELF) não estava ligado ao stub e não liberava nada: cada filme vazava
+   `0x2E810` bytes, o heap enchia, a alocação devolvia 0, o jogo não confere e mandava o som do filme para o endereço 0 do
+   IOP. O driver ADX lê esse endereço no fim de uma lista, pulava para o lixo e a thread morria (`execution outside RAM`),
+   deixando o último buffer em laço: um tom contínuo. `un5.py` (`STUB_AT`) corrige na próxima geração. O alocador
+   também passou a reaproveitar o espaço liberado (primeiro encaixe).
+3. `PHMADH` e `PMADDH` estavam errados no gerador (`mmi_translation_helpers.cpp`): `PHMADH` é o filtro de síntese do AHX, e
+   toda fala de personagem (`AHX/PS2EE`) saía como ruído branco em volume máximo. `PMADDH` só aparece em `0x19af84`, com
+   `PMTHI`/`PMTLO` (que só gravavam a metade baixa). Corrigi os três; `PMSUBH` e `PHMSBH` continuam errados, mas o jogo não os usa.
+
+Como o código gerado foi editado só nesses 3 arquivos (`sub_00166F40`, `sub_0013BAA0`, `sub_0019AA00`), não houve build
+completo; a próxima geração sai igual pelo gerador corrigido.
+
+Sobra: o `libbt4gsx` ainda abre um stream Oboe próprio, mudo (`[SPU2/Output] Backend = Null` no ini não mudou isso).
 
 ## Teste nos aparelhos
 

@@ -28,6 +28,7 @@
 #include <thread>
 
 int ps2x_runtime_main(int argc, char *argv[]); // the runtime's main() (src/main.cpp, renamed by the build)
+void hl_spu2_install();                        // the sound (recomp/android/spu2/hl_spu2.cpp)
 
 namespace
 {
@@ -297,6 +298,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         fail(SDL_GetError());
         return 1;
     }
+    hl_spu2_install();
     SDL_Window *window = SDL_CreateWindow("Hidden Leaf", 0, 0, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     int width = 0, height = 0;
     void *native = window ? windowHandle(window, &width, &height) : nullptr;

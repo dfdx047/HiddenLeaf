@@ -563,6 +563,7 @@ STUB_ALIASES = {
 # libmpeg keeps its state for the runtime's stubs, not in the game's memory: the game's own sceMpegIsEnd and
 # sceMpegIsRefBuffEmpty read fields nobody fills, so the opening movie never ended (its last frame stayed on screen).
 STUB_AT = {
+    0x166f40: "sceSifFreeIopHeap",  # (no name in the ELF: unstubbed, it does nothing, and every movie leaks 0x2e810 bytes of IOP heap until the game gets 0 and writes to address 0)
     0x159748: "sceMpegIsEnd",
     0x159758: "sceMpegIsRefBuffEmpty",
 }

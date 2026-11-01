@@ -43,6 +43,16 @@ add_subdirectory("${PS2R}/ps2xIOP" ps2xIOP EXCLUDE_FROM_ALL)
 # (its read32 and the like are called once per IOP instruction, across files)
 target_compile_options(ps2_iop PRIVATE -flto=thin)
 
+# The SPU2 of ARMSX2 (see spu2/hl_spu2.cpp), its sources as they are in Dragon Rage's tree
+set(SPU2_SRC "${ARMSX2}/pcsx2/SPU2")
+add_library(hl_spu2 STATIC spu2/hl_spu2.cpp ${SPU2_SRC}/ADSR.cpp ${SPU2_SRC}/Debug.cpp ${SPU2_SRC}/Dma.cpp ${SPU2_SRC}/Mixer.cpp
+    ${SPU2_SRC}/ReadInput.cpp ${SPU2_SRC}/RegTable.cpp ${SPU2_SRC}/Reverb.cpp ${SPU2_SRC}/ReverbResample.cpp ${SPU2_SRC}/spu2_neon.cpp
+    ${SPU2_SRC}/spu2sys.cpp)
+target_include_directories(hl_spu2 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/spu2/compat" "${ARMSX2}/pcsx2" "${ARMSX2}"
+    "${ARMSX2}/3rdparty/fmt/include" "${PS2R}/ps2xIOP/src" "${SDL3}/include")
+target_compile_definitions(hl_spu2 PRIVATE PCSX2_CORE)
+target_compile_options(hl_spu2 PRIVATE -O3)
+
 set(L "${RT}/src/lib")
 file(GLOB_RECURSE KERNEL_SRC CONFIGURE_DEPENDS "${L}/Kernel/*.cpp")
 add_library(ps2_runtime STATIC
@@ -72,5 +82,5 @@ set_source_files_properties(${UN5_TABLES} PROPERTIES COMPILE_OPTIONS "-O0" SKIP_
 set(UN5_RUNNER_OPT "-O2" CACHE STRING "Optimisation of the generated game code")
 target_compile_options(un5 PRIVATE ${UN5_RUNNER_OPT})
 target_include_directories(un5 PRIVATE "${RT}/include" "${L}" "${L}/Kernel" "${SDL3}/include")
-target_link_libraries(un5 PRIVATE ps2_runtime "${SDL3}/lib/libSDL3.so" android log z m dl)
+target_link_libraries(un5 PRIVATE ps2_runtime hl_spu2 "${SDL3}/lib/libSDL3.so" android log z m dl)
 target_link_options(un5 PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,-Bsymbolic-functions -flto=thin -static-libstdc++)

@@ -1,0 +1,280 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index b88403c..3119932 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -40,6 +40,14 @@ namespace ps2x::iop::detail
+         m_dmaStart.reset();
+     }
+ 
++    namespace
++    {
++        bool isSpu2Register(uint32_t phys) noexcept
++        {
++            return g_spu2 != nullptr && phys >= IopMemory::Spu2Base && phys < IopMemory::Spu2Base + 0x1000u;
++        }
++    }
++
+     uint8_t IopMemory::read8(uint32_t address) const
+     {
+         const uint32_t phys = physicalAddress(address);
+@@ -47,6 +55,8 @@ namespace ps2x::iop::detail
+             return m_ram[phys];
+         if (phys >= ScratchBase && phys < ScratchBase + ScratchSize)
+             return m_scratch[phys - ScratchBase];
++        if (isSpu2Register(phys))
++            return static_cast<uint8_t>(g_spu2->read16(phys & ~1u) >> ((phys & 1u) * 8u));
+         const uint32_t value = readHardware32(phys & ~3u);
+         return static_cast<uint8_t>(value >> ((phys & 3u) * 8u));
+     }
+@@ -60,12 +70,16 @@ namespace ps2x::iop::detail
+             std::memcpy(&value, m_ram.data() + phys, sizeof(value));
+             return value;
+         }
++        if ((phys & 1u) == 0u && isSpu2Register(phys))
++            return g_spu2->read16(phys);
+         return static_cast<uint16_t>(read8(address) | (static_cast<uint16_t>(read8(address + 1u)) << 8u));
+     }
+ 
+     uint32_t IopMemory::read32Slow(uint32_t address) const
+     {
+         const uint32_t phys = physicalAddress(address);
++        if ((phys & 3u) == 0u && isSpu2Register(phys))
++            return static_cast<uint32_t>(g_spu2->read16(phys)) | (static_cast<uint32_t>(g_spu2->read16(phys + 2u)) << 16u);
+         if ((phys & 3u) == 0u && phys >= ScratchBase && phys + 3u < ScratchBase + ScratchSize)
+         {
+             uint32_t value;
+@@ -111,6 +125,11 @@ namespace ps2x::iop::detail
+             markOwned(phys, sizeof(value));
+             return;
+         }
++        if ((phys & 1u) == 0u && isSpu2Register(phys))
++        {
++            g_spu2->write16(phys, value);
++            return;
++        }
+         write8(address, static_cast<uint8_t>(value));
+         write8(address + 1u, static_cast<uint8_t>(value >> 8u));
+     }
+@@ -118,6 +137,12 @@ namespace ps2x::iop::detail
+     void IopMemory::write32Slow(uint32_t address, uint32_t value)
+     {
+         const uint32_t phys = physicalAddress(address);
++        if ((phys & 3u) == 0u && isSpu2Register(phys))
++        {
++            g_spu2->write16(phys, static_cast<uint16_t>(value));
++            g_spu2->write16(phys + 2u, static_cast<uint16_t>(value >> 16u));
++            return;
++        }
+         if ((phys & 3u) == 0u && phys >= ScratchBase && phys + 3u < ScratchBase + ScratchSize)
+         {
+             std::memcpy(m_scratch.data() + (phys - ScratchBase), &value, sizeof(value));
+@@ -236,6 +261,16 @@ namespace ps2x::iop::detail
+ 
+         const bool secondCore = address == kDmaSpu1Chcr;
+         m_hardware[address] = value & ~kDmaStart;
++        if (g_spu2)
++        {   // (its end comes through Spu2Hooks::takeIrqs)
++            uint32_t madr = 0u, bcr = 0u;
++            if (const auto current = m_hardware.find(address - 8u); current != m_hardware.end())
++                madr = current->second;
++            if (const auto current = m_hardware.find(address - 4u); current != m_hardware.end())
++                bcr = current->second;
++            g_spu2->dma(secondCore, madr, bcr, value);
++            return;
++        }
+ 
+         const uint32_t statusAddress = 0x1F900344u + (secondCore ? 0x400u : 0u);
+         const uint32_t alignedStatus = statusAddress & ~3u;
+@@ -291,7 +326,9 @@ namespace ps2x::iop::detail
+             return address;
+         }
+ 
+-        uint32_t candidate = alignUp(m_heapCursor, alignment);
++        // (first fit, what was freed included: a movie allocates and frees its 0x2E810 bytes every time, and with the
++        // heap full the game gets 0, uses it without looking and sends the movie's sound to address 0 of the IOP)
++        uint32_t candidate = alignUp(HeapBase, alignment);
+         for (;;)
+         {
+             bool overlap = false;
+@@ -326,6 +363,9 @@ namespace ps2x::iop::detail
+                   m_owned.begin() + block->address + block->size,
+                   uint8_t{0});
+         m_allocations.erase(block);
++        m_heapCursor = HeapBase;
++        for (const auto &other : m_allocations)
++            m_heapCursor = std::max(m_heapCursor, other.address + other.size);
+         return true;
+     }
+ 
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index eeab185..0e3e88a 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -11,6 +11,20 @@
+ 
+ namespace ps2x::iop::detail
+ {
++    // Hidden Leaf: a real SPU2 under the IOP, when the host has one (recomp/android/spu2/hl_spu2.cpp). Without it, the
++    // registers stay plain memory and a DMA just ends after a while, with no sound.
++    struct Spu2Hooks
++    {
++        static constexpr uint32_t kDma4Done = 1u, kDma7Done = 2u, kSpu2Irq = 4u;
++        void (*attach)(const uint64_t *cycles, uint8_t *ram);
++        void (*advance)();                                                     // its clock up to the IOP's
++        uint16_t (*read16)(uint32_t phys);
++        void (*write16)(uint32_t phys, uint16_t value);
++        void (*dma)(bool secondCore, uint32_t madr, uint32_t bcr, uint32_t chcr);
++        uint32_t (*takeIrqs)();                                                // what ended since the last call
++    };
++    inline const Spu2Hooks *g_spu2 = nullptr;
++
+     class IopMemory
+     {
+     public:
+@@ -92,6 +106,7 @@ namespace ps2x::iop::detail
+         [[nodiscard]] bool dmaStartPending() const noexcept { return m_dmaStart.has_value(); }
+         [[nodiscard]] std::optional<DmaStart> takeDmaStart() noexcept;
+         [[nodiscard]] std::span<const uint8_t> ram() const noexcept { return m_ram; }
++        [[nodiscard]] uint8_t *ramData() noexcept { return m_ram.data(); }
+ 
+         [[nodiscard]] static uint32_t physicalAddress(uint32_t address) noexcept { return address & 0x1FFFFFFFu; }
+ 
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index b889753..46ba785 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -316,6 +316,13 @@ namespace ps2x::iop::detail
+                         totalCycles = std::max(totalCycles, due);
+                         servicePendingDmaInterrupts();
+                     }
++                    // (with a real SPU2 the DMA's end is not in that list until the SPU2 gets there: move its clock)
++                    for (int i = 0; g_spu2 && i < 2048 && !kernel.eventFlagReady(static_cast<int>(cpu.gpr[4]), cpu.gpr[5], cpu.gpr[6]); ++i)
++                    {
++                        totalCycles += 2048u;
++                        serviceSpu2();
++                        servicePendingDmaInterrupts();
++                    }
+                 }
+                 return kernel.dispatchEventImport(call.ordinal, cpu)
+                            ? ImportDisposition::Handled
+@@ -618,6 +625,26 @@ namespace ps2x::iop::detail
+             servicingGuestCallbacks = false;
+         }
+ 
++        void serviceSpu2()
++        {
++            if (!spu2Attached)
++            {
++                g_spu2->attach(&totalCycles, memory.ramData());
++                spu2Attached = true;
++            }
++            g_spu2->advance();
++            if (const uint32_t irqs = g_spu2->takeIrqs())
++            {
++                if (irqs & Spu2Hooks::kDma4Done)
++                    pendingDmaInterrupts[kSpu2Dma4Irq] = totalCycles;
++                if (irqs & Spu2Hooks::kDma7Done)
++                    pendingDmaInterrupts[kSpu2Dma7Irq] = totalCycles;
++                if (irqs & Spu2Hooks::kSpu2Irq)
++                    pendingDmaInterrupts[kSpu2Irq] = totalCycles;
++                nextDmaDue = std::min(nextDmaDue, totalCycles);
++            }
++        }
++
+         void runCycles(uint64_t cycles) noexcept
+         {
+             try
+@@ -625,6 +652,8 @@ namespace ps2x::iop::detail
+                 const uint64_t target = totalCycles + cycles;
+                 while (totalCycles < target)
+                 {
++                    if (g_spu2)
++                        serviceSpu2();
+                     servicePendingDmaInterrupts();
+                     servicePendingGuestCallbacks();
+                     timrman.serviceDue(totalCycles, *this);
+@@ -786,6 +815,8 @@ namespace ps2x::iop::detail
+         IopLoadcore loadcore;
+         std::map<int, Module> modules;
+         std::map<int, uint64_t> pendingDmaInterrupts;
++        bool spu2Attached = false;
++        static constexpr int kSpu2Dma4Irq = 0x24, kSpu2Dma7Irq = 0x28, kSpu2Irq = 9; // (intrman's numbers: DMA 4, DMA 7, SPU2)
+         uint64_t nextDmaDue = UINT64_MAX; // the earliest of them
+         std::multimap<uint64_t, ScheduledGuestCallback> pendingGuestCallbacks;
+         uint32_t nextModuleId = 1;
+diff --git a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+index a2bcb77..eb22140 100644
+--- a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+@@ -384,40 +384,28 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePMADDH(const Instruction &inst)
+     {
+-        // Parallel multiply add halfword -> results to HI/LO and rd
+-        return fmt::format("{{ __m128i prod = _mm_madd_epi16(GPR_VEC(ctx, {}), GPR_VEC(ctx, {})); \n" // Packed multiply and add adjacent pairs
+-                           "   int32_t p0 = _mm_cvtsi128_si32(prod); \n"
+-                           "   int32_t p1 = _mm_cvtsi128_si32(_mm_srli_si128(prod, 4)); \n"
+-                           "   int32_t p2 = _mm_cvtsi128_si32(_mm_srli_si128(prod, 8)); \n"
+-                           "   int32_t p3 = _mm_cvtsi128_si32(_mm_srli_si128(prod, 12)); \n"
+-                           "   int64_t acc = Ps2HiLoToU64(ctx->hi, ctx->lo); \n"
+-                           "   acc += (int64_t)p0 + (int64_t)p1 + (int64_t)p2 + (int64_t)p3; \n"
+-                           "   ctx->lo = (uint32_t)acc; ctx->hi = (uint32_t)(acc >> 32); \n"
+-                           "   SET_GPR_U64(ctx, {}, acc); }}",
++        // Parallel Multiply-Add Halfword (Hidden Leaf): eight products, each added to its word of the 128-bit LO or HI (the
++        // upper halves are lo1 and hi1); rd gets words 0 and 2 of each
++        return fmt::format("{{ alignas(16) int16_t a[8]; alignas(16) int16_t b[8]; alignas(16) int32_t l[4]; alignas(16) int32_t h[4]; \n"
++                           "   _mm_store_si128((__m128i *)a, GPR_VEC(ctx, {})); _mm_store_si128((__m128i *)b, GPR_VEC(ctx, {})); \n"
++                           "   std::memcpy(&l[0], &ctx->lo, 8); std::memcpy(&l[2], &ctx->lo1, 8); std::memcpy(&h[0], &ctx->hi, 8); std::memcpy(&h[2], &ctx->hi1, 8); \n"
++                           "   for (int i = 0; i < 4; ++i) {{ l[i] = (int32_t)((uint32_t)l[i] + (uint32_t)((int32_t)a[i * 2] * b[i * 2])); h[i] = (int32_t)((uint32_t)h[i] + (uint32_t)((int32_t)a[i * 2 + 1] * b[i * 2 + 1])); }} \n"
++                           "   std::memcpy(&ctx->lo, &l[0], 8); std::memcpy(&ctx->lo1, &l[2], 8); std::memcpy(&ctx->hi, &h[0], 8); std::memcpy(&ctx->hi1, &h[2], 8); \n"
++                           "   SET_GPR_VEC(ctx, {}, _mm_set_epi32(h[2], l[2], h[0], l[0])); }}",
+                            inst.rs, inst.rt, inst.rd);
+     }
+ 
+-
+     std::string CodeGenerator::translatePHMADH(const Instruction &inst)
+     {
+-        // Parallel Horizontal Multiply Add Halfword -> results to HI/LO and rd
+-        return fmt::format("{{ __m128i evens = _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(2,0,2,0)); \n" // Select even halfwords
+-                           "   __m128i odds  = _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,1,3,1)); \n" // Select odd halfwords
+-                           "   __m128i prod_ev = _mm_mullo_epi16(evens, _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(2,0,2,0))); \n"
+-                           "   __m128i prod_od = _mm_mullo_epi16(odds,  _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,1,3,1))); \n"
+-                           "   __m128i sum_pairs = _mm_add_epi16(prod_ev, prod_od); \n"                            // Add rs[0]*rt[0] + rs[1]*rt[1], etc.
+-                           "   int32_t h0 = _mm_extract_epi16(sum_pairs, 0) + _mm_extract_epi16(sum_pairs, 1); \n" // Horizontal add within low 32b
+-                           "   int32_t h1 = _mm_extract_epi16(sum_pairs, 2) + _mm_extract_epi16(sum_pairs, 3); \n" // Horizontal add within next 32b
+-                           "   int32_t h2 = _mm_extract_epi16(sum_pairs, 4) + _mm_extract_epi16(sum_pairs, 5); \n"
+-                           "   int32_t h3 = _mm_extract_epi16(sum_pairs, 6) + _mm_extract_epi16(sum_pairs, 7); \n"
+-                           "   int64_t acc = Ps2HiLoToU64(ctx->hi, ctx->lo); \n"
+-                           "   acc += (int64_t)h0 + (int64_t)h1 + (int64_t)h2 + (int64_t)h3; \n"
+-                           "   ctx->lo = (uint32_t)acc; ctx->hi = (uint32_t)(acc >> 32); \n"
+-                           "   SET_GPR_U64(ctx, {}, acc); }}",
+-                           inst.rs, inst.rt, inst.rs, inst.rt, inst.rd);
++        // Parallel Horizontal Multiply Add Halfword: each word of rd is rs.h[2i+1]*rt.h[2i+1] + rs.h[2i]*rt.h[2i]; LO and
++        // HI get the same words, alternating (Hidden Leaf: CRI's AHX synthesis filter is made of this; it came out as noise)
++        return fmt::format("{{ __m128i prod = _mm_madd_epi16(GPR_VEC(ctx, {}), GPR_VEC(ctx, {})); \n"
++                           "   alignas(16) int32_t w[4]; _mm_store_si128((__m128i *)w, prod); \n"
++                           "   ctx->lo = (uint32_t)w[0]; ctx->hi = (uint32_t)w[1]; ctx->lo1 = (uint32_t)w[2]; ctx->hi1 = (uint32_t)w[3]; \n"
++                           "   SET_GPR_VEC(ctx, {}, prod); }}",
++                           inst.rs, inst.rt, inst.rd);
+     }
+ 
+-
+     std::string CodeGenerator::translatePMSUBH(const Instruction &inst)
+     {
+         return fmt::format("{{ __m128i prod = _mm_madd_epi16(GPR_VEC(ctx, {}), GPR_VEC(ctx, {})); \n"
+@@ -585,13 +573,13 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePMTHI(const Instruction &inst)
+     {
+-        return fmt::format("ctx->hi = GPR_U32(ctx, {});", inst.rs); // PMTHI uses standard HI/LO
++        return fmt::format("{{ __m128i value = GPR_VEC(ctx, {}); ctx->hi = (uint64_t)_mm_cvtsi128_si64(value); ctx->hi1 = (uint64_t)_mm_cvtsi128_si64(_mm_srli_si128(value, 8)); }}", inst.rs);
+     }
+ 
+ 
+     std::string CodeGenerator::translatePMTLO(const Instruction &inst)
+     {
+-        return fmt::format("ctx->lo = GPR_U32(ctx, {});", inst.rs); // PMTLO uses standard HI/LO
++        return fmt::format("{{ __m128i value = GPR_VEC(ctx, {}); ctx->lo = (uint64_t)_mm_cvtsi128_si64(value); ctx->lo1 = (uint64_t)_mm_cvtsi128_si64(_mm_srli_si128(value, 8)); }}", inst.rs);
+     }
+ 
+ 
