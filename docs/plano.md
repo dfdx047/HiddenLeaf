@@ -129,6 +129,31 @@ e folhas alinhadas a 16 bytes (métodos virtuais vazios como `0x6ea220`), o BTL 
 **Rota de teste:** `HL_AUTOPRESS="15:CROSS,35:START,50:START,58:START,64:UP,68:CROSS"`, aos 92 s `DOWN WAIT WAIT CROSS`,
 aos 110 s `CROSS WAIT WAIT CROSS`, aos 118 s `CROSS`, depois CROSS a cada 6 s; a luta começa perto de ~210 s.
 
+**Rota por vsync (substitui a de cima):** `HL_PADROUTE="tick:BOTÕES,..."` anexa ao `hl_pad` por contagem de vsync, sem
+depender da velocidade do PC. Rota completa até a luta (começa em ~5200 vsyncs, ~200 s):
+`650:CROSS,1560:START,2080:START,2330:START,2520:UP,2650:CROSS,3179:DOWN WAIT WAIT CROSS,3587:CROSS WAIT WAIT CROSS,`
+`3827:CROSS,4059:CROSS,4233:CROSS,4391:CROSS,4545:CROSS,4715:CROSS,4893:CROSS,5083:CROSS,5226:CROSS,5306:CROSS,5386:CROSS,5468:CROSS,5548:CROSS,5630:CROSS`.
+
+**Luta (0038–0040):**
+- 0038, ponto flutuante do EE: `SQRT.S` lia `fs` em vez de `ft` (49 instruções erradas); `CVT.W.S` trunca e satura; divisão
+  e raiz do VU0 com a semântica do PS2. O cenário passou a sair inteiro e estável.
+- 0039, sem fatia de tempo entre threads de mesma prioridade: era por isso que a luta nunca começava (estado dos
+  personagens em `0x8ed3f0` zerado). Agora o cronômetro conta, o HUD aparece, sem travar.
+- 0040, opcodes do EFU do VU1 pela tabela do manual (`0x78` ESQRT, `0x79` ERSQRT, `0x7A` ERCPR, `0x7C` ESIN, `0x7D` EATAN,
+  `0x7E` EEXP), também na tabela de latência. O interpretador rodava EEXP onde o jogo pedia EATAN/ERSQRT.
+
+**Aberto: personagens invisíveis.** As matrizes dos ossos explodem (1e35, nan). A origem está nas chaves de rotação da
+animação (tipo eixo+ângulo, 32 bytes: x, y, z, ângulo, duração; lidas em `0x1a8128`–`0x1a81f8`, `func_10C160` faz
+eixo+ângulo → matriz): no recomp o ângulo é sempre 0 (803 chaves) ou ±`0x7f800000` (75); no savestate do PCSX2 são normais
+(1,17; −2,13; π/2). O eixo está certo; só o ângulo é errado, e essas chaves não existem cruas no disco, logo são
+calculadas ou descomprimidas na carga. `sin(inf)` dá nan e contamina tudo daí em diante. **Quadros alternam** HUD (sem
+cenário) e cenário (sem HUD): só olhar de novo quando os personagens saírem. Endereços são determinísticos entre execuções
+com a rota por vsync (chave em `0x1c391f0`), o que permite watchpoint por `mprotect`.
+
+**Perfil da luta:** ~13 vsyncs/s; interpretador do VU1 ~55% (`commitReadyPipelines` 22%, `run` 7%,
+`calculatePairReadyCycle` 6%), `DrawSpriteFast` 15,6%, `DrawTriangleFast` 3%; o EE quase não aparece. Para 50 vsyncs/s falta
+um caminho rápido do VU1 (~4×).
+
 **Pendências vistas:** "(null)" no menu de memory card segue sem causa (fora do caminho New Game); filmes têm quadros
 pretos em alguns dumps desde o 0032 (o stub de `sceGsSwapDBuff` limpa o quadro); um osso do objeto do título (`+1c`, osso 5)
 com matriz errada (R -3e38/nan contra P 0.425,-0.425,-0.85), provavelmente o cursor.

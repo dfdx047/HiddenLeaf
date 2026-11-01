@@ -572,7 +572,10 @@ STUB_AT = {
 # it keeps the PS2's float rules (no Inf or NaN, overflow clamps), which the runtime's C++ versions lose (the 2D camera's
 # sceVu0MulMatrix gave the x86 NaN, so every sprite landed at 0,0 and was clipped). Each one moves from stubs to
 # entry_points. sceVpu0Reset touches the hardware: it stays a stub.
-UNSTUB = re.compile(r"_?sceVu0\w+")
+# The math library too: fabs, sin, cos, floor and atan here are the soft-float double versions (argument in $a0, result
+# in $v0) while the runtime's C++ reads $f12 and writes $f0; and its rem_pio2f gives NaN for an angle of 0x7f800000,
+# where the game's own gets 0 (x - x), so sin = 0 and cos = 1.
+UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin")
 
 
 def cmd_stubfix(a):
@@ -589,7 +592,7 @@ def cmd_stubfix(a):
     if own:
         text = text[:block.start(1)] + "".join(keep) + text[block.end(1):]
         text = re.sub(r"^(entry_points = \[\s*\n)", lambda s: s.group(1) + "".join(own), text, count=1, flags=re.M)
-        moved.append("%d sceVu0 functions recompiled" % len(own))
+        moved.append("%d functions recompiled" % len(own))
     for name, handler in STUB_ALIASES.items():
         m = re.search(r'^\s*"%s@(0x[0-9A-Fa-f]+)",?\s*\n' % re.escape(name), text, re.M)
         if not m:
