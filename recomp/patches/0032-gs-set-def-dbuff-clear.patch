@@ -1,0 +1,46 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index 025d9e4..efd95c2 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -947,10 +947,10 @@ namespace ps2_stubs
+         uint32_t psm = getRegU32(ctx, 5);
+         uint32_t w = getRegU32(ctx, 6);
+         uint32_t h = getRegU32(ctx, 7);
+-        const uint32_t ztest = readStackU32(rdram, ctx, 16);
+-        const uint32_t zpsm = readStackU32(rdram, ctx, 20);
+-        const uint32_t clear = readStackU32(rdram, ctx, 24);
+-        (void)clear;
++        // Hidden Leaf: the fifth to seventh arguments are in t0-t2 on the EE, not on the stack (0x150150 in UN5)
++        const uint32_t ztest = getRegU32(ctx, 8) & 0xFFFFu;
++        const uint32_t zpsm = getRegU32(ctx, 9) & 0xFFFFu;
++        const uint32_t clear = getRegU32(ctx, 10) & 0xFFFFu;
+ 
+         if (w == 0u)
+         {
+@@ -992,6 +992,26 @@ namespace ps2_stubs
+         db.giftag1 = db.giftag0;
+         seedGsDrawEnv1(db.draw1, drawWidth, drawHeight, 0u, fbw, psm, zbufAddr, zpsm, ztest, false);
+ 
++        if (clear != 0u)
++        {
++            // Hidden Leaf: the clear sprite as sceGsSetDefClear (0x14ff60) writes it: black, Q=1, Z=0, ZTST=ALWAYS, and
++            // TEST back to the game's ZTST. UN5 copies it to the end of its frame packet; without it nothing ever
++            // cleared the Z buffer and the pixels of an earlier frame with a higher Z stayed on the screen.
++            const uint64_t testAlways = 0x30000ull;
++            const uint64_t testAfter = ztest != 0u ? (0x10000ull | (static_cast<uint64_t>(ztest & 3u) << 17)) : testAlways;
++            const uint64_t x0 = (0x800u - (w >> 1)) << 4, y0 = (0x800u - (h >> 1)) << 4;
++            const uint64_t x1 = x0 + (w << 4), y1 = y0 + (h << 4);
++            for (GsClearMem *c : {&db.clear0, &db.clear1})
++            {
++                c->testa = {testAlways, GS_REG_TEST_1};
++                c->prim = {static_cast<uint64_t>(GS_PRIM_SPRITE), GS_REG_PRIM};
++                c->rgbaq = {0x3F80000000000000ull, GS_REG_RGBAQ};
++                c->xyz2a = {x0 | (y0 << 16), GS_REG_XYZ2};
++                c->xyz2b = {x1 | (y1 << 16), GS_REG_XYZ2};
++                c->testb = {testAfter, GS_REG_TEST_1};
++            }
++        }
++
+         if (!writeGsDBuff(rdram, envAddr, db))
+         {
+             setReturnS32(ctx, -1);
