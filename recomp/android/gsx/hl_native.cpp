@@ -393,11 +393,15 @@ namespace
 	}
 
 	// The replay thread is not one of the heavy ones and does not need a big core: the three that do come first there.
+	cpu_set_t s_replayCores;
+	bool s_replayCoresSaved = false;
 	void toSmallCores()
 	{
 		const char* off = std::getenv("HL_NATIVE_LITTLE");
 		if (off && off[0] == '0')
 			return;
+		if (!s_replayCoresSaved)
+			s_replayCoresSaved = sched_getaffinity(0, sizeof(s_replayCores), &s_replayCores) == 0;
 		int capacity[32], lowest = 1 << 30, highest = 0, count = 0;
 		for (; count < 32; ++count)
 		{
@@ -423,6 +427,12 @@ namespace
 				CPU_SET(i, &set);
 		const int result = sched_setaffinity(0, sizeof(set), &set);
 		std::fprintf(stderr, "hl_native: replay thread on the cores of capacity %d: %d\n", lowest, result);
+	}
+	// (out of the fight the replay thread runs PCSX2's GS, which is real work)
+	void toAllCores()
+	{
+		if (s_replayCoresSaved)
+			sched_setaffinity(0, sizeof(s_replayCores), &s_replayCores);
 	}
 
 	// ---- textures
@@ -919,6 +929,12 @@ namespace
 		}
 	}
 
+	// What says a fight is on the screen: every frame of one copies the Z to page 0x1E0 (width 4, Z24), for its shadows.
+	constexpr uint64_t kFightFrameMask = 0x3F3F01FFull, kFightFrame = 0x310401E0ull;
+	constexpr uint32_t kFightFramesToStart = 8u, kFightVsyncsToStop = 30u;
+	bool s_fightSeen = false;
+	uint32_t s_fightFrames = 0u, s_vsyncsSinceFight = 1u << 30;
+
 	inline void writeRegister(uint32_t r, uint64_t value)
 	{
 		if (r == R_PRIM)
@@ -948,6 +964,8 @@ namespace
 			s_dirty = true;
 		s_regs[r & 255u] = value;
 		s_seen[r & 255u] = true;
+		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame)
+			s_fightSeen = true;
 		if (r == R_TRXDIR && (value & 3u) == 0u)
 			beginTransfer();
 		s_gsInSync = false;
@@ -1882,7 +1900,7 @@ bool transfer(uint8_t path, const uint8_t* data, uint32_t size)
 {
 	static const bool once = [] {
 		const char* on = std::getenv("HL_NATIVE");
-		s_on = on && on[0] == '1';
+		s_on = !(on && on[0] == '0');
 		const char* from = std::getenv("HL_NATIVE_FROM");
 		s_from = from ? std::strtoull(from, nullptr, 10) : 0u;
 		if (s_on)
@@ -1900,8 +1918,7 @@ bool transfer(uint8_t path, const uint8_t* data, uint32_t size)
 					s_cap = std::fopen(text.substr(0, a).c_str(), "wb");
 				}
 			}
-			std::fprintf(stderr, "hl_native: on, from vsync %llu\n", static_cast<unsigned long long>(s_from));
-			toSmallCores();
+			std::fprintf(stderr, "hl_native: waiting for a fight (not before vsync %llu)\n", static_cast<unsigned long long>(s_from));
 		}
 		return true;
 	}();
@@ -1929,12 +1946,30 @@ void vsync()
 		std::fflush(s_cap);
 	}
 	++s_vsync;
-	if (!s_sceneOn && s_vsync >= s_from)
+	if (s_fightSeen)
+	{
+		s_fightSeen = false;
+		s_fightFrames = s_vsyncsSinceFight <= 4u ? s_fightFrames + 1u : 1u;
+		s_vsyncsSinceFight = 0u;
+	}
+	else if (s_vsyncsSinceFight < (1u << 30))
+		++s_vsyncsSinceFight;
+	if (!s_sceneOn && s_fightFrames >= kFightFramesToStart && s_vsyncsSinceFight <= 4u && s_vsync >= s_from)
 	{
 		s_sceneOn = true;
 		s_dirty = true;
 		s_gsInSync = true;
+		toSmallCores();
 		std::fprintf(stderr, "hl_native: scene on at vsync %llu\n", static_cast<unsigned long long>(s_vsync));
+	}
+	else if (s_sceneOn && s_vsyncsSinceFight > kFightVsyncsToStop)
+	{
+		// (the GS takes over from what the targets hold: it needs the registers and whatever was held back of the uploads)
+		flushAll();
+		s_sceneOn = false;
+		s_fightFrames = 0u;
+		toAllCores();
+		std::fprintf(stderr, "hl_native: scene off at vsync %llu\n", static_cast<unsigned long long>(s_vsync));
 	}
 	if ((s_vsync % 500u) == 0u)
 		logStats();

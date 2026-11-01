@@ -459,6 +459,8 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | idem | RG Cube | sem limite | **50,0** | 30,6 | 8,5 | 0,3 | 13,2 | 10,6 | 2,1 | - | - | 3,19 | replay 6,8, idle 9,7; pares > 44 ms 0,1%, pior 1% 41,5 ms, pior 48,1 ms |
 | 2026-11-01 | idem, Turnip v26.3.0-R6 | Retroid Pocket 5 | sd480p | 50,0 | 22,1 | 11,1 | 0,5 | 13,9 | 12,2 | 2,8 | - | - | 3,18 | replay 9,8, idle 5,8; pares > 44 ms 2,6%, pior 1% 48,5 ms, pior 59,7 ms. 0 pretos, GPU não caiu. Sem ganho |
 | 2026-11-01 | idem, Turnip Rutabaga v3 | Retroid Pocket 5 | sd480p | 50,0 | 22,1 | 11,0 | 0,4 | 13,7 | 12,4 | 2,8 | - | - | 3,14 | replay 9,9, idle 5,6; pares > 44 ms 3,2%, pior 1% 47,5 ms, pior 58,5 ms. Sem ganho. O driver do sistema continua o padrão |
+| 2026-11-01 | nativo padrão, liga sozinho pela luta (sem nenhuma variável) | Retroid Pocket 5 | sd480p | **50,0** | 22,9 | 10,8 | 0,4 | 13,7 | 11,5 | 2,8 | - | - | 3,16 | replay 9,9, idle 6,1; pares > 44 ms 2,0%, pior 1% 48,2 ms, pior 61,4 ms |
+| 2026-11-01 | idem | RG Cube | sem limite | **50,0** | 30,3 | 8,4 | 0,3 | 12,9 | 10,4 | 2,1 | - | - | 3,13 | replay 6,6, idle 9,4; pares > 44 ms 0,0%, pior 1% 41,6 ms, pior 42,9 ms |
 
 **Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
 `1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
@@ -511,7 +513,11 @@ Assim o HUD também sai por aqui quando o desenho é simples; a contrapartida é
 sem lista de cenas. Desenha nas mesmas imagens Vulkan dos alvos do GS (FB 0 e Z em `0x1E00`), então o GS continua de onde
 parou, e marca os alvos como válidos (RGB e alfa) para a cópia final FB 0 → página `0x70` não ler a memória do GS.
 
-- Liga com `HL_NATIVE=1` e `HL_NATIVE_FROM=<vsync>` (só teste; falta detectar a luta). `HL_NATIVE_WHOLE=0`,
+- Padrão ligado (`HL_NATIVE=0` desliga). Liga sozinho depois de 8 quadros seguidos com a assinatura da luta no fluxo, a cópia do Z
+  (`FRAME` com FBP `0x1E0`, FBW 4, Z24); desliga depois de 30 vsyncs sem ela e devolve registradores e uploads ao GS. Testado no RP5:
+  entrada na luta (v5236), pausa e seus painéis (continua nativo, imagem certa), saída para o Mode Select pelo GS (v7563) e segunda
+  luta na mesma sessão (v9825), 0 pretos. A campanha (`ADV`) **não foi testada**. `HL_NATIVE_FROM=<vsync>` só impede
+  de ligar antes do vsync dado. A thread de replay só fica nos núcleos pequenos com o nativo ligado. `HL_NATIVE_WHOLE=0`,
   `HL_NATIVE_LITTLE=0` e `HL_NATIVE_CAP=<arquivo>:<vsync>:<n>` (o que foi ao GS, `HL_GSCAP` com um registro `0xFE` por quadro nativo).
 - Nativo na luta inteira: cena, sombras (volumes em `R` contra o Z da cena, sem a cópia do Z), bloom, efeitos, HUD e a cópia final
   para `0x70`. Texturas que não vieram por upload (efeitos nos bits altos, CLUTs em `0x2Cxx`) são lidas da memória do GS.
@@ -521,7 +527,11 @@ parou, e marca os alvos como válidos (RGB e alfa) para a cópia final FB 0 → 
   a tela preta com números ótimos: confira sempre o print, não só a tabela.
 - Turnip: R6 e Rutabaga funcionam no RP5 com a imagem viva (0 pretos no R6 gravado, sem queda da GPU), mas sem ganho: pares
   > 44 ms 2,6% e 3,2%, contra 2,0% do driver do sistema, dentro do que a cena varia. O `v863.1` é da Adreno 863 e não se aplica. Para testar: a pasta do driver em `files/drivers/<id>/` e o id em `files/drivers/selected`.
-- Limites conhecidos: o alfa do FB não é escrito pelo nativo; `As > 128` é limitado; sem despejo do cache de texturas.
+- Limites conhecidos: o alfa do FB não é escrito pelo nativo; `As > 128` é limitado; sem despejo do cache de texturas (248 depois
+  de duas lutas, limite de 16384 conjuntos de descritor; as texturas nunca são liberadas); pipelines criados na primeira vez que
+  aparecem, o que pode causar pico; leitura pelo GS de um alvo privado do nativo (`target read`, 32 tags por 500 vsyncs em
+  um trecho da segunda luta) lê dado velho.
+- Falta: comparar quadro a quadro com o GS (a cena varia entre rodadas, comparei só a olho); os 2% de pares acima de 44 ms no RP5.
 
 ### Áudio (2026-11-01)
 

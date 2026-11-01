@@ -53,20 +53,19 @@ O log da execução vai para `build/run.log`.
 
 ## Próximos passos
 
-O estado detalhado do boot (onde o jogo está, endereços, variáveis `HL_*` de depuração) fica em `docs/plano.md`,
-seção "Estado do boot". Em resumo: o jogo passa da tela de idioma, toca os filmes (FFmpeg) e chega à tela de título,
-que **desenha desde o patch 0029** (`VSQI` do VU0) e com as cores certas desde o 0030 (`MAX`/`MINI` do VU1), mas ainda
-ampliada pela malha do pós-efeito do título e lenta: o rasterizador de software do GS não dá conta dos triângulos
-texturizados de tela cheia. 50 vsyncs/s (PAL, 0027). Sem áudio.
+Fase Android (estado e tabela de medidas em `docs/plano.md`, "Renderizador nativo da luta"). A luta roda a 50 fps nos dois
+aparelhos, com o renderizador nativo (`recomp/android/gsx/hl_native.cpp`), que liga sozinho ao detectar a luta; menus e o resto seguem
+pelo GS do ARMSX2 (`libbt4gsx`).
 
-1. Tela de título: a malha do pós-efeito maior que a tela e a velocidade do GS (ver "Tela de título" em
-   `docs/plano.md`); depois, o menu principal.
-2. Áudio: SPU2 do ARMSX2 num patch (ver `docs/plano.md`, Decisões).
-3. Gráficos no Android: o renderizador do GS do ARMSX2.
+1. Os 2% de pares de vsync acima de 44 ms no Retroid Pocket 5 (perfil `sd480p`).
+2. Conferir o nativo: comparação com o GS, campanha (`ADV`), despejo do cache de texturas.
+3. Controles na tela e som ouvidos numa luta jogada de verdade.
 4. `TouchBridge.nativeScene()` no host Android: 1 menu, 2 luta (`BTL.BIN` residente), 3 campanha (`ADV.BIN`).
 
 ## Aparelhos de teste
 
+- Retroid Pocket 5 (SD865): `192.168.1.89:5555`. Medir com `HL_STOP_PERF=1 tools/device-profile.sh -s 192.168.1.89:5555 limit sd480p`.
+- Anbernic RG Cube (Mali): `192.168.1.183:5555`, sem limite.
 - AYN Odin 2 Mini: `adb -s 9cf62eef`. Instalar o launcher:
   `cd android && ANDROID_SERIAL=9cf62eef ./gradlew installDebug`.
 - Dados do app: `/sdcard/Android/data/com.dfdx047.hiddenleaf/files/`.
