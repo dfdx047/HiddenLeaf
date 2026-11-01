@@ -1,0 +1,46 @@
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 9281d5f..01cd5ef 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,4 +1,7 @@
+ #include "runtime/gs/gs_frontend.h"
++#include <filesystem>
++#include <fstream>
++#include <cstdio>
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ps2_log.h"
+ #include "runtime/ps2_memory.h"
+@@ -1415,6 +1418,33 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+     case GS_REG_TEXFLUSH:
+         if (m_backend)
+             m_backend->TextureFlush();
++        {
++            // Hidden Leaf: a file named hl_steps asks for the FRAME of context 1 at each of the next 40 TEXFLUSHes
++            // (one per texture of the scene: what each draw added), as hl_frames/step_NNN.ppm
++            static int s_steps = 0, s_checks = 0;
++            if (++s_checks % 200 == 0 && std::filesystem::exists("hl_steps"))
++            {
++                std::filesystem::remove("hl_steps");
++                std::filesystem::create_directories("hl_frames");
++                s_steps = 40;
++            }
++            if (s_steps > 0 && m_backend)
++            {
++                char name[64];
++                std::snprintf(name, sizeof(name), "hl_frames/step_%03d.ppm", 40 - s_steps);
++                --s_steps;
++                std::ofstream ppm(name, std::ios::binary);
++                const GSFrameReg frame = m_ctx[0].frame;
++                ppm << "P6\n512 512\n255\n";
++                for (uint32_t y = 0; y < 512u; ++y)
++                    for (uint32_t x = 0; x < 512u; ++x)
++                    {
++                        const uint32_t pixel = m_backend->ReadVram(frame.psm, frame.fbp * 32u, frame.fbw ? frame.fbw : 8u, x, y);
++                        const char rgb[3] = {static_cast<char>(pixel), static_cast<char>(pixel >> 8), static_cast<char>(pixel >> 16)};
++                        ppm.write(rgb, 3);
++                    }
++            }
++        }
+         break;
+     case GS_REG_SCANMSK:
+         m_scanmsk = value;
