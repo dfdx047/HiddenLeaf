@@ -16,6 +16,11 @@ object TouchBridge {
      */
     @JvmStatic external fun nativeScene(): Int
 
+    /** The engine's numbers of the last second (HL_PERF in hl_env.txt), for the overlay. Empty when off. */
+    @JvmStatic external fun nativePerfLine(): String
+
+    fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
+
     private var nativeMissing = false
     private var logged = false
 

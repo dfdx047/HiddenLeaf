@@ -86,6 +86,28 @@ class GameActivity : SDLActivity() {
         requestedOrientation = orientationFlag()
     }
 
+    /** HL_PERF's line, at the bottom of the screen: nothing on it unless the engine has numbers. */
+    private fun addPerfOverlay(layout: ViewGroup) {
+        val text = TextView(this).apply {
+            setTextColor(android.graphics.Color.YELLOW)
+            setBackgroundColor(0x80000000.toInt())
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            visibility = android.view.View.GONE
+        }
+        layout.addView(text, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL))
+        text.post(object : Runnable {
+            override fun run() {
+                val line = TouchBridge.perfLine()
+                if (line.isNotEmpty()) {
+                    text.text = line
+                    text.visibility = android.view.View.VISIBLE
+                }
+                text.postDelayed(this, 500)
+            }
+        })
+    }
+
     private fun addTouchPad() {
         val layout = SDLActivity.getContentView() as? ViewGroup ?: return
         val view = createTouchSurface(this, store.load())
@@ -107,6 +129,7 @@ class GameActivity : SDLActivity() {
         }
         layout.addView(view.view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pad = view
+        addPerfOverlay(layout)
     }
 
     override fun onResume() {

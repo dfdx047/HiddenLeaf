@@ -1,0 +1,2312 @@
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index 589d768..550d449 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -388,6 +388,8 @@ add_library(ps2_runtime STATIC
+     src/lib/ps2_pad.cpp
+     src/lib/ps2_rom_device.cpp
+     src/lib/ps2_vfs.cpp
++    src/lib/hl_perf.cpp
++    src/lib/vu/ps2_vu_fast.cpp
+     src/lib/ps2_runtime.cpp
+     src/lib/ps2_vif1_interpreter.cpp
+     src/lib/vu/ps2_vu1_core.cpp
+@@ -608,3 +610,7 @@ endif()
+ install(DIRECTORY include/
+     DESTINATION include
+ )
++
++# Hidden Leaf: the VU does not fuse multiply-adds, whatever -march allows
++set_source_files_properties(src/lib/vu/ps2_vu1_core.cpp src/lib/vu/ps2_vu1_upper.cpp src/lib/vu/ps2_vu1_lower.cpp src/lib/vu/ps2_vu_fast.cpp
++    PROPERTIES COMPILE_OPTIONS "-ffp-contract=off" SKIP_UNITY_BUILD_INCLUSION ON)
+diff --git a/ps2xRuntime/include/runtime/hl_perf.h b/ps2xRuntime/include/runtime/hl_perf.h
+new file mode 100644
+index 0000000..3a3c6f4
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/hl_perf.h
+@@ -0,0 +1,44 @@
++#pragma once
++// Hidden Leaf: HL_PERF=1: where the time of a frame goes (src/lib/hl_perf.cpp). The game thread is always in exactly one
++// category, so they add up to the frame. The GS is another thread: its CPU time, read from the kernel.
++#include <cstdint>
++
++namespace hl_perf
++{
++    enum Cat : int
++    {
++        kEe,      // the recompiled game code (and the runtime's stubs)
++        kVu0,     // VU0 microprograms (VCALLMS)
++        kVu1,     // VU1 microprograms
++        kIop,     // the IOP: sound driver, disc
++        kGifParse,// the runtime's own parse of the GS stream, for its registers
++        kRing,    // writing the stream for PCSX2's GS
++        kWaitGs,  // the game waiting for PCSX2's GS, which is behind
++        kIdle,    // waiting for the next vsync or event: spare time
++        kCount
++    };
++
++    extern bool g_on;
++    Cat switchTo(Cat next);
++
++    struct Scope
++    {
++        Cat prev = kEe;
++        explicit Scope(Cat c)
++        {
++            if (g_on)
++                prev = switchTo(c);
++        }
++        ~Scope()
++        {
++            if (g_on)
++                switchTo(prev);
++        }
++    };
++
++    void startOnGameThread();             // the thread measured; reads HL_PERF
++    void backToEe();                      // at the dispatcher: a thread switch leaves no scope to close
++    void onVsync(uint32_t tick);          // once per guest vsync
++    void addStreamBytes(uint64_t bytes);  // the frame's GS stream
++    const char *line();                   // the last second, for the overlay; empty when off
++}
+diff --git a/ps2xRuntime/include/runtime/ps2_vu1.h b/ps2xRuntime/include/runtime/ps2_vu1.h
+index 67c8184..7b2685d 100644
+--- a/ps2xRuntime/include/runtime/ps2_vu1.h
++++ b/ps2xRuntime/include/runtime/ps2_vu1.h
+@@ -1,6 +1,9 @@
+ #ifndef PS2_VU1_H
+ #define PS2_VU1_H
+ 
++#include <memory>
++#include <unordered_map>
++#include <vector>
+ #include <array>
+ #include <cstdint>
+ 
+@@ -45,6 +48,7 @@ public:
+     };
+ 
+     explicit VU1Interpreter(Unit unit = Unit::VU1);
++    ~VU1Interpreter();
+ 
+     void reset();
+ 
+@@ -224,6 +228,24 @@ private:
+     std::array<uint64_t, 16> m_viLatestWrite{};
+     std::array<uint64_t, 4> m_accLatestWrite{};
+ 
++    // Hidden Leaf: the fast path (ps2_vu_fast.cpp)
++    struct FastImage;
++    struct FastStallsExit;
++    struct FastSimResult;
++    std::shared_ptr<FastImage> m_fastImage;
++    std::unordered_map<uint64_t, std::shared_ptr<FastImage>> m_fastImages;
++    uint64_t m_fastGeneration = ~0ull;
++    bool m_fastOff = false;
++    bool m_kickDry = false;
++    std::vector<uint8_t> *m_kickCapture = nullptr;
++    std::unique_ptr<VU1Interpreter> m_verifyShadow;
++    bool fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles);
++    bool fastExecute(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles);
++    void fastSimulate(FastImage &image, uint32_t start, FastSimResult &out);
++    void fastEmitBlock(FastImage &image, uint32_t start);
++    void fastTranslate(FastImage &image, uint32_t start);
++    void fastKick(uint8_t *data, uint32_t dataSize, uint32_t qwordAddress);
++
+     uint64_t m_cycle = 0;
+     uint64_t m_nextWriteSequence = 0;
+     uint64_t m_efuResourceReady = 0;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 68c3d00..a1407ee 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_perf.h"
+ #include <csetjmp>
+ #if defined(PS2X_HEADLESS_HOST)
+ #include "runtime/gs/hl_gs_live.h"
+@@ -196,11 +197,13 @@ __attribute__((noinline)) void EeScheduler::guarded(F &&body)
+     if (_setjmp(here) == 0)
+         body();
+     m_transferJump = outer;
++    hl_perf::backToEe();
+ }
+ 
+ void EeScheduler::run()
+ {
+     assertExecutor();
++    hl_perf::startOnGameThread();
+     m_running.store(true, std::memory_order_release);
+ 
+     while (!m_stopRequested.load(std::memory_order_acquire))
+@@ -508,7 +511,14 @@ void EeScheduler::accountCycles(uint32_t cycles) noexcept
+     const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+     m_eeCycle += elapsed;
+     m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
+-    m_runtime.advanceIopEeCycles(elapsed);
++    // (the IOP in small batches: 1024 EE cycles are 3 us of the PS2, and the call was most of its cost)
++    static thread_local uint64_t s_iopPending = 0u;
++    s_iopPending += elapsed;
++    if (s_iopPending >= 1024u)
++    {
++        m_runtime.advanceIopEeCycles(s_iopPending);
++        s_iopPending = 0u;
++    }
+     if (m_pendingEeTimerInterrupts != 0u)
+     {
+         m_checkpointPending.store(true, std::memory_order_release);
+@@ -1970,6 +1980,7 @@ void EeScheduler::processDueDeadlines()
+ 
+             if (now < pacingDeadline)
+             {
++                hl_perf::Scope idle(hl_perf::kIdle);
+                 m_eventCv.wait_until(lock, pacingDeadline, [this]()
+                                      { return !m_events.empty() ||
+                                               m_stopRequested.load(std::memory_order_acquire); });
+@@ -2023,7 +2034,15 @@ void EeScheduler::processDueDeadlines()
+                 // Hidden Leaf: a vblank that came late in host time (a slow stretch: loading, the first frames of a
+                 // scene) does not bring the next ones sooner; with the lag kept, the game ran above 50 Hz until it
+                 // caught up (~53 vsyncs/s for minutes after the boot)
+-                const auto nextHostDeadline = std::max(scheduled.hostDeadline + m_vblankPeriod,
++                // (HL_FAST_UNTIL=<vsync>: no waiting for the clock before it: shorter test runs to a fixed scene)
++                static const uint32_t s_fastUntil = []() -> uint32_t
++                {
++                    const char *v = std::getenv("HL_FAST_UNTIL");
++                    return v ? static_cast<uint32_t>(std::atoi(v)) : 0u;
++                }();
++                const auto nextHostDeadline = m_vsyncTick < s_fastUntil
++                                                  ? std::chrono::steady_clock::now()
++                                                  : std::max(scheduled.hostDeadline + m_vblankPeriod,
+                                                        std::chrono::steady_clock::now());
+                 scheduleEvent(scheduled.deadlineCycle + m_vblankPeriodCycles,
+                               nextHostDeadline,
+@@ -2043,6 +2062,7 @@ void EeScheduler::processEvent(const EeEvent &event)
+         break;
+     case EeEventType::VBlankStart:
+         ++m_vsyncTick;
++        hl_perf::onVsync(m_vsyncTick);
+         if (m_vsyncTick % 300u == 0u)
+         {
+             hl_float_report(m_vsyncTick);
+@@ -2178,6 +2198,7 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
+ 
+ void EeScheduler::waitForEvent()
+ {
++    hl_perf::Scope idle(hl_perf::kIdle);
+     std::unique_lock lock(m_eventMutex);
+     if (!m_events.empty() || m_stopRequested.load(std::memory_order_acquire))
+     {
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index d7902f7..4b6a544 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_perf.h"
+ // Hidden Leaf: the live GS stream (see runtime/gs/hl_gs_live.h). The protocol is BT3-Recomp's ps2_gs_live.cpp (GPLv3), in turn
+ // from PS2Recomp's gs_dump_writer.cpp, reduced to what one process needs: the ring is plain memory.
+ #include "runtime/gs/hl_gs_live.h"
+@@ -94,9 +95,16 @@ namespace
+     void writeByte(uint8_t v) { writeBytes(&v, 1u); }
+     void writeWord(uint32_t v) { writeBytes(&v, 4u); }
+ 
+-    void endPacket()
++    // A futex wake per XGKICK cost the game thread a quarter of its time: the reader is woken every so many bytes, and at
++    // what must not wait (a vsync, a download).
++    constexpr int64_t kWakeEvery = 128 * 1024;
++    int64_t s_wokenAt = 0;
++    void endPacket(bool force = false)
+     {
+         ps2live::RingHeader *h = s_ring.load(std::memory_order_relaxed);
++        if (!force && h->writePos - s_wokenAt < kWakeEvery)
++            return;
++        s_wokenAt = h->writePos;
+         __atomic_thread_fence(__ATOMIC_SEQ_CST);
+         if (h->consumerWaiting)
+             ps2live::eventSet(&s_events->data);
+@@ -231,6 +239,8 @@ namespace hl_gslive
+     void transfer(int path, const uint8_t *data, uint32_t sizeBytes)
+     {
+         const uint8_t type = path == 1 ? kPath1New : (path == 2 ? kPath2 : kPath3);
++        hl_perf::Scope ring(hl_perf::kRing);
++        hl_perf::addStreamBytes(sizeBytes);
+         std::lock_guard<std::mutex> lock(s_mutex);
+         ensureStarted();
+         sizeBytes &= ~15u;
+@@ -279,7 +289,7 @@ namespace hl_gslive
+             seq0 = __atomic_load_n(&s_events->readbackSeq, __ATOMIC_ACQUIRE);
+             writeByte(kTypeReadFifo2);
+             writeWord(qwc);
+-            endPacket();
++            endPacket(true);
+             if (!answers)
+                 return false;
+         }
+@@ -315,7 +325,7 @@ namespace hl_gslive
+             writeBytes(s_regs.data(), s_regs.size());
+             writeByte(kTypeVSync);
+             writeByte(static_cast<uint8_t>(s_frames & 1u));
+-            endPacket();
++            endPacket(true);
+             static const uint32_t maxLag = []() -> uint32_t
+             {
+                 const char *v = std::getenv("HL_GSLIVE_MAXLAG");
+@@ -329,6 +339,7 @@ namespace hl_gslive
+             ++s_frames;
+         }
+         // bounded lag: the game waits until the host has read up to the VSync maxLag frames back
++        hl_perf::Scope waitGs(hl_perf::kWaitGs);
+         while (target >= 0 && __atomic_load_n(&h->readPos, __ATOMIC_ACQUIRE) < target)
+         {
+             if (h->consumerQuit)
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index ad0e4df..8e9c2db 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_perf.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #if defined(PS2X_HEADLESS_HOST)
+ #include "runtime/gs/hl_gs_live.h"
+@@ -63,6 +64,7 @@ void GifArbiter::drain()
+ #if defined(PS2X_HEADLESS_HOST)
+             hl_gslive::transfer(static_cast<int>(pkt.pathId), pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+ #endif
++            hl_perf::Scope parse(hl_perf::kGifParse);
+             m_processFn(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+         }
+     }
+diff --git a/ps2xRuntime/src/lib/hl_perf.cpp b/ps2xRuntime/src/lib/hl_perf.cpp
+new file mode 100644
+index 0000000..037cb73
+--- /dev/null
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -0,0 +1,247 @@
++// Hidden Leaf: the per-frame numbers of HL_PERF=1 (see runtime/hl_perf.h). Every second a line in the log and on the overlay.
++// HL_PERF_FROM=<vsync>: the fixed measure: from that vsync 10 s of warm-up, then 30 s measured, then a [perf] RESULT line.
++#include "runtime/hl_perf.h"
++
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <mutex>
++#include <string>
++#include <vector>
++#if defined(__linux__)
++#include <dirent.h>
++#endif
++
++namespace hl_perf
++{
++    bool g_on = false;
++
++    namespace
++    {
++        thread_local bool t_game = false;
++        Cat s_current = kEe;
++        uint64_t s_last = 0;
++        uint64_t s_ticks[kCount] = {};
++        std::atomic<uint64_t> s_bytes{0};
++
++        inline uint64_t now()
++        {
++#if defined(__aarch64__)
++            uint64_t v;
++            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(v));
++            return v;
++#else
++            return static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
++#endif
++        }
++
++        double ticksPerMs()
++        {
++#if defined(__aarch64__)
++            uint64_t f;
++            __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
++            return static_cast<double>(f) / 1000.0;
++#else
++            return static_cast<double>(std::chrono::steady_clock::period::den) / std::chrono::steady_clock::period::num / 1000.0;
++#endif
++        }
++
++        struct Window
++        {
++            uint64_t startTick = 0;
++            uint64_t ticks[kCount] = {};
++            uint64_t gsNs = 0;
++            uint64_t bytes = 0;
++            uint32_t frames = 0;
++            std::vector<float> frameMs;
++        };
++
++        // CPU time of PCSX2's GS threads ("GS", and "CPU Thread" that feeds it)
++        uint64_t gsThreadsNs()
++        {
++            uint64_t total = 0;
++#if defined(__linux__)
++            DIR *dir = opendir("/proc/self/task");
++            if (!dir)
++                return 0;
++            while (dirent *entry = readdir(dir))
++            {
++                if (entry->d_name[0] == '.')
++                    continue;
++                char path[96], comm[32] = {};
++                std::snprintf(path, sizeof(path), "/proc/self/task/%s/comm", entry->d_name);
++                FILE *f = std::fopen(path, "r");
++                if (!f)
++                    continue;
++                const bool ok = std::fgets(comm, sizeof(comm), f) != nullptr;
++                std::fclose(f);
++                if (!ok || (std::strncmp(comm, "GS\n", 3) != 0 && std::strncmp(comm, "CPU Thread\n", 11) != 0))
++                    continue;
++                std::snprintf(path, sizeof(path), "/proc/self/task/%s/schedstat", entry->d_name);
++                f = std::fopen(path, "r");
++                if (!f)
++                    continue;
++                unsigned long long ns = 0;
++                if (std::fscanf(f, "%llu", &ns) == 1)
++                    total += ns;
++                std::fclose(f);
++            }
++            closedir(dir);
++#endif
++            return total;
++        }
++
++        std::mutex s_lineMutex;
++        std::string s_line;
++
++        Window s_second, s_measure;
++        uint64_t s_gsLast = 0;
++        uint64_t s_lastVsync = 0, s_secondStart = 0, s_measureStart = 0;
++        enum class Phase { Off, Waiting, Warm, Measuring, Done } s_phase = Phase::Off;
++        uint32_t s_from = 0;
++
++        void accumulate(Window &w, const uint64_t *deltaTicks, uint64_t gsNs, uint64_t bytes)
++        {
++            for (int i = 0; i < kCount; ++i)
++                w.ticks[i] += deltaTicks[i];
++            w.gsNs += gsNs;
++            w.bytes += bytes;
++        }
++
++        std::string describe(const Window &w, double fps, double tpm)
++        {
++            const double frames = std::max<uint32_t>(w.frames, 1u);
++            const auto ms = [&](Cat c) { return static_cast<double>(w.ticks[c]) / tpm / frames; };
++            char text[256];
++            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f idle %.1f ms | %.2f MB/f",
++                          fps, ms(kEe), ms(kVu0), ms(kVu1), static_cast<double>(w.gsNs) / 1e6 / frames, ms(kIop), ms(kGifParse), ms(kRing), ms(kWaitGs), ms(kIdle),
++                          static_cast<double>(w.bytes) / 1048576.0 / frames);
++            return text;
++        }
++    }
++
++    Cat switchTo(Cat next)
++    {
++        if (!t_game)
++            return next;
++        const uint64_t t = now();
++        s_ticks[s_current] += t - s_last;
++        s_last = t;
++        const Cat previous = s_current;
++        s_current = next;
++        return previous;
++    }
++
++    void backToEe()
++    {
++        if (g_on && s_current != kEe)
++            switchTo(kEe);
++    }
++
++    void startOnGameThread()
++    {
++        if (!std::getenv("HL_PERF"))
++            return;
++        t_game = true;
++        s_last = s_secondStart = s_lastVsync = now();
++        if (const char *from = std::getenv("HL_PERF_FROM"))
++        {
++            s_from = static_cast<uint32_t>(std::atoi(from));
++            s_phase = Phase::Waiting;
++        }
++        g_on = true;
++    }
++
++    void addStreamBytes(uint64_t bytes)
++    {
++        if (g_on)
++            s_bytes.fetch_add(bytes, std::memory_order_relaxed);
++    }
++
++    void onVsync(uint32_t tick)
++    {
++        if (!g_on || !t_game)
++            return;
++        static const double tpm = ticksPerMs();
++        const Cat here = switchTo(s_current); // (brings the counters up to now)
++        (void)here;
++        const uint64_t t = s_last;
++        const float frameMs = static_cast<float>(static_cast<double>(t - s_lastVsync) / tpm);
++        s_lastVsync = t;
++        ++s_second.frames;
++
++        if (s_phase == Phase::Waiting && tick >= s_from)
++        {
++            s_phase = Phase::Warm;
++            s_measureStart = t;
++            std::fprintf(stderr, "[perf] vsync %u: 10 s of warm-up\n", tick);
++        }
++        else if (s_phase == Phase::Warm && static_cast<double>(t - s_measureStart) / tpm >= 10000.0)
++        {
++            s_phase = Phase::Measuring;
++            s_measureStart = t;
++            s_measure = {};
++            std::fprintf(stderr, "[perf] vsync %u: measuring 30 s\n", tick);
++        }
++        if (s_phase == Phase::Measuring)
++        {
++            ++s_measure.frames;
++            s_measure.frameMs.push_back(frameMs);
++        }
++
++        if (static_cast<double>(t - s_secondStart) / tpm < 1000.0)
++            return;
++
++        // a second is up: everything since the last one
++        static uint64_t s_prev[kCount] = {};
++        uint64_t delta[kCount];
++        for (int i = 0; i < kCount; ++i)
++        {
++            delta[i] = s_ticks[i] - s_prev[i];
++            s_prev[i] = s_ticks[i];
++        }
++        const uint64_t gsNow = gsThreadsNs();
++        const uint64_t gsDelta = gsNow - s_gsLast;
++        s_gsLast = gsNow;
++        const uint64_t bytes = s_bytes.exchange(0, std::memory_order_relaxed);
++        accumulate(s_second, delta, gsDelta, bytes);
++        if (s_phase == Phase::Measuring)
++            accumulate(s_measure, delta, gsDelta, bytes);
++
++        const double fps = s_second.frames * 1000.0 / (static_cast<double>(t - s_secondStart) / tpm);
++        const std::string text = describe(s_second, fps, tpm);
++        {
++            std::lock_guard<std::mutex> lock(s_lineMutex);
++            s_line = text;
++        }
++        std::fprintf(stderr, "[perf] v%u %s\n", tick, text.c_str());
++        s_second = {};
++        s_secondStart = t;
++
++        if (s_phase == Phase::Measuring && static_cast<double>(t - s_measureStart) / tpm >= 30000.0)
++        {
++            s_phase = Phase::Done;
++            const double seconds = static_cast<double>(t - s_measureStart) / tpm / 1000.0;
++            std::vector<float> sorted = s_measure.frameMs;
++            std::sort(sorted.begin(), sorted.end(), [](float a, float b) { return a > b; });
++            const size_t worst = std::max<size_t>(1u, sorted.size() / 100u);
++            double sum = 0.0;
++            for (size_t i = 0; i < worst && i < sorted.size(); ++i)
++                sum += sorted[i];
++            const double low = sum > 0.0 ? 1000.0 / (sum / static_cast<double>(worst)) : 0.0;
++            const std::string result = describe(s_measure, s_measure.frames / seconds, tpm);
++            std::fprintf(stderr, "[perf] RESULT low1 %.1f fps, %u frames in %.1f s: %s\n", low, s_measure.frames, seconds, result.c_str());
++        }
++    }
++
++    const char *line()
++    {
++        static std::string copy;
++        std::lock_guard<std::mutex> lock(s_lineMutex);
++        copy = s_line;
++        return copy.c_str();
++    }
++}
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index dfae56d..ecf8e10 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_perf.h"
+ #include "runtime/hl_image.h"
+ #include "ps2_runtime.h"
+ #include "ps2_log.h"
+@@ -696,6 +697,7 @@ bool PS2Runtime::canBindIopRpc(uint32_t sid) const noexcept
+ 
+ ps2x::iop::RpcResult PS2Runtime::handleIopRpc(uint8_t *rdram, R5900Context *ctx, ps2x::iop::RpcRequest request)
+ {
++    hl_perf::Scope iopScope(hl_perf::kIop);
+     auto scope = m_iopHost->enterCall(ctx, rdram);
+     request.callToken = scope.token();
+     return m_iopSubsystem->handleRpc(request);
+@@ -703,12 +705,14 @@ ps2x::iop::RpcResult PS2Runtime::handleIopRpc(uint8_t *rdram, R5900Context *ctx,
+ 
+ void PS2Runtime::notifyIopSifTransfer(uint8_t *rdram, const ps2x::iop::SifTransfer &transfer)
+ {
++    hl_perf::Scope iopScope(hl_perf::kIop);
+     auto scope = m_iopHost->enterCall(nullptr, rdram);
+     m_iopSubsystem->onSifTransfer(transfer);
+ }
+ 
+ void PS2Runtime::advanceIopEeCycles(uint64_t eeCycles) noexcept
+ {
++    hl_perf::Scope iopScope(hl_perf::kIop);
+     m_iopSubsystem->runEeCycles(eeCycles);
+ }
+ 
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index c8a779d..e8f806b 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -1,3 +1,9 @@
++#include "runtime/hl_perf.h"
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <map>
++#include <string>
+ #include "runtime/ps2_vu1.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include "runtime/gs/gs_frontend.h"
+@@ -64,6 +70,14 @@ VU1Interpreter::VU1Interpreter(Unit unit)
+     reset();
+ }
+ 
++// (not the 64 KB of the packet: this runs thousands of times per frame)
++static void clearXgkick(uint32_t &source, uint32_t &total, uint32_t &copied, uint32_t &tagEnd, uint32_t &credit, uint64_t &issue, bool &active, bool &eop)
++{
++    source = total = copied = tagEnd = credit = 0u;
++    issue = 0u;
++    active = eop = false;
++}
++
+ void VU1Interpreter::resetScheduler()
+ {
+     m_flagPipeline = {};
+@@ -73,7 +87,8 @@ void VU1Interpreter::resetScheduler()
+     m_vfWritePipeline = {};
+     m_viWritePipeline = {};
+     m_accWritePipeline = {};
+-    m_xgkick = {};
++    clearXgkick(m_xgkick.sourceAddress, m_xgkick.totalBytes, m_xgkick.copiedBytes, m_xgkick.currentTagEnd, m_xgkick.cycleCredit,
++                m_xgkick.issueCycle, m_xgkick.active, m_xgkick.currentTagEop);
+     m_vfReady = {};
+     m_viReady = {};
+     m_accReady = {};
+@@ -919,6 +934,13 @@ void VU1Interpreter::finishXgkick()
+     if (!m_xgkick.active)
+         return;
+ 
++    if (m_kickCapture)
++        m_kickCapture->insert(m_kickCapture->end(), m_xgkick.packet.data(), m_xgkick.packet.data() + m_xgkick.totalBytes);
++    if (m_kickDry)
++    {
++        m_xgkick.active = false;
++        return;
++    }
+     if (m_activeMemory)
+         m_activeMemory->submitGifPacket(GifPathId::Path1, m_xgkick.packet.data(), m_xgkick.totalBytes);
+     else if (m_activeGs)
+@@ -932,7 +954,8 @@ void VU1Interpreter::startXgkick(uint32_t qwordAddress)
+         return;
+ 
+     const uint32_t sourceAddress = (qwordAddress * 16u) % m_activeVuDataSize;
+-    m_xgkick = {};
++    clearXgkick(m_xgkick.sourceAddress, m_xgkick.totalBytes, m_xgkick.copiedBytes, m_xgkick.currentTagEnd, m_xgkick.cycleCredit,
++                m_xgkick.issueCycle, m_xgkick.active, m_xgkick.currentTagEop);
+     m_xgkick.active = true;
+     m_xgkick.sourceAddress = sourceAddress;
+     m_xgkick.cycleCredit = 1u; // XGKICK's issue cycle counts toward PATH1.
+@@ -1620,15 +1643,97 @@ void VU1Interpreter::resume(uint8_t *vuCode, uint32_t codeSize,
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
++// HL_VUCENSUS=<dir>: which microprograms the game runs: a binary of each distinct image in <dir>, a table in the log.
++namespace
++{
++    struct VuProgStat
++    {
++        uint64_t runs = 0, cycles = 0;
++        uint32_t maxPc = 0;
++        std::map<uint32_t, uint64_t> entries;
++    };
++    const char *vuCensusDir()
++    {
++        static const char *dir = std::getenv("HL_VUCENSUS");
++        return dir;
++    }
++    uint64_t vuFnv(const uint8_t *data, uint32_t size)
++    {
++        uint64_t h = 1469598103934665603ull;
++        for (uint32_t i = 0; i < size; ++i)
++            h = (h ^ data[i]) * 1099511628211ull;
++        return h;
++    }
++    std::map<uint64_t, VuProgStat> s_vuStats[2];
++    struct VuCensus
++    {
++        VuProgStat *stat = nullptr;
++        const uint64_t &cycle;
++        uint64_t start;
++        VuCensus(bool vu1, const uint8_t *code, uint32_t size, PS2Memory *memory, uint32_t pc, const uint64_t &cycleRef)
++            : cycle(cycleRef), start(cycleRef)
++        {
++            if (!vuCensusDir() || !memory)
++                return;
++            static uint64_t s_gen[2] = {~0ull, ~0ull}, s_hash[2] = {};
++            const uint64_t gen = vu1 ? memory->getVU1CodeGeneration() : memory->getVU0CodeGeneration();
++            if (gen != s_gen[vu1])
++            {
++                s_gen[vu1] = gen;
++                const uint64_t h = vuFnv(code, size);
++                s_hash[vu1] = h;
++                if (s_vuStats[vu1].find(h) == s_vuStats[vu1].end())
++                {
++                    char path[512];
++                    std::snprintf(path, sizeof(path), "%s/vu%d_%016llx.bin", vuCensusDir(), vu1 ? 1 : 0, static_cast<unsigned long long>(h));
++                    if (FILE *f = std::fopen(path, "wb"))
++                    {
++                        std::fwrite(code, 1, size, f);
++                        std::fclose(f);
++                    }
++                }
++            }
++            stat = &s_vuStats[vu1][s_hash[vu1]];
++            ++stat->runs;
++            ++stat->entries[pc];
++        }
++        ~VuCensus()
++        {
++            if (!stat)
++                return;
++            stat->cycles += cycle - start;
++            static auto s_last = std::chrono::steady_clock::now();
++            const auto now = std::chrono::steady_clock::now();
++            if (now - s_last < std::chrono::seconds(10))
++                return;
++            s_last = now;
++            for (int u = 0; u < 2; ++u)
++                for (const auto &[hash, s] : s_vuStats[u])
++                {
++                    std::string entries;
++                    for (const auto &[pc, n] : s.entries)
++                        entries += " " + std::to_string(pc) + ":" + std::to_string(n);
++                    std::fprintf(stderr, "[vucensus] vu%d %016llx runs=%llu cycles=%llu entries%s\n", u, static_cast<unsigned long long>(hash),
++                                 static_cast<unsigned long long>(s.runs), static_cast<unsigned long long>(s.cycles), entries.c_str());
++                }
++        }
++    };
++}
++
+ void VU1Interpreter::run(uint8_t *vuCode, uint32_t codeSize,
+                          uint8_t *vuData, uint32_t dataSize,
+                          GS &gs, PS2Memory *memory, uint32_t maxCycles)
+ {
++    hl_perf::Scope perfScope(m_unit == Unit::VU1 ? hl_perf::kVu1 : hl_perf::kVu0);
++    VuCensus census(m_unit == Unit::VU1, vuCode, codeSize, memory, m_state.pc, m_cycle);
+     m_activeVuData = vuData;
+     m_activeVuDataSize = dataSize;
+     m_activeGs = &gs;
+     m_activeMemory = memory;
+ 
++    if (fastRun(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles))
++        return;
++
+     const int previousRoundingMode = std::fegetround();
+     const bool useVuRounding = std::fesetround(FE_TOWARDZERO) == 0;
+     const uint64_t budgetEnd = m_cycle + maxCycles;
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+new file mode 100644
+index 0000000..84a1aae
+--- /dev/null
++++ b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+@@ -0,0 +1,1583 @@
++// Hidden Leaf: the VU's fast path. The interpreter (ps2_vu1_core.cpp) models every pipeline cycle by cycle, at about 1 us per
++// pair on the phones; a fight runs some 350 000 pairs per frame. Since a read of a register that is still being written
++// stalls until it is ready, the registers behave sequentially; only the Q and P registers and the MAC flags can be seen
++// "late", and those depend on the cycle count. So the code is translated, when first run, into a list of small operations:
++//   - the stalls are worked out once, per block (cycle offset of each pair), with the interpreter's own usage tables;
++//   - the FMAC arithmetic runs under round-to-zero with flush-to-zero, which gives the VU's results for finite operands;
++//     a result that comes out Inf/NaN means a special operand: it is redone with the operands normalized;
++//   - the MAC flags are computed only when something can read them;
++//   - XGKICK sends its packet at once.
++// Anything else (CLIP and FC* flags, D/T bits, a branch in a delay slot) leaves to the interpreter at that block.
++// HL_VUFAST=0 turns it off. HL_VUVERIFY=1 runs the interpreter on a copy first and compares (state, memory, GS packets).
++#include "runtime/ps2_vu1.h"
++#include "runtime/gs/ps2_gif_arbiter.h"
++#include "runtime/gs/gs_frontend.h"
++#include "runtime/ps2_memory.h"
++#include "ps2_vu1_detail.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <limits>
++#include <map>
++#include <memory>
++#include <vector>
++
++#if defined(__aarch64__)
++#include <arm_neon.h>
++#else
++#include <immintrin.h>
++#endif
++
++#define HL_UNLIKELY(x) __builtin_expect(!!(x), 0)
++
++namespace
++{
++#if defined(__aarch64__)
++    using Vec = float32x4_t;
++    inline Vec LD(const float *p) { return vld1q_f32(p); }
++    inline void ST(float *p, Vec v) { vst1q_f32(p, v); }
++    inline Vec LD1(const float *p) { return vld1q_dup_f32(p); }
++    inline Vec SET1(float f) { return vdupq_n_f32(f); }
++    inline Vec ADD(Vec a, Vec b) { return vaddq_f32(a, b); }
++    inline Vec SUB(Vec a, Vec b) { return vsubq_f32(a, b); }
++    inline Vec MUL(Vec a, Vec b) { return vmulq_f32(a, b); }
++    inline bool anySpecial(Vec r)
++    {
++        const uint32x4_t e = vdupq_n_u32(0x7F800000u);
++        return vmaxvq_u32(vceqq_u32(vandq_u32(vreinterpretq_u32_f32(r), e), e)) != 0u;
++    }
++    inline Vec normOperand(Vec v)
++    {
++        const uint32x4_t e = vdupq_n_u32(0x7F800000u);
++        const uint32x4_t bits = vreinterpretq_u32_f32(v);
++        const uint32x4_t exp = vandq_u32(bits, e);
++        const uint32x4_t sign = vandq_u32(bits, vdupq_n_u32(0x80000000u));
++        uint32x4_t out = vbslq_u32(vceqq_u32(exp, e), vorrq_u32(sign, vdupq_n_u32(0x7F7FFFFFu)), bits);
++        out = vbslq_u32(vceqzq_u32(exp), sign, out);
++        return vreinterpretq_f32_u32(out);
++    }
++    inline uint32_t macOf(Vec r, uint8_t dest)
++    {
++        static const uint32_t lanes[4] = {8u, 4u, 2u, 1u};
++        const uint32x4_t lane = vld1q_u32(lanes);
++        const uint32x4_t bits = vreinterpretq_u32_f32(r);
++        const uint32x4_t magnitude = vandq_u32(bits, vdupq_n_u32(0x7FFFFFFFu));
++        const uint32_t z = vaddvq_u32(vandq_u32(vceqzq_u32(magnitude), lane));
++        const uint32_t s = vaddvq_u32(vandq_u32(lane, vreinterpretq_u32_s32(vshrq_n_s32(vreinterpretq_s32_u32(bits), 31))));
++        const uint32_t o = vaddvq_u32(vandq_u32(vceqq_u32(magnitude, vdupq_n_u32(0x7F7FFFFFu)), lane));
++        return (z | (s << 4) | (o << 12)) & (dest * 0x1111u);
++    }
++#else
++    using Vec = __m128;
++    inline Vec LD(const float *p) { return _mm_loadu_ps(p); }
++    inline void ST(float *p, Vec v) { _mm_storeu_ps(p, v); }
++    inline Vec LD1(const float *p) { return _mm_load1_ps(p); }
++    inline Vec SET1(float f) { return _mm_set1_ps(f); }
++    inline Vec ADD(Vec a, Vec b) { return _mm_add_ps(a, b); }
++    inline Vec SUB(Vec a, Vec b) { return _mm_sub_ps(a, b); }
++    inline Vec MUL(Vec a, Vec b) { return _mm_mul_ps(a, b); }
++    inline bool anySpecial(Vec r)
++    {
++        const __m128i e = _mm_set1_epi32(0x7F800000);
++        return _mm_movemask_epi8(_mm_cmpeq_epi32(_mm_and_si128(_mm_castps_si128(r), e), e)) != 0;
++    }
++    inline Vec normOperand(Vec v)
++    {
++        const __m128i e = _mm_set1_epi32(0x7F800000);
++        const __m128i bits = _mm_castps_si128(v);
++        const __m128i exp = _mm_and_si128(bits, e);
++        const __m128i sign = _mm_and_si128(bits, _mm_set1_epi32(static_cast<int>(0x80000000u)));
++        const __m128i isSpecial = _mm_cmpeq_epi32(exp, e);
++        __m128i out = _mm_or_si128(_mm_and_si128(isSpecial, _mm_or_si128(sign, _mm_set1_epi32(0x7F7FFFFF))), _mm_andnot_si128(isSpecial, bits));
++        const __m128i isZero = _mm_cmpeq_epi32(exp, _mm_setzero_si128());
++        out = _mm_or_si128(_mm_and_si128(isZero, sign), _mm_andnot_si128(isZero, out));
++        return _mm_castsi128_ps(out);
++    }
++    inline uint32_t macOf(Vec r, uint8_t dest)
++    {
++        static const uint8_t rev[16] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
++        const __m128i bits = _mm_castps_si128(r);
++        const __m128i magnitude = _mm_and_si128(bits, _mm_set1_epi32(0x7FFFFFFF));
++        const uint32_t z = rev[_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(magnitude, _mm_setzero_si128())))];
++        const uint32_t s = rev[_mm_movemask_ps(r)];
++        const uint32_t o = rev[_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(magnitude, _mm_set1_epi32(0x7F7FFFFF))))];
++        return (z | (s << 4) | (o << 12)) & (dest * 0x1111u);
++    }
++#endif
++
++    // the rounding of the VU: toward zero, denormals to zero
++    struct VuFpMode
++    {
++#if defined(__aarch64__)
++        uint64_t saved;
++        VuFpMode()
++        {
++            __asm__ volatile("mrs %0, fpcr" : "=r"(saved));
++            const uint64_t mode = (saved & ~(3ull << 22)) | (3ull << 22) | (1ull << 24);
++            __asm__ volatile("msr fpcr, %0" : : "r"(mode));
++        }
++        ~VuFpMode() { __asm__ volatile("msr fpcr, %0" : : "r"(saved)); }
++#else
++        unsigned saved;
++        VuFpMode()
++        {
++            saved = _mm_getcsr();
++            _mm_setcsr((saved & ~0x6000u) | 0x6000u | 0x8000u | 0x0040u);
++        }
++        ~VuFpMode() { _mm_setcsr(saved); }
++#endif
++    };
++
++    alignas(16) const uint32_t kDestMask[16][4] = {
++        {0, 0, 0, 0}, {0, 0, 0, ~0u}, {0, 0, ~0u, 0}, {0, 0, ~0u, ~0u},
++        {0, ~0u, 0, 0}, {0, ~0u, 0, ~0u}, {0, ~0u, ~0u, 0}, {0, ~0u, ~0u, ~0u},
++        {~0u, 0, 0, 0}, {~0u, 0, 0, ~0u}, {~0u, 0, ~0u, 0}, {~0u, 0, ~0u, ~0u},
++        {~0u, ~0u, 0, 0}, {~0u, ~0u, 0, ~0u}, {~0u, ~0u, ~0u, 0}, {~0u, ~0u, ~0u, ~0u}};
++
++    inline void storeMasked(float *dst, Vec r, uint8_t dest)
++    {
++#if defined(__aarch64__)
++        ST(dst, vbslq_f32(vld1q_u32(kDestMask[dest]), r, LD(dst)));
++#else
++        const __m128 m = _mm_load_ps(reinterpret_cast<const float *>(kDestMask[dest]));
++        ST(dst, _mm_or_ps(_mm_and_ps(m, r), _mm_andnot_ps(m, LD(dst))));
++#endif
++    }
++
++    inline float normScalar(float value)
++    {
++        uint32_t bits;
++        std::memcpy(&bits, &value, sizeof(bits));
++        const uint32_t exponent = (bits >> 23) & 0xFFu;
++        if (exponent == 0u)
++            bits &= 0x80000000u;
++        else if (exponent == 0xFFu)
++            bits = (bits & 0x80000000u) | 0x7F7FFFFFu;
++        std::memcpy(&value, &bits, sizeof(value));
++        return value;
++    }
++
++    inline int32_t maxRaw(int32_t a, int32_t b) { return (a < 0 && b < 0) ? std::min(a, b) : std::max(a, b); }
++    inline int32_t minRaw(int32_t a, int32_t b) { return (a < 0 && b < 0) ? std::max(a, b) : std::min(a, b); }
++
++    inline uint64_t codeHash(const uint8_t *code, uint32_t size)
++    {
++        uint64_t h = 1469598103934665603ull;
++        for (uint32_t i = 0; i + 8u <= size; i += 8u)
++        {
++            uint64_t word;
++            std::memcpy(&word, code + i, sizeof(word));
++            h = (h ^ word) * 1099511628211ull;
++            h ^= h >> 29;
++        }
++        return h;
++    }
++
++    // registers of the fast path: vf[0..31], then these
++    constexpr uint8_t kVfTemp = 32u, kVfAcc = 33u, kVfDiscard = 34u, kVfCount = 35u;
++    constexpr uint8_t kViBackup = 16u;
++
++    enum FmacOp : uint8_t { kAdd, kSub, kMul, kMadd, kMsub, kFmacOps };
++    enum FmacSrc : uint8_t { kFull, kBcX, kBcY, kBcZ, kBcW, kQ, kI, kFmacSrcs };
++
++    // Other kinds, after the FMAC block (kFmacOps * kFmacSrcs * 4 of them)
++    enum Kind : uint16_t
++    {
++        kFmacFirst = 0,
++        kOpm = kFmacOps * kFmacSrcs * 4,
++        kMaxMin, kItof, kFtoi, kAbs, kMove, kMr32, kSetI,
++        kLq, kLqPost, kLqPre, kSq, kSqPost, kSqPre, kIlw, kIlwr, kIsw, kIswr,
++        kIaddiu, kIsubiu, kIadd, kIsub, kIaddi, kIand, kIor, kMtir, kMfir, kXtop, kXitop, kSaveVi,
++        kFmand, kFmor, kFmeq, kFsand, kFsset,
++        kDiv, kSqrt, kRsqrt, kWaitQ, kEfu, kWaitP, kMfp, kXgkick,
++        kBranch, kJump, kEnd, kEndProgram, kToInterpreter,
++        kKinds
++    };
++
++    struct FOp
++    {
++        const void *label;
++        uint8_t a, b, c, d;
++        int32_t imm;
++        uint32_t off;
++        int32_t x;
++    };
++}
++
++struct VU1Interpreter::FastImage
++{
++    struct Stalls;
++    std::vector<FOp> ops;
++    std::vector<int32_t> entry; // pair -> index of its block's first op, -1 not translated
++    std::vector<uint8_t> code;
++    uint32_t pairs = 0;
++    bool statusLive = false; // some FS* reader in the code: every FMAC counts for the status flags
++
++    struct Stalls
++    {
++        int16_t vf[32][4];
++        int16_t vi[16];
++        int16_t acc[4];
++        int16_t fdiv;
++        int16_t efu;
++        int16_t efuResource;
++    };
++    struct Block
++    {
++        Stalls in;
++        bool emitted = false;
++    };
++    std::map<uint32_t, Block> blocks;
++};
++
++struct VU1Interpreter::FastSimResult
++{
++    std::vector<uint32_t> pairs;
++    std::vector<int32_t> cycles;
++    FastImage::Stalls exit{};
++    int32_t total = 0;
++    uint32_t next = 0;
++    uint32_t branchPair = 0;
++    bool hasBranch = false;
++    bool ends = false;
++    bool toInterpreter = false;
++};
++
++namespace
++{
++    bool vuFastEnabled()
++    {
++        static const bool on = []
++        {
++            const char *v = std::getenv("HL_VUFAST");
++            return !(v && v[0] == '0');
++        }();
++        return on;
++    }
++    bool vuVerifyEnabled()
++    {
++        static const bool on = std::getenv("HL_VUVERIFY") != nullptr;
++        return on;
++    }
++    const void *const *g_labels = nullptr;
++
++    bool pairNeedsInterpreter(uint32_t lower, uint32_t upper, bool reservedUpper, bool reservedLower)
++    {
++        if (reservedUpper || reservedLower || (upper & 0x18000000u) != 0u)
++            return true;
++        const uint8_t op = upper & 0x3Fu;
++        if (op >= 0x3Cu && ((upper & 3u) | ((upper >> 4) & 0x7Cu)) == 0x1Fu)
++            return true; // CLIP
++        if ((upper & 0x80000000u) != 0u)
++            return false;
++        const uint8_t opHi = (lower >> 25) & 0x7Fu;
++        if (lower == 0u || lower == 0x8000033Cu)
++            return false;
++        if (opHi >= 0x10u && opHi <= 0x13u)
++            return true; // FC*
++        // FS*: only the zero and sign flags are kept here (no underflow, and overflow only roughly); the game reads those
++        if (opHi == 0x14u || opHi == 0x17u)
++            return true; // FSEQ, FSOR
++        if (opHi == 0x16u && ((((lower >> 21) & 1u) << 11 | (lower & 0x7FFu)) & ~0x0C3u) != 0u)
++            return true; // FSAND of other flags
++        if (opHi == 0x1Cu)
++            return true; // FCGET
++        if (opHi == 0x40u && (lower & 0x3Fu) >= 0x3Cu)
++        {
++            const uint8_t special = (lower & 3u) | ((lower >> 4) & 0x7Cu);
++            if (special >= 0x40u && special <= 0x43u)
++                return true; // R*
++        }
++        return false;
++    }
++    bool lowerIsBranch(uint32_t lower, uint32_t upper)
++    {
++        if ((upper & 0x80000000u) != 0u || lower == 0x8000033Cu)
++            return false;
++        const uint8_t opHi = (lower >> 25) & 0x7Fu;
++        return opHi >= 0x20u && opHi <= 0x2Fu;
++    }
++}
++
++VU1Interpreter::~VU1Interpreter() = default;
++
++// ---------------------------------------------------------------------------------------------------------------------
++// Translation
++// ---------------------------------------------------------------------------------------------------------------------
++
++// One pass of the stall model over a block: fills `cycles` (offset of each pair) when asked; returns the state at its end.
++void VU1Interpreter::fastSimulate(FastImage &image, uint32_t start, FastSimResult &out)
++{
++    FastImage::Block &block = image.blocks[start];
++    int32_t vf[32][4], vi[16], acc[4];
++    for (int r = 0; r < 32; ++r)
++        for (int c = 0; c < 4; ++c)
++            vf[r][c] = block.in.vf[r][c];
++    for (int r = 0; r < 16; ++r)
++        vi[r] = block.in.vi[r];
++    for (int c = 0; c < 4; ++c)
++        acc[c] = block.in.acc[c];
++    int32_t fdiv = block.in.fdiv, efu = block.in.efu, efuRes = block.in.efuResource;
++
++    const uint32_t n = image.pairs;
++    int32_t cycle = 0;
++    uint32_t k = start;
++    out = {};
++    bool endAfterNext = false, ending = false;
++    for (uint32_t count = 0; count < 512u; ++count)
++    {
++        const DecodedInstructionPair d = decodeInstructionPair(image.code.data(), k * 8u);
++        if (pairNeedsInterpreter(d.lower, d.upper, d.upperUsage.reserved, d.lowerUsage.reserved) ||
++            (endAfterNext && (d.eBit || lowerIsBranch(d.lower, d.upper))))
++        {
++            out.toInterpreter = true;
++            return;
++        }
++
++        int32_t ready = cycle;
++        const InstructionUsage *usages[2] = {&d.upperUsage, &d.lowerUsage};
++        for (const InstructionUsage *usage : usages)
++        {
++            for (uint32_t index = 0; index < usage->vfReadCount; ++index)
++            {
++                const VfAccess &access = usage->vfRead[index];
++                for (uint32_t c = 0; c < 4u; ++c)
++                    if ((access.lanes & (8u >> c)) != 0u)
++                        ready = std::max(ready, vf[access.reg][c]);
++            }
++            for (uint32_t r = 1; r < 16u; ++r)
++                if ((usage->viRead & (1u << r)) != 0u)
++                    ready = std::max(ready, vi[r]);
++            for (uint32_t c = 0; c < 4u; ++c)
++                if ((usage->accRead & (8u >> c)) != 0u)
++                    ready = std::max(ready, acc[c]);
++        }
++        if (d.lowerUsage.pipeline == PipelineFdiv || d.lowerUsage.waitQ)
++            ready = std::max(ready, fdiv);
++        if (d.lowerUsage.pipeline == PipelineEfu)
++            ready = std::max(ready, efuRes);
++        if (d.lowerUsage.waitP)
++            ready = std::max(ready, efu);
++        cycle = ready;
++
++        out.pairs.push_back(k);
++        out.cycles.push_back(cycle);
++
++        // what this pair leaves in the pipelines (markPairWrites)
++        const VfAccess lowerWrite = d.lowerUsage.vfWrite;
++        if (lowerWrite.reg != 0u && d.suppressedLowerVf != lowerWrite.reg)
++        {
++            const int32_t latency = d.lowerUsage.vfLatency != 0u ? d.lowerUsage.vfLatency : d.lowerUsage.latency;
++            for (uint32_t c = 0; c < 4u; ++c)
++                if ((lowerWrite.lanes & (8u >> c)) != 0u)
++                    vf[lowerWrite.reg][c] = cycle + latency;
++        }
++        const VfAccess upperWrite = d.upperUsage.vfWrite;
++        if (upperWrite.reg != 0u)
++        {
++            const int32_t latency = d.upperUsage.vfLatency != 0u ? d.upperUsage.vfLatency : d.upperUsage.latency;
++            for (uint32_t c = 0; c < 4u; ++c)
++                if ((upperWrite.lanes & (8u >> c)) != 0u)
++                    vf[upperWrite.reg][c] = cycle + latency;
++        }
++        for (uint32_t r = 1; r < 16u; ++r)
++            if ((d.lowerUsage.viWrite & (1u << r)) != 0u)
++                vi[r] = cycle + (d.lowerUsage.viLatency != 0u ? d.lowerUsage.viLatency : d.lowerUsage.latency);
++        for (uint32_t c = 0; c < 4u; ++c)
++            if ((d.upperUsage.accWrite & (8u >> c)) != 0u)
++                acc[c] = cycle + kAccForwardLatency;
++        if (d.lowerUsage.pipeline == PipelineFdiv && !d.lowerUsage.waitQ)
++            fdiv = cycle + d.lowerUsage.latency;
++        if (d.lowerUsage.pipeline == PipelineEfu && !d.lowerUsage.waitP)
++        {
++            efu = cycle + d.lowerUsage.latency;
++            efuRes = cycle + (d.lowerUsage.latency > 0u ? d.lowerUsage.latency - 1 : 0);
++        }
++        ++cycle;
++
++        if (ending)
++            break;
++        if (endAfterNext)
++        {
++            ending = false;
++            break;
++        }
++        if (d.eBit)
++        {
++            out.ends = true;
++            endAfterNext = true;
++        }
++        else if (lowerIsBranch(d.lower, d.upper))
++        {
++            endAfterNext = true;
++            out.branchPair = k;
++            out.hasBranch = true;
++        }
++        k = (k + 1u) % n;
++    }
++    out.next = (k + 1u) % n;
++    out.total = cycle;
++
++    FastImage::Stalls &end = out.exit;
++    const auto rel = [cycle](int32_t v) { return static_cast<int16_t>(std::max(0, v - cycle)); };
++    for (int r = 0; r < 32; ++r)
++        for (int c = 0; c < 4; ++c)
++            end.vf[r][c] = rel(vf[r][c]);
++    for (int r = 0; r < 16; ++r)
++        end.vi[r] = rel(vi[r]);
++    for (int c = 0; c < 4; ++c)
++        end.acc[c] = rel(acc[c]);
++    end.fdiv = rel(fdiv);
++    end.efu = rel(efu);
++    end.efuResource = rel(efuRes);
++}
++
++namespace
++{
++    int32_t fmacKind(FmacOp op, FmacSrc src, bool masked, bool mac)
++    {
++        return (static_cast<int32_t>(op) * kFmacSrcs + src) * 4 + (masked ? 2 : 0) + (mac ? 1 : 0);
++    }
++
++    // upper code -> arithmetic + operand, for both the fd group and the ACC group (same numbering)
++    bool decodeFmac(uint8_t code, FmacOp &op, FmacSrc &src)
++    {
++        const auto bc = [](uint8_t c) { return static_cast<FmacSrc>(kBcX + (c & 3u)); };
++        if (code <= 0x03u) { op = kAdd; src = bc(code); return true; }
++        if (code <= 0x07u) { op = kSub; src = bc(code); return true; }
++        if (code <= 0x0Bu) { op = kMadd; src = bc(code); return true; }
++        if (code <= 0x0Fu) { op = kMsub; src = bc(code); return true; }
++        if (code >= 0x18u && code <= 0x1Bu) { op = kMul; src = bc(code); return true; }
++        switch (code)
++        {
++        case 0x1C: op = kMul; src = kQ; return true;
++        case 0x1E: op = kMul; src = kI; return true;
++        case 0x20: op = kAdd; src = kQ; return true;
++        case 0x21: op = kMadd; src = kQ; return true;
++        case 0x22: op = kAdd; src = kI; return true;
++        case 0x23: op = kMadd; src = kI; return true;
++        case 0x24: op = kSub; src = kQ; return true;
++        case 0x25: op = kMsub; src = kQ; return true;
++        case 0x26: op = kSub; src = kI; return true;
++        case 0x27: op = kMsub; src = kI; return true;
++        case 0x28: op = kAdd; src = kFull; return true;
++        case 0x29: op = kMadd; src = kFull; return true;
++        case 0x2A: op = kMul; src = kFull; return true;
++        case 0x2C: op = kSub; src = kFull; return true;
++        case 0x2D: op = kMsub; src = kFull; return true;
++        default: return false;
++        }
++    }
++
++    bool upperWritesFlags(uint32_t upper, uint8_t &dest)
++    {
++        const uint8_t op = upper & 0x3Fu;
++        dest = DEST(upper);
++        FmacOp fop;
++        FmacSrc src;
++        if (op < 0x3Cu)
++            return dest != 0u && (decodeFmac(op, fop, src) || op == 0x2Eu);
++        const uint8_t special = (upper & 3u) | ((upper >> 4) & 0x7Cu);
++        return dest != 0u && (decodeFmac(special, fop, src) || special == 0x2Eu);
++    }
++
++    bool lowerReadsMac(uint32_t lower, uint32_t upper)
++    {
++        if ((upper & 0x80000000u) != 0u)
++            return false;
++        const uint8_t opHi = (lower >> 25) & 0x7Fu;
++        return opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu;
++    }
++}
++
++void VU1Interpreter::fastEmitBlock(FastImage &image, uint32_t start)
++{
++    const void *const *labels = g_labels;
++    FastSimResult sim;
++    fastSimulate(image, start, sim);
++    image.blocks[start].emitted = true;
++    image.entry[start] = static_cast<int32_t>(image.ops.size());
++    std::vector<FOp> &ops = image.ops;
++    const auto push = [&](int kind, uint8_t a = 0, uint8_t b = 0, uint8_t c = 0, uint8_t d = 0, int32_t imm = 0, uint32_t off = 0, int32_t x = 0) -> FOp &
++    {
++        ops.push_back(FOp{labels[kind], a, b, c, d, imm, off, x});
++        return ops.back();
++    };
++    if (sim.toInterpreter)
++    {
++        static int s_said = 0;
++        if (s_said < 40)
++        {
++            ++s_said;
++            std::fprintf(stderr, "[vufast] VU%d block at pc 0x%x left to the interpreter\n", m_unit == Unit::VU1 ? 1 : 0, start * 8u);
++        }
++        push(kToInterpreter, 0, 0, 0, 0, static_cast<int32_t>(start));
++        return;
++    }
++
++    // MAC flags: which FMAC results can be read before the next one replaces them
++    const size_t count = sim.pairs.size();
++    std::vector<bool> macLive(count, true);
++    {
++        int last = -1;
++        for (int i = static_cast<int>(count) - 1; i >= 0; --i)
++        {
++            const uint32_t k = sim.pairs[i];
++            uint32_t lower, upper;
++            std::memcpy(&lower, image.code.data() + k * 8u, 4);
++            std::memcpy(&upper, image.code.data() + k * 8u + 4u, 4);
++            uint8_t dest = 0;
++            if (!upperWritesFlags(upper, dest))
++                continue;
++            if (last >= 0)
++            {
++                const int32_t from = sim.cycles[i] + static_cast<int32_t>(kFmacLatency);
++                const int32_t until = sim.cycles[last] + static_cast<int32_t>(kFmacLatency);
++                bool read = until > sim.total; // (a reader in the next block could see this one)
++                for (size_t j = i; !read && j < count; ++j)
++                {
++                    uint32_t lo, up;
++                    std::memcpy(&lo, image.code.data() + sim.pairs[j] * 8u, 4);
++                    std::memcpy(&up, image.code.data() + sim.pairs[j] * 8u + 4u, 4);
++                    if (lowerReadsMac(lo, up) && sim.cycles[j] >= from && sim.cycles[j] < until)
++                        read = true;
++                }
++                macLive[i] = read;
++            }
++            last = i;
++        }
++    }
++
++    for (size_t index = 0; index < count; ++index)
++    {
++        const uint32_t k = sim.pairs[index];
++        const uint32_t off = static_cast<uint32_t>(sim.cycles[index]);
++        const DecodedInstructionPair d = decodeInstructionPair(image.code.data(), k * 8u);
++
++        // ---- the upper instruction's destination
++        const uint8_t shadow = d.upperVfShadowReg;
++        if (shadow != 0u)
++            push(kMove, kVfTemp, shadow, 0, 0xFu);
++        const auto vfTarget = [&](uint8_t reg) -> uint8_t
++        {
++            if (reg == 0u)
++                return kVfDiscard;
++            return reg == shadow ? kVfTemp : reg;
++        };
++
++        const uint32_t up = d.upper;
++        const uint8_t dest = DEST(up), ft = FT(up), fs = FS(up), fd = FD(up);
++        const uint8_t uop = up & 0x3Fu;
++        const uint8_t special = uop >= 0x3Cu ? static_cast<uint8_t>((up & 3u) | ((up >> 4) & 0x7Cu)) : 0xFFu;
++        const uint8_t code = uop < 0x3Cu ? uop : special;
++        const bool accGroup = uop >= 0x3Cu;
++        FmacOp fop;
++        FmacSrc fsrc;
++        const bool live = macLive[index] || image.statusLive;
++        if (dest != 0u || code == 0x2Fu)
++        {
++            if (decodeFmac(code, fop, fsrc))
++            {
++                const uint8_t target = accGroup ? kVfAcc : vfTarget(fd);
++                if (!(target == kVfDiscard && !live))
++                    push(fmacKind(fop, fsrc, dest != 0xFu, live), target, fs, ft, dest, 0, off);
++            }
++            else if (code == 0x2Eu)
++                push(kOpm, accGroup ? kVfAcc : vfTarget(fd), fs, ft, dest, accGroup ? 1 : 0, off, live ? 1 : 0);
++            else if (!accGroup && code >= 0x10u && code <= 0x17u)
++                push(kMaxMin, vfTarget(fd), fs, ft, dest, code <= 0x13u ? 1 : 0, 0, code & 3);
++            else if (!accGroup && (code == 0x1Du || code == 0x1Fu))
++                push(kMaxMin, vfTarget(fd), fs, 0, dest, code == 0x1Du ? 1 : 0, 0, 5);
++            else if (!accGroup && (code == 0x2Bu || code == 0x2Fu))
++                push(kMaxMin, vfTarget(fd), fs, ft, dest, code == 0x2Bu ? 1 : 0, 0, 4);
++            else if (accGroup && special >= 0x10u && special <= 0x13u)
++            {
++                static const int32_t shifts[4] = {0, 4, 12, 15};
++                push(kItof, vfTarget(ft), fs, 0, dest, shifts[special & 3u]);
++            }
++            else if (accGroup && special >= 0x14u && special <= 0x17u)
++            {
++                static const int32_t shifts[4] = {0, 4, 12, 15};
++                push(kFtoi, vfTarget(ft), fs, 0, dest, shifts[special & 3u]);
++            }
++            else if (accGroup && special == 0x1Du)
++                push(kAbs, vfTarget(ft), fs, 0, dest);
++        }
++
++        // ---- the lower instruction
++        if (d.iBit)
++        {
++            int32_t word;
++            std::memcpy(&word, &d.lower, 4);
++            push(kSetI, 0, 0, 0, 0, word);
++        }
++        else if (d.lower != 0u && d.lower != 0x8000033Cu)
++        {
++            const uint32_t lo = d.lower;
++            // a branch right after this pair reads the old value of what it writes
++            if (d.lowerUsage.delaysNextBranchRead && index + 1u < count)
++            {
++                uint32_t nextLower, nextUpper;
++                std::memcpy(&nextLower, image.code.data() + sim.pairs[index + 1] * 8u, 4);
++                std::memcpy(&nextUpper, image.code.data() + sim.pairs[index + 1] * 8u + 4u, 4);
++                if (lowerIsBranch(nextLower, nextUpper))
++                    for (uint8_t reg = 1; reg < 16u; ++reg)
++                        if ((d.lowerUsage.viWrite & (1u << reg)) != 0u)
++                        {
++                            push(kSaveVi, reg);
++                            break;
++                        }
++            }
++            const uint8_t opHi = (lo >> 25) & 0x7Fu;
++            const uint8_t ldest = DEST(lo), vfT = FT(lo), vfS = FS(lo), viT = VIT(lo), viS = VIS(lo), viD = VID(lo);
++            const int16_t imm11 = IMM11(lo);
++            const int32_t imm15 = static_cast<int16_t>(static_cast<int16_t>(lo & 0x7FFu) | static_cast<int32_t>((lo >> 10) & 0x7800u));
++            const uint8_t firstLane = (ldest & 8u) ? 0u : (ldest & 4u) ? 1u : (ldest & 2u) ? 2u : 3u;
++            // (the previous pair may have written the register a branch reads)
++            bool backup = false;
++            uint8_t backupReg = 0;
++            if (index > 0u)
++            {
++                const DecodedInstructionPair prev = decodeInstructionPair(image.code.data(), sim.pairs[index - 1] * 8u);
++                if (prev.lowerUsage.delaysNextBranchRead)
++                    for (uint8_t reg = 1; reg < 16u; ++reg)
++                        if ((prev.lowerUsage.viWrite & (1u << reg)) != 0u)
++                        {
++                            backup = true;
++                            backupReg = reg;
++                            break;
++                        }
++            }
++            const auto branchVi = [&](uint8_t reg) -> uint8_t { return backup && reg == backupReg ? kViBackup : reg; };
++            switch (opHi)
++            {
++            case 0x00: push(kLq, vfTarget(vfT), viS, 0, ldest, imm11); break;
++            case 0x01: push(kSq, 0, vfS, viT, ldest, imm11); break;
++            case 0x04: if (viT != 0u) push(kIlw, viT, viS, firstLane, 0, imm11); break;
++            case 0x05: push(kIsw, viT, viS, 0, ldest, imm11); break;
++            case 0x08: if (viT != 0u) push(kIaddiu, viT, viS, 0, 0, imm15); break;
++            case 0x09: if (viT != 0u) push(kIsubiu, viT, viS, 0, 0, imm15); break;
++            case 0x15: push(kFsset, 0, 0, 0, 0, static_cast<int32_t>((((lo >> 21) & 1u) << 11) | (lo & 0x7FFu)), off); break;
++            case 0x16: if (viT != 0u) push(kFsand, viT, 0, 0, 0, static_cast<int32_t>((((lo >> 21) & 1u) << 11) | (lo & 0x7FFu)), off); break;
++            case 0x18: if (viT != 0u) push(kFmeq, viT, viS, 0, 0, 0, off); break;
++            case 0x1A: if (viT != 0u) push(kFmand, viT, viS, 0, 0, 0, off); break;
++            case 0x1B: if (viT != 0u) push(kFmor, viT, viS, 0, 0, 0, off); break;
++            case 0x20: push(kBranch, 0, 0, 0, 0, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x21: push(kBranch, viT, 0, 0, 1, static_cast<int32_t>(k + 2u), 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x24: push(kJump, 0, branchVi(viS), 0, 0, 0); break;
++            case 0x25: push(kJump, viT, branchVi(viS), 0, 1, static_cast<int32_t>(k + 2u)); break;
++            case 0x28: push(kBranch, branchVi(viT), branchVi(viS), 0, 2, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x29: push(kBranch, branchVi(viT), branchVi(viS), 0, 3, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x2C: push(kBranch, 0, branchVi(viS), 0, 4, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x2D: push(kBranch, 0, branchVi(viS), 0, 5, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x2E: push(kBranch, 0, branchVi(viS), 0, 6, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x2F: push(kBranch, 0, branchVi(viS), 0, 7, 0, 0, static_cast<int32_t>((k + 1u + imm11) % image.pairs)); break;
++            case 0x40:
++            {
++                const uint8_t funct = lo & 0x3Fu;
++                switch (funct)
++                {
++                case 0x30: if (viD != 0u) push(kIadd, viD, viS, viT); break;
++                case 0x31: if (viD != 0u) push(kIsub, viD, viS, viT); break;
++                case 0x32: if (viT != 0u) push(kIaddi, viT, viS, 0, 0, static_cast<int32_t>((lo >> 6) & 0x1Fu) << 27 >> 27); break;
++                case 0x34: if (viD != 0u) push(kIand, viD, viS, viT); break;
++                case 0x35: if (viD != 0u) push(kIor, viD, viS, viT); break;
++                default:
++                {
++                    const uint8_t f2 = (lo & 3u) | ((lo >> 4) & 0x7Cu);
++                    switch (f2)
++                    {
++                    case 0x30: push(kMove, vfTarget(vfT), vfS, 0, ldest); break;
++                    case 0x31: push(kMr32, vfTarget(vfT), vfS, 0, ldest); break;
++                    case 0x34: push(kLqPost, vfTarget(vfT), viS, 0, ldest); break;
++                    case 0x35: push(kSqPost, 0, vfS, viT, ldest); break;
++                    case 0x36: push(kLqPre, vfTarget(vfT), viS, 0, ldest); break;
++                    case 0x37: push(kSqPre, 0, vfS, viT, ldest); break;
++                    case 0x38: push(kDiv, 0, vfS, vfT, static_cast<uint8_t>(((lo >> 21) & 3u) | (((lo >> 23) & 3u) << 2)), 0, off); break;
++                    case 0x39: push(kSqrt, 0, 0, vfT, static_cast<uint8_t>(((lo >> 23) & 3u) << 2), 0, off); break;
++                    case 0x3A: push(kRsqrt, 0, vfS, vfT, static_cast<uint8_t>(((lo >> 21) & 3u) | (((lo >> 23) & 3u) << 2)), 0, off); break;
++                    case 0x3B: push(kWaitQ, 0, 0, 0, 0, 0, off); break;
++                    case 0x3C: if (viT != 0u) push(kMtir, viT, vfS, static_cast<uint8_t>((lo >> 21) & 3u)); break;
++                    case 0x3D: push(kMfir, vfTarget(vfT), viS, 0, ldest); break;
++                    case 0x3E: if (viT != 0u) push(kIlwr, viT, viS, firstLane); break;
++                    case 0x3F: push(kIswr, viT, viS, 0, ldest); break;
++                    case 0x64: push(kMfp, vfTarget(vfT), 0, 0, ldest, 0, off); break;
++                    case 0x68: if (viT != 0u) push(kXtop, viT); break;
++                    case 0x69: if (viT != 0u) push(kXitop, viT); break;
++                    case 0x6C: push(kXgkick, 0, viS); break;
++                    case 0x7B: push(kWaitP, 0, 0, 0, 0, 0, off); break;
++                    default: push(kEfu, 0, vfS, 0, 0, static_cast<int32_t>(lo), off); break;
++                    }
++                    break;
++                }
++                }
++                break;
++            }
++            default:
++                break;
++            }
++        }
++        if (shadow != 0u)
++            push(kMove, shadow, kVfTemp, 0, 0xFu);
++    }
++
++    if (sim.ends)
++        push(kEndProgram, 0, 0, 0, 0, sim.total, 0, static_cast<int32_t>(sim.next));
++    else
++        push(kEnd, 0, 0, 0, 0, sim.total, 0, static_cast<int32_t>(sim.next));
++}
++
++void VU1Interpreter::fastTranslate(FastImage &image, uint32_t start)
++{
++    // Flow the stall state through the blocks reachable from here, then emit the new ones.
++    std::vector<uint32_t> work{start};
++    std::vector<uint32_t> region;
++    if (image.blocks.find(start) == image.blocks.end())
++        image.blocks[start] = FastImage::Block{FastImage::Stalls{}};
++    for (size_t guard = 0; !work.empty() && guard < 20000u; ++guard)
++    {
++        const uint32_t b = work.back();
++        work.pop_back();
++        if (std::find(region.begin(), region.end(), b) == region.end())
++            region.push_back(b);
++        FastSimResult sim;
++        fastSimulate(image, b, sim);
++        if (sim.toInterpreter || sim.ends)
++            continue;
++        const auto flowTo = [&](uint32_t to)
++        {
++            auto found = image.blocks.find(to);
++            if (found == image.blocks.end())
++            {
++                image.blocks[to] = FastImage::Block{sim.exit};
++                work.push_back(to);
++                return;
++            }
++            if (found->second.emitted)
++                return;
++            bool changed = false;
++            FastImage::Stalls &in = found->second.in;
++            const auto join = [&changed](int16_t &slot, int16_t value)
++            {
++                if (value > slot)
++                {
++                    slot = value;
++                    changed = true;
++                }
++            };
++            for (int r = 0; r < 32; ++r)
++                for (int c = 0; c < 4; ++c)
++                    join(in.vf[r][c], sim.exit.vf[r][c]);
++            for (int r = 0; r < 16; ++r)
++                join(in.vi[r], sim.exit.vi[r]);
++            for (int c = 0; c < 4; ++c)
++                join(in.acc[c], sim.exit.acc[c]);
++            join(in.fdiv, sim.exit.fdiv);
++            join(in.efu, sim.exit.efu);
++            join(in.efuResource, sim.exit.efuResource);
++            if (changed)
++                work.push_back(to);
++        };
++        if (!sim.hasBranch)
++        {
++            flowTo(sim.next);
++            continue;
++        }
++        uint32_t lower;
++        std::memcpy(&lower, image.code.data() + sim.branchPair * 8u, 4);
++        const uint8_t opHi = (lower >> 25) & 0x7Fu;
++        if (opHi == 0x24u || opHi == 0x25u)
++            continue; // JR, JALR: wherever they land starts clear
++        flowTo((sim.branchPair + 1u + IMM11(lower)) % image.pairs);
++        if (opHi != 0x20u && opHi != 0x21u)
++            flowTo(sim.next);
++    }
++    for (uint32_t b : region)
++        if (!image.blocks[b].emitted)
++            fastEmitBlock(image, b);
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// XGKICK at once
++// ---------------------------------------------------------------------------------------------------------------------
++void VU1Interpreter::fastKick(uint8_t *data, uint32_t dataSize, uint32_t qwordAddress)
++{
++    const uint32_t mask = dataSize - 1u;
++    uint32_t source = (qwordAddress * 16u) & mask;
++    uint32_t total = 0;
++    uint8_t *packet = m_xgkick.packet.data();
++    for (;;)
++    {
++        if (total > XgkickPipeline::kBufferSize - 16u)
++            return;
++        uint64_t tagLo;
++        std::memcpy(&tagLo, data + source, sizeof(tagLo));
++        const uint32_t nloop = static_cast<uint32_t>(tagLo & 0x7FFFu);
++        const uint32_t format = static_cast<uint32_t>((tagLo >> 58) & 3u);
++        uint32_t nreg = static_cast<uint32_t>((tagLo >> 60) & 0xFu);
++        if (nreg == 0u)
++            nreg = 16u;
++        uint64_t bytes = 16u;
++        if (format == 0u)
++            bytes += static_cast<uint64_t>(nloop) * nreg * 16u;
++        else if (format == 1u)
++            bytes += ((static_cast<uint64_t>(nloop) * nreg + 1u) & ~1ull) * 8u;
++        else
++            bytes += static_cast<uint64_t>(nloop) * 16u;
++        if (bytes > XgkickPipeline::kBufferSize - total)
++            return;
++        uint32_t left = static_cast<uint32_t>(bytes);
++        while (left != 0u)
++        {
++            const uint32_t chunk = std::min(left, dataSize - source);
++            std::memcpy(packet + total, data + source, chunk);
++            total += chunk;
++            left -= chunk;
++            source = (source + chunk) & mask;
++        }
++        if (((tagLo >> 15) & 1u) != 0u)
++            break;
++    }
++    if (m_kickCapture)
++        m_kickCapture->insert(m_kickCapture->end(), packet, packet + total);
++    if (m_kickDry)
++        return;
++    if (m_activeMemory)
++        m_activeMemory->submitGifPacket(GifPathId::Path1, packet, total);
++    else if (m_activeGs)
++        m_activeGs->processGIFPacket(packet, total);
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// Execution
++// ---------------------------------------------------------------------------------------------------------------------
++
++// Returns true when the run is over (ended, or out of budget); false to continue in the interpreter at m_state.pc.
++bool VU1Interpreter::fastExecute(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles)
++{
++#define FMAC_LABELS_SRC(OP, SRC) &&L_##OP##_##SRC##_FF, &&L_##OP##_##SRC##_FM, &&L_##OP##_##SRC##_MF, &&L_##OP##_##SRC##_MM
++#define FMAC_LABELS_OP(OP)                                                                                       \
++    FMAC_LABELS_SRC(OP, FULL), FMAC_LABELS_SRC(OP, BCX), FMAC_LABELS_SRC(OP, BCY), FMAC_LABELS_SRC(OP, BCZ),     \
++        FMAC_LABELS_SRC(OP, BCW), FMAC_LABELS_SRC(OP, Q), FMAC_LABELS_SRC(OP, I)
++    static const void *const labels[kKinds] = {
++        FMAC_LABELS_OP(ADD_), FMAC_LABELS_OP(SUB_), FMAC_LABELS_OP(MUL_), FMAC_LABELS_OP(MADD_), FMAC_LABELS_OP(MSUB_),
++        &&L_Opm, &&L_MaxMin, &&L_Itof, &&L_Ftoi, &&L_Abs, &&L_Move, &&L_Mr32, &&L_SetI,
++        &&L_Lq, &&L_LqPost, &&L_LqPre, &&L_Sq, &&L_SqPost, &&L_SqPre, &&L_Ilw, &&L_Ilwr, &&L_Isw, &&L_Iswr,
++        &&L_Iaddiu, &&L_Isubiu, &&L_Iadd, &&L_Isub, &&L_Iaddi, &&L_Iand, &&L_Ior, &&L_Mtir, &&L_Mfir, &&L_Xtop, &&L_Xitop, &&L_SaveVi,
++        &&L_Fmand, &&L_Fmor, &&L_Fmeq, &&L_Fsand, &&L_Fsset,
++        &&L_Div, &&L_Sqrt, &&L_Rsqrt, &&L_WaitQ, &&L_Efu, &&L_WaitP, &&L_Mfp, &&L_Xgkick,
++        &&L_Branch, &&L_Jump, &&L_End, &&L_EndProgram, &&L_ToInterpreter};
++    g_labels = labels;
++
++    // the image of the code now in memory
++    const uint64_t generation = m_unit == Unit::VU1 ? memory->getVU1CodeGeneration() : memory->getVU0CodeGeneration();
++    if (!m_fastImage || m_fastGeneration != generation)
++    {
++        m_fastGeneration = generation;
++        const uint64_t hash = codeHash(vuCode, codeSize);
++        auto found = m_fastImages.find(hash);
++        if (found == m_fastImages.end())
++        {
++            if (m_fastImages.size() >= 512u)
++                m_fastImages.clear();
++            auto image = std::make_shared<FastImage>();
++            image->pairs = codeSize / 8u;
++            image->code.assign(vuCode, vuCode + codeSize);
++            image->entry.assign(image->pairs, -1);
++            image->ops.reserve(4096);
++            for (uint32_t k = 0; k < image->pairs; ++k)
++            {
++                uint32_t lower, upper;
++                std::memcpy(&lower, vuCode + k * 8u, 4);
++                std::memcpy(&upper, vuCode + k * 8u + 4u, 4);
++                const uint8_t opHi = (lower >> 25) & 0x7Fu;
++                if ((upper & 0x80000000u) == 0u && (opHi == 0x14u || opHi == 0x16u || opHi == 0x17u))
++                    image->statusLive = true;
++            }
++            found = m_fastImages.emplace(hash, std::move(image)).first;
++        }
++        m_fastImage = found->second;
++    }
++    FastImage &image = *m_fastImage;
++
++    alignas(16) float vf[kVfCount][4];
++    int32_t vi[17];
++    std::memcpy(vf, m_state.vf, sizeof(m_state.vf));
++    std::memcpy(vf[kVfAcc], m_state.acc, sizeof(m_state.acc));
++    std::memcpy(vi, m_state.vi, sizeof(m_state.vi));
++    vi[kViBackup] = 0;
++
++    uint64_t cyc = m_cycle;
++    const uint64_t budget = m_cycle + maxCycles;
++    // the flag pipeline: entries in order, each ready 4 cycles after its pair (the interpreter's commit, in ps2_vu1_core.cpp)
++    struct FlagEntry { uint64_t ready; uint32_t mac; uint16_t status; uint16_t sticky; uint8_t type; };
++    FlagEntry flagRing[16];
++    uint32_t flagHead = 0, flagTail = 0;
++    const bool statusLive = image.statusLive;
++    const auto applyFlag = [this](const FlagEntry &e)
++    {
++        if (e.type == 0u)
++        {
++            m_state.mac = e.mac;
++            if (e.status != 0xFFFFu)
++                m_state.status = (m_state.status & 0xFF0u) | e.status | ((e.status | e.sticky) << 6);
++        }
++        else
++            m_state.status = (m_state.status & 0x03Fu) | (static_cast<uint32_t>(e.status) & 0xFC0u);
++    };
++    const auto statusOfMac = [](uint32_t mac) -> uint16_t
++    {
++        return static_cast<uint16_t>(((mac & 0x000Fu) ? 1u : 0u) | ((mac & 0x00F0u) ? 2u : 0u) | ((mac & 0x0F00u) ? 4u : 0u) | ((mac & 0xF000u) ? 8u : 0u));
++    };
++#define HL_COMMIT_FLAGS(now) do { while (flagHead != flagTail && flagRing[flagHead & 15u].ready <= (now)) { applyFlag(flagRing[flagHead & 15u]); ++flagHead; } } while (0)
++#define HL_PUSH_FLAG(entry) do { if (flagTail - flagHead == 16u) { applyFlag(flagRing[flagHead & 15u]); ++flagHead; } flagRing[flagTail & 15u] = entry; ++flagTail; } while (0)
++    const uint32_t dataMask = dataSize - 1u;
++    const uint32_t pairMask = image.pairs - 1u;
++    int32_t branchTo = -1;
++    uint32_t nextPair;
++    bool ended = false, toInterpreter = false;
++    VuFpMode fpMode;
++
++    const auto commitP = [this](uint64_t now)
++    {
++        for (ScalarPipelineEntry &entry : m_efu)
++            if (entry.valid && entry.readyCycle <= now)
++            {
++                m_state.p = entry.value;
++                entry = {};
++            }
++    };
++
++#define NEXT do { ++op; goto *op->label; } while (0)
++#define NOW (cyc + op->off)
++#define COMMIT_Q(now) do { if (m_fdiv.valid && m_fdiv.readyCycle <= (now)) { m_state.q = m_fdiv.value; m_fdiv.valid = false; } } while (0)
++
++    const FOp *op;
++    uint32_t pair = (m_state.pc / 8u) & pairMask;
++    goto L_Enter;
++
++// --- the FMAC group: 5 operations x 7 kinds of second operand x (dest xyzw or not) x (flags or not)
++#define HL_STORE_F ST(vf[op->a], r);
++#define HL_STORE_M storeMasked(vf[op->a], r, op->d);
++#define HL_MAC_F(OP)
++// (product-sum instructions: the product's conditions go to the sticky flags too)
++#define HL_STICKY_ADD_ 0u
++#define HL_STICKY_SUB_ 0u
++#define HL_STICKY_MUL_ 0u
++#define HL_STICKY_MADD_ statusOfMac(macOf(MUL(a, b), op->d))
++#define HL_STICKY_MSUB_ statusOfMac(macOf(MUL(a, b), op->d))
++#define HL_MAC_M(OP)                                                                                                  \
++    {                                                                                                                 \
++        const uint32_t mac = macOf(r, op->d);                                                                         \
++        const FlagEntry entry{NOW + kFmacLatency, mac, statusLive ? statusOfMac(mac) : uint16_t{0},                   \
++                              statusLive ? static_cast<uint16_t>(HL_STICKY_##OP) : uint16_t{0}, 0u};                  \
++        HL_PUSH_FLAG(entry);                                                                                          \
++    }
++#define HL_SRC_FULL Vec b = LD(vf[op->c]);
++#define HL_SRC_BCX Vec b = LD1(&vf[op->c][0]);
++#define HL_SRC_BCY Vec b = LD1(&vf[op->c][1]);
++#define HL_SRC_BCZ Vec b = LD1(&vf[op->c][2]);
++#define HL_SRC_BCW Vec b = LD1(&vf[op->c][3]);
++#define HL_SRC_Q COMMIT_Q(NOW); Vec b = SET1(m_state.q);
++#define HL_SRC_I Vec b = SET1(m_state.i);
++#define HL_EXPR_ADD_ ADD(a, b)
++#define HL_EXPR_SUB_ SUB(a, b)
++#define HL_EXPR_MUL_ MUL(a, b)
++#define HL_EXPR_MADD_ ADD(LD(vf[kVfAcc]), MUL(a, b))
++#define HL_EXPR_MSUB_ SUB(LD(vf[kVfAcc]), MUL(a, b))
++#define HL_REDO_ADD_ ADD(a, b)
++#define HL_REDO_SUB_ SUB(a, b)
++#define HL_REDO_MUL_ MUL(a, b)
++#define HL_REDO_MADD_ ADD(normOperand(LD(vf[kVfAcc])), MUL(a, b))
++#define HL_REDO_MSUB_ SUB(normOperand(LD(vf[kVfAcc])), MUL(a, b))
++#define FMAC_ONE(OP, SRC, MK, MC)                                 \
++    L_##OP##_##SRC##_##MK##MC:                                    \
++    {                                                             \
++        Vec a = LD(vf[op->b]);                                    \
++        HL_SRC_##SRC                                              \
++        Vec r = HL_EXPR_##OP;                                     \
++        if (HL_UNLIKELY(anySpecial(r)))                           \
++        {                                                         \
++            a = normOperand(a);                                   \
++            b = normOperand(b);                                   \
++            r = HL_REDO_##OP;                                     \
++        }                                                         \
++        HL_MAC_##MC(OP)                                           \
++        HL_STORE_##MK                                             \
++        NEXT;                                                     \
++    }
++#define FMAC_SRC(OP, SRC) FMAC_ONE(OP, SRC, F, F) FMAC_ONE(OP, SRC, F, M) FMAC_ONE(OP, SRC, M, F) FMAC_ONE(OP, SRC, M, M)
++#define FMAC_OP(OP) FMAC_SRC(OP, FULL) FMAC_SRC(OP, BCX) FMAC_SRC(OP, BCY) FMAC_SRC(OP, BCZ) FMAC_SRC(OP, BCW) FMAC_SRC(OP, Q) FMAC_SRC(OP, I)
++    FMAC_OP(ADD_)
++    FMAC_OP(SUB_)
++    FMAC_OP(MUL_)
++    FMAC_OP(MADD_)
++    FMAC_OP(MSUB_)
++
++L_Opm:
++{
++    // OPMSUB (imm 0): ACC - cross, OPMULA (imm 1): cross; w is 0
++    alignas(16) float s[4], t[4], acc[4], res[4];
++    ST(s, normOperand(LD(vf[op->b])));
++    ST(t, normOperand(LD(vf[op->c])));
++    ST(acc, normOperand(LD(vf[kVfAcc])));
++    static constexpr uint8_t left[3] = {1u, 2u, 0u}, right[3] = {2u, 0u, 1u};
++    uint32_t mac = 0u;
++    for (int c = 0; c < 3; ++c)
++    {
++        // Culling reads the sign of this: as the interpreter, from the exact result (a double holds the product exactly).
++        const float product = s[left[c]] * t[right[c]];
++        const double exactProduct = static_cast<double>(s[left[c]]) * static_cast<double>(t[right[c]]);
++        const double exact = op->imm ? exactProduct : static_cast<double>(acc[c]) - exactProduct;
++        float value = op->imm ? product : acc[c] - product;
++        const double magnitude = std::fabs(exact);
++        const uint32_t lane = 8u >> c;
++        uint32_t flags = std::signbit(exact) ? lane << 4 : 0u;
++        if (magnitude == 0.0)
++        {
++            flags |= lane;
++            value = std::signbit(exact) ? -0.0f : 0.0f;
++        }
++        else if (magnitude > static_cast<double>(std::numeric_limits<float>::max()))
++        {
++            flags |= lane << 12;
++            value = std::signbit(exact) ? -std::numeric_limits<float>::max() : std::numeric_limits<float>::max();
++        }
++        else if (magnitude < static_cast<double>(std::numeric_limits<float>::min()))
++        {
++            flags |= lane | (lane << 8);
++            value = std::signbit(exact) ? -0.0f : 0.0f;
++        }
++        mac |= flags;
++        res[c] = value;
++    }
++    res[3] = 0.0f;
++    mac |= 1u; // (w is an exact zero)
++    if (op->x)
++    {
++        mac &= op->d * 0x1111u;
++        const FlagEntry entry{NOW + kFmacLatency, mac, statusLive ? statusOfMac(mac) : uint16_t{0}, 0u, 0u};
++        HL_PUSH_FLAG(entry);
++    }
++    storeMasked(vf[op->a], LD(res), op->d);
++    NEXT;
++}
++L_MaxMin:
++{
++    // imm: 1 max, 0 min; x: 0..3 broadcast of ft, 4 ft, 5 the I register
++    int32_t s[4], t[4], res[4];
++    std::memcpy(s, vf[op->b], 16);
++    if (op->x <= 3)
++        std::memcpy(t, vf[op->c], 16), t[0] = t[1] = t[2] = t[3] = t[op->x];
++    else if (op->x == 4)
++        std::memcpy(t, vf[op->c], 16);
++    else
++    {
++        std::memcpy(&t[0], &m_state.i, 4);
++        t[1] = t[2] = t[3] = t[0];
++    }
++    for (int c = 0; c < 4; ++c)
++        res[c] = op->imm ? maxRaw(s[c], t[c]) : minRaw(s[c], t[c]);
++    alignas(16) float out[4];
++    std::memcpy(out, res, 16);
++    storeMasked(vf[op->a], LD(out), op->d);
++    NEXT;
++}
++L_Itof:
++{
++    alignas(16) float out[4];
++#if defined(__aarch64__)
++    const Vec value = vcvtq_f32_s32(vreinterpretq_s32_f32(LD(vf[op->b])));
++#else
++    const Vec value = _mm_cvtepi32_ps(_mm_castps_si128(LD(vf[op->b])));
++#endif
++    const Vec r = op->imm ? MUL(value, SET1(1.0f / static_cast<float>(1 << op->imm))) : value;
++    ST(out, r);
++    storeMasked(vf[op->a], LD(out), op->d);
++    NEXT;
++}
++L_Ftoi:
++{
++    const Vec value = normOperand(LD(vf[op->b]));
++    const Vec scaled = op->imm ? MUL(value, SET1(static_cast<float>(1 << op->imm))) : value;
++#if defined(__aarch64__)
++    const Vec r = vreinterpretq_f32_s32(vcvtq_s32_f32(scaled));
++#else
++    alignas(16) int32_t out[4];
++    _mm_store_si128(reinterpret_cast<__m128i *>(out), _mm_cvttps_epi32(scaled));
++    alignas(16) float in[4];
++    ST(in, scaled);
++    for (int c = 0; c < 4; ++c)
++        if (out[c] == std::numeric_limits<int32_t>::min() && in[c] > 0.0f)
++            out[c] = std::numeric_limits<int32_t>::max();
++    const Vec r = _mm_castsi128_ps(_mm_load_si128(reinterpret_cast<const __m128i *>(out)));
++#endif
++    storeMasked(vf[op->a], r, op->d);
++    NEXT;
++}
++L_Abs:
++{
++    alignas(16) float out[4];
++    ST(out, normOperand(LD(vf[op->b])));
++    for (float &value : out)
++        value = std::fabs(value);
++    storeMasked(vf[op->a], LD(out), op->d);
++    NEXT;
++}
++L_Move:
++    storeMasked(vf[op->a], LD(vf[op->b]), op->d);
++    NEXT;
++L_Mr32:
++{
++    alignas(16) const float out[4] = {vf[op->b][1], vf[op->b][2], vf[op->b][3], vf[op->b][0]};
++    storeMasked(vf[op->a], LD(out), op->d);
++    NEXT;
++}
++L_SetI:
++{
++    float value;
++    std::memcpy(&value, &op->imm, 4);
++    m_state.i = normScalar(value);
++    NEXT;
++}
++
++// --- memory
++L_Lq:
++{
++    const uint32_t addr = (static_cast<uint32_t>(vi[op->b] + op->imm) * 16u) & dataMask;
++    alignas(16) float value[4];
++    std::memcpy(value, vuData + addr, 16);
++    storeMasked(vf[op->a], LD(value), op->d);
++    NEXT;
++}
++L_LqPost:
++{
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->b])) * 16u) & dataMask;
++    alignas(16) float value[4];
++    std::memcpy(value, vuData + addr, 16);
++    storeMasked(vf[op->a], LD(value), op->d);
++    if (op->b != 0u)
++        vi[op->b] = static_cast<int16_t>(vi[op->b] + 1);
++    NEXT;
++}
++L_LqPre:
++{
++    if (op->b != 0u)
++        vi[op->b] = static_cast<int16_t>(vi[op->b] - 1);
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->b])) * 16u) & dataMask;
++    alignas(16) float value[4];
++    std::memcpy(value, vuData + addr, 16);
++    storeMasked(vf[op->a], LD(value), op->d);
++    NEXT;
++}
++#define HL_STORE_QWORD(addr)                                       \
++    {                                                              \
++        alignas(16) float old[4];                                  \
++        std::memcpy(old, vuData + (addr), 16);                     \
++        const Vec merged = [&] {                                   \
++            alignas(16) float tmp[4];                              \
++            std::memcpy(tmp, old, 16);                             \
++            storeMasked(tmp, LD(vf[op->b]), op->d);                \
++            return LD(tmp);                                        \
++        }();                                                       \
++        alignas(16) float out[4];                                  \
++        ST(out, merged);                                           \
++        std::memcpy(vuData + (addr), out, 16);                     \
++    }
++L_Sq:
++{
++    const uint32_t addr = (static_cast<uint32_t>(vi[op->c] + op->imm) * 16u) & dataMask;
++    HL_STORE_QWORD(addr)
++    NEXT;
++}
++L_SqPost:
++{
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->c])) * 16u) & dataMask;
++    HL_STORE_QWORD(addr)
++    if (op->c != 0u)
++        vi[op->c] = static_cast<int16_t>(vi[op->c] + 1);
++    NEXT;
++}
++L_SqPre:
++{
++    if (op->c != 0u)
++        vi[op->c] = static_cast<int16_t>(vi[op->c] - 1);
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->c])) * 16u) & dataMask;
++    HL_STORE_QWORD(addr)
++    NEXT;
++}
++L_Ilw:
++{
++    const uint32_t addr = (static_cast<uint32_t>(vi[op->b] + op->imm) * 16u) & dataMask;
++    uint32_t value;
++    std::memcpy(&value, vuData + addr + op->c * 4u, 4);
++    vi[op->a] = static_cast<int16_t>(value & 0xFFFFu);
++    NEXT;
++}
++L_Ilwr:
++{
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->b])) * 16u) & dataMask;
++    uint32_t value;
++    std::memcpy(&value, vuData + addr + op->c * 4u, 4);
++    vi[op->a] = static_cast<int16_t>(value & 0xFFFFu);
++    NEXT;
++}
++L_Isw:
++{
++    const uint32_t addr = (static_cast<uint32_t>(vi[op->b] + op->imm) * 16u) & dataMask;
++    const uint32_t value = static_cast<uint16_t>(vi[op->a]);
++    for (int c = 0; c < 4; ++c)
++        if ((op->d & (8u >> c)) != 0u)
++            std::memcpy(vuData + addr + c * 4, &value, 4);
++    NEXT;
++}
++L_Iswr:
++{
++    const uint32_t addr = (static_cast<uint32_t>(static_cast<uint16_t>(vi[op->b])) * 16u) & dataMask;
++    const uint32_t value = static_cast<uint16_t>(vi[op->a]);
++    for (int c = 0; c < 4; ++c)
++        if ((op->d & (8u >> c)) != 0u)
++            std::memcpy(vuData + addr + c * 4, &value, 4);
++    NEXT;
++}
++
++// --- integers
++L_Iaddiu: vi[op->a] = static_cast<int16_t>(vi[op->b] + op->imm); NEXT;
++L_Isubiu: vi[op->a] = static_cast<int16_t>(vi[op->b] - op->imm); NEXT;
++L_Iadd: vi[op->a] = static_cast<int16_t>(vi[op->b] + vi[op->c]); NEXT;
++L_Isub: vi[op->a] = static_cast<int16_t>(vi[op->b] - vi[op->c]); NEXT;
++L_Iaddi: vi[op->a] = static_cast<int16_t>(vi[op->b] + op->imm); NEXT;
++L_Iand: vi[op->a] = static_cast<int16_t>(vi[op->b] & vi[op->c]); NEXT;
++L_Ior: vi[op->a] = static_cast<int16_t>(vi[op->b] | vi[op->c]); NEXT;
++L_Mtir:
++{
++    uint32_t value;
++    std::memcpy(&value, &vf[op->b][op->c], 4);
++    vi[op->a] = static_cast<int16_t>(value & 0xFFFFu);
++    NEXT;
++}
++L_Mfir:
++{
++    const int32_t value = static_cast<int16_t>(vi[op->b]);
++    alignas(16) int32_t words[4] = {value, value, value, value};
++    alignas(16) float out[4];
++    std::memcpy(out, words, 16);
++    storeMasked(vf[op->a], LD(out), op->d);
++    NEXT;
++}
++L_Xtop: vi[op->a] = static_cast<int16_t>(m_state.top & 0x3FFu); NEXT;
++L_Xitop: vi[op->a] = static_cast<int16_t>(m_state.itop & 0x3FFu); NEXT;
++L_SaveVi: vi[kViBackup] = vi[op->a]; NEXT;
++
++// --- flags
++L_Fmand:
++{
++    HL_COMMIT_FLAGS(NOW);
++    vi[op->a] = static_cast<int16_t>(m_state.mac & static_cast<uint16_t>(vi[op->b]));
++    NEXT;
++}
++L_Fmor:
++{
++    HL_COMMIT_FLAGS(NOW);
++    vi[op->a] = static_cast<int16_t>(m_state.mac | static_cast<uint16_t>(vi[op->b]));
++    NEXT;
++}
++L_Fmeq:
++{
++    HL_COMMIT_FLAGS(NOW);
++    vi[op->a] = (m_state.mac & 0xFFFFu) == static_cast<uint16_t>(vi[op->b]) ? 1 : 0;
++    NEXT;
++}
++L_Fsand:
++{
++    HL_COMMIT_FLAGS(NOW);
++    vi[op->a] = static_cast<int16_t>((m_state.status & 0xFFFu) & static_cast<uint32_t>(op->imm));
++    NEXT;
++}
++L_Fsset:
++{
++    // cancels the status of an instruction issued in the same cycle (queueFsset)
++    const uint64_t ready = NOW + kFmacLatency;
++    if (flagHead != flagTail && flagRing[(flagTail - 1u) & 15u].ready == ready && flagRing[(flagTail - 1u) & 15u].type == 0u)
++        flagRing[(flagTail - 1u) & 15u].status = 0xFFFFu;
++    const FlagEntry entry{ready, 0u, static_cast<uint16_t>(static_cast<uint32_t>(op->imm) & 0xFC0u), 0u, 1u};
++    HL_PUSH_FLAG(entry);
++    NEXT;
++}
++
++// --- Q and P
++L_Div:
++{
++    if (m_fdiv.valid)
++        m_state.q = m_fdiv.value;
++    const float num = normScalar(vf[op->b][op->d & 3u]);
++    const float den = normScalar(vf[op->c][op->d >> 2]);
++    float result;
++    if (den == 0.0f)
++        result = std::signbit(num) != std::signbit(den) ? -std::numeric_limits<float>::max() : std::numeric_limits<float>::max();
++    else
++        result = normScalar(num / den);
++    m_fdiv.valid = true;
++    m_fdiv.readyCycle = NOW + 7u;
++    m_fdiv.value = result;
++    NEXT;
++}
++L_Sqrt:
++{
++    if (m_fdiv.valid)
++        m_state.q = m_fdiv.value;
++    m_fdiv.valid = true;
++    m_fdiv.readyCycle = NOW + 7u;
++    m_fdiv.value = normScalar(std::sqrt(std::fabs(normScalar(vf[op->c][op->d >> 2]))));
++    NEXT;
++}
++L_Rsqrt:
++{
++    if (m_fdiv.valid)
++        m_state.q = m_fdiv.value;
++    const float num = normScalar(vf[op->b][op->d & 3u]);
++    const float den = std::sqrt(std::fabs(normScalar(vf[op->c][op->d >> 2])));
++    float result;
++    if (den != 0.0f)
++        result = normScalar(num / den);
++    else
++        result = std::signbit(num) ? -std::numeric_limits<float>::max() : std::numeric_limits<float>::max();
++    m_fdiv.valid = true;
++    m_fdiv.readyCycle = NOW + 13u;
++    m_fdiv.value = result;
++    NEXT;
++}
++L_WaitQ:
++{
++    if (m_fdiv.valid)
++    {
++        // (a stall the block's model did not foresee moves everything after it)
++        if (m_fdiv.readyCycle > NOW)
++            cyc += m_fdiv.readyCycle - NOW;
++        m_state.q = m_fdiv.value;
++        m_fdiv.valid = false;
++    }
++    NEXT;
++}
++L_Efu:
++{
++    // the interpreter's own code, with its P pipeline
++    uint32_t word = static_cast<uint32_t>(op->imm);
++    std::memcpy(m_state.vf[op->b], vf[op->b], 16);
++    m_cycle = NOW;
++    commitP(m_cycle);
++    execLower(word, vuData, dataSize, gs, memory, 0u);
++    NEXT;
++}
++L_WaitP:
++{
++    uint64_t last = 0;
++    for (const ScalarPipelineEntry &entry : m_efu)
++        if (entry.valid)
++            last = std::max(last, entry.readyCycle);
++    if (last > NOW)
++        cyc += last - NOW;
++    commitP(NOW);
++    NEXT;
++}
++L_Mfp:
++{
++    commitP(NOW);
++    storeMasked(vf[op->a], SET1(m_state.p), op->d);
++    NEXT;
++}
++L_Xgkick:
++    fastKick(vuData, dataSize, static_cast<uint16_t>(vi[op->b]));
++    NEXT;
++
++// --- control flow
++L_Branch:
++{
++    bool taken = false;
++    switch (op->d)
++    {
++    case 0: taken = true; break;
++    case 1: taken = true; if (op->a != 0u) vi[op->a] = static_cast<int16_t>(op->imm); break;
++    case 2: taken = static_cast<int16_t>(vi[op->b]) == static_cast<int16_t>(vi[op->a]); break;
++    case 3: taken = static_cast<int16_t>(vi[op->b]) != static_cast<int16_t>(vi[op->a]); break;
++    case 4: taken = static_cast<int16_t>(vi[op->b]) < 0; break;
++    case 5: taken = static_cast<int16_t>(vi[op->b]) > 0; break;
++    case 6: taken = static_cast<int16_t>(vi[op->b]) <= 0; break;
++    default: taken = static_cast<int16_t>(vi[op->b]) >= 0; break;
++    }
++    branchTo = taken ? op->x : -1;
++    NEXT;
++}
++L_Jump:
++{
++    branchTo = static_cast<int32_t>(static_cast<uint16_t>(vi[op->b]) & pairMask);
++    if (op->d == 1u && op->a != 0u)
++        vi[op->a] = static_cast<int16_t>(op->imm);
++    NEXT;
++}
++L_End:
++    cyc += static_cast<uint32_t>(op->imm);
++    nextPair = branchTo >= 0 ? static_cast<uint32_t>(branchTo) : static_cast<uint32_t>(op->x);
++    branchTo = -1;
++    if (HL_UNLIKELY(cyc >= budget))
++    {
++        m_state.pc = nextPair * 8u;
++        goto L_Out;
++    }
++    pair = nextPair;
++L_Enter:
++{
++    int32_t index = image.entry[pair];
++    if (HL_UNLIKELY(index < 0))
++    {
++        fastTranslate(image, pair);
++        index = image.entry[pair];
++    }
++    op = image.ops.data() + index;
++    goto *op->label;
++}
++L_EndProgram:
++    cyc += static_cast<uint32_t>(op->imm);
++    m_state.pc = static_cast<uint32_t>(op->x) * 8u;
++    ended = true;
++    goto L_Out;
++L_ToInterpreter:
++    m_state.pc = static_cast<uint32_t>(op->imm) * 8u;
++    toInterpreter = true;
++    goto L_Out;
++
++L_Out:
++    std::memcpy(m_state.vf, vf, sizeof(m_state.vf));
++    m_state.vf[0][0] = m_state.vf[0][1] = m_state.vf[0][2] = 0.0f;
++    m_state.vf[0][3] = 1.0f;
++    std::memcpy(m_state.acc, vf[kVfAcc], sizeof(m_state.acc));
++    std::memcpy(m_state.vi, vi, sizeof(m_state.vi));
++    m_state.vi[0] = 0;
++    HL_COMMIT_FLAGS(~0ull);
++    m_cycle = cyc;
++    if (ended)
++    {
++        if (m_fdiv.valid)
++        {
++            m_state.q = m_fdiv.value;
++            m_fdiv.valid = false;
++        }
++        commitP(~0ull);
++        m_cycle = cyc;
++        m_state.cycles = m_cycle;
++        m_state.ebit = false;
++        m_state.haltAfterDelaySlot = false;
++    }
++    return !toInterpreter;
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// Entry from run()
++// ---------------------------------------------------------------------------------------------------------------------
++bool VU1Interpreter::fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles)
++{
++    if (!vuFastEnabled() || m_fastOff || memory == nullptr || (m_state.pc & 7u) != 0u)
++        return false;
++    if ((m_unit == Unit::VU1 && vuCode != memory->getVU1Code()) || (m_unit == Unit::VU0 && vuCode != memory->getVU0Code()))
++        return false;
++    if (m_state.ebit || m_state.branchPending || m_state.haltAfterDelaySlot || pipelinesPending())
++        return false;
++
++    if (!vuVerifyEnabled())
++        return fastExecute(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
++
++    // HL_VUVERIFY: the interpreter first, on copies
++    static uint64_t s_runs = 0, s_bad = 0;
++    if (!m_verifyShadow)
++    {
++        m_verifyShadow = std::make_unique<VU1Interpreter>(m_unit);
++        m_verifyShadow->m_fastOff = true;
++    }
++    VU1Interpreter &shadow = *m_verifyShadow;
++    const VU1State before = m_state;
++    std::vector<uint8_t> dataBefore(vuData, vuData + dataSize);
++    std::vector<uint8_t> shadowData = dataBefore;
++    std::vector<uint8_t> shadowKicks, fastKicks;
++    shadow.m_state = m_state;
++    shadow.m_cycle = m_cycle;
++    shadow.resetScheduler();
++    shadow.m_kickCapture = &shadowKicks;
++    shadow.m_kickDry = true;
++    shadow.run(vuCode, codeSize, shadowData.data(), dataSize, gs, memory, maxCycles);
++
++    m_kickCapture = &fastKicks;
++    const bool over = fastExecute(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
++    m_kickCapture = nullptr;
++    ++s_runs;
++    if (!over)
++        return false; // (left to the interpreter: nothing to compare yet)
++
++    char what[256] = {};
++    const VU1State &a = shadow.m_state, &b = m_state;
++    // (known and harmless: near the top of the range, where the exact result overflowed, the last bits differ)
++    const auto nearMax = [](float x, float y)
++    {
++        return std::fabs(x) > 3.0e38f && std::fabs(y) > 3.0e38f && std::signbit(x) == std::signbit(y);
++    };
++    if (std::memcmp(a.vf, b.vf, sizeof(a.vf)) != 0)
++    {
++        for (int r = 0; r < 32 && !what[0]; ++r)
++            for (int c = 0; c < 4 && !what[0]; ++c)
++                if (std::memcmp(&a.vf[r][c], &b.vf[r][c], 4) != 0 && !nearMax(a.vf[r][c], b.vf[r][c]))
++                {
++                    uint32_t x, y;
++                    std::memcpy(&x, &a.vf[r][c], 4);
++                    std::memcpy(&y, &b.vf[r][c], 4);
++                    std::snprintf(what, sizeof(what), "vf%d.%c interp %08x (%g) fast %08x (%g)", r, "xyzw"[c], x, a.vf[r][c], y, b.vf[r][c]);
++                }
++    }
++    if (!what[0] && std::memcmp(a.vi, b.vi, sizeof(a.vi)) != 0)
++    {
++        for (int r = 0; r < 16 && !what[0]; ++r)
++            if (a.vi[r] != b.vi[r])
++                std::snprintf(what, sizeof(what), "vi%d interp %d fast %d", r, a.vi[r], b.vi[r]);
++    }
++    if (what[0])
++    {
++    }
++    else if (std::memcmp(a.acc, b.acc, sizeof(a.acc)) != 0 &&
++             !(nearMax(a.acc[0], b.acc[0]) || nearMax(a.acc[1], b.acc[1]) || nearMax(a.acc[2], b.acc[2]) || nearMax(a.acc[3], b.acc[3])))
++        std::snprintf(what, sizeof(what), "acc interp %g %g %g %g fast %g %g %g %g", a.acc[0], a.acc[1], a.acc[2], a.acc[3], b.acc[0], b.acc[1], b.acc[2], b.acc[3]);
++    else if (std::memcmp(&a.q, &b.q, 4) != 0)
++        std::snprintf(what, sizeof(what), "q interp %g fast %g", a.q, b.q);
++    else if (std::memcmp(&a.p, &b.p, 4) != 0)
++        std::snprintf(what, sizeof(what), "p interp %g fast %g", a.p, b.p);
++    else if (std::memcmp(&a.i, &b.i, 4) != 0)
++        std::snprintf(what, sizeof(what), "i interp %g fast %g", a.i, b.i);
++    else if (a.pc != b.pc)
++        std::snprintf(what, sizeof(what), "pc interp 0x%x fast 0x%x", a.pc, b.pc);
++    else if (m_fastImage && m_fastImage->statusLive && (a.status & 0x0C3u) != (b.status & 0x0C3u))
++        std::snprintf(what, sizeof(what), "status interp %03x fast %03x", a.status, b.status);
++    else if (std::memcmp(shadowData.data(), vuData, dataSize) != 0)
++    {
++        uint32_t at = 0;
++        while (shadowData[at] == vuData[at])
++            ++at;
++        std::snprintf(what, sizeof(what), "data at 0x%x interp %02x fast %02x", at, shadowData[at], vuData[at]);
++    }
++    else if (shadowKicks != fastKicks)
++    {
++        size_t at = 0;
++        while (at < shadowKicks.size() && at < fastKicks.size() && shadowKicks[at] == fastKicks[at])
++            ++at;
++        std::snprintf(what, sizeof(what), "kicks %zu/%zu bytes, first difference at %zu", shadowKicks.size(), fastKicks.size(), at);
++    }
++
++    if (what[0])
++    {
++        ++s_bad;
++        if (s_bad <= 60u)
++            std::fprintf(stderr, "[vufast] VU%d MISMATCH run %llu entry pc 0x%x: %s\n", m_unit == Unit::VU1 ? 1 : 0, static_cast<unsigned long long>(s_runs), before.pc, what);
++    }
++    if (s_runs % 20000u == 0u)
++        std::fprintf(stderr, "[vufast] %llu runs verified, %llu mismatches\n", static_cast<unsigned long long>(s_runs), static_cast<unsigned long long>(s_bad));
++    return true;
++}

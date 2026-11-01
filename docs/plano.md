@@ -387,6 +387,35 @@ Depois disso:
 - Áudio: SPU2 do ARMSX2 (ver Decisões).
 - Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
 
+## Fase Android (desde 2026-11-01)
+
+Arquitetura: `libun5.so` (runtime sem janela, `PS2X_HEADLESS_HOST`, código gerado, `recomp/android/host/`) escreve o fluxo do
+GS no formato de dump do PCSX2 num anel em memória (`ps2_live_ring.h`), lido por `libbt4gsx.so` (GS do ARMSX2 90126bdfea com
+Vulkan, o mesmo do Dragon Rage: o PCSX2 upstream não tem build Android). A ISO é lida pelo fd do launcher (`hl_image.cpp`).
+`recomp/android/build.sh` depende das saídas do build do Dragon Rage (libbt4gsx, SDL3, FFmpeg). O APK de teste tem o código do
+jogo em `jniLibs/` (ignorado pelo git), então fica local; a decisão "nada do jogo no APK" ainda precisa de resposta.
+
+**Cena de medida fixa:** Naruto x Naruto, cenário do lamen, pela rota `HL_PADROUTE` de `build/lab/hl_env.txt`.
+`build/lab/measure.sh SERIAL TAG`: `HL_PERF=1 HL_PERF_FROM=5900` (10 s de aquecimento, 30 s de medida, linha `[perf] RESULT`).
+`HL_FAST_UNTIL=5800` tira a espera do relógio até lá. O Retroid (perfil `sd480p`, não calibrado) e o Cube (sem limite) chegam à
+luta em uns 12 e 8 min com o interpretador de VU.
+
+**Colunas:** tempo por quadro em ms. EE, VU0, VU1, IOP, parse (parser do próprio runtime) e ring (escrita do fluxo) somam o
+tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do PCSX2, em paralelo: conta contra o orçamento dele.
+
+| data | build | aparelho | perfil | fps | 1% low | EE | VU0 | VU1 | GS | IOP | parse | ring | MB/q | o que mudou |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-01 | 8fac981+HL_PERF | Retroid Pocket 5 | sd480p | 1,5 | 0,7 | 32,8 | 31,8 | 608,5 | 55,1 | 20,1 | 3,1 | 8,7 | 3,22 | primeira medida, VU por interpretador |
+| 2026-11-01 | 8fac981+HL_PERF | RG Cube | sem limite | 1,9 | 0,8 | 19,9 | 30,0 | 473,1 | 77,1 | 10,3 | 2,0 | 5,5 | 3,28 | primeira medida, VU por interpretador |
+| 2026-11-01 | +VU rápida 1 | RG Cube | sem limite | 5,1 | 2,2 | 18,7 | 0,3 | 167,2 | 31,5 | 10,6 | 2,0 | 3,5 | 3,13 | caminho rápido de VU (ps2_vu_fast.cpp); o laço de vértices com FSAND ainda no interpretador |
+| 2026-11-01 | +VU rápida 1 | Retroid Pocket 5 | sd480p | 3,9 | 1,5 | 32,6 | 0,4 | 194,2 | 33,1 | 21,9 | 2,8 | 6,9 | 3,12 | idem |
+| 2026-11-01 | +flags de status | RG Cube | sem limite | 22,9 | 6,1 | 17,8 | 0,3 | 10,1 | 19,1 | 10,4 | 1,8 | 1,8 | 3,25 | FSAND/FSSET no caminho rápido (waitGS 2,7) |
+| 2026-11-01 | +flags de status | Retroid Pocket 5 | sd480p | 14,7 | 4,5 | 29,3 | 0,4 | 12,5 | 23,2 | 20,2 | 2,4 | 5,9 | 2,99 | idem |
+| 2026-11-01 | +lotes | RG Cube | sem limite | 23,8 | 5,8 | 15,9 | 0,3 | 10,6 | 17,3 | 4,8 | 1,9 | 1,0 | 3,25 | futex do anel a cada 128 KB, IOP em lotes de 1024 ciclos, sem limpar 64 KB por execução de VU; waitGS 8,5: o GS segura o Cube |
+| 2026-11-01 | +lotes | Retroid Pocket 5 | sd480p | 24,9 | 8,8 | 17,5 | 0,4 | 13,1 | 11,1 | 5,3 | 2,6 | 1,6 | 3,17 | idem; waitGS 0 |
+
+A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
+
 ## Teste nos aparelhos
 
 - **AYN Odin 2 Mini** (Snapdragon 8 Gen 2, Adreno 740), mais os aparelhos do Dragon Rage: RG Cube (Mali-G57, o alvo

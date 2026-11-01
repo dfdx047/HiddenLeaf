@@ -6,6 +6,7 @@
 #include "hl_host_pad.h"
 #include "ps2_live_ring.h"
 #include "runtime/gs/hl_gs_live.h"
+#include "runtime/hl_perf.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -250,6 +251,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuOpen(JNIEnv *, jclass) { return JNI_FALSE; }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeScene(JNIEnv *, jclass) { return 0; }
+// HL_PERF's line of the last second: "" when it is off
+extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePerfLine(JNIEnv *env, jclass) { return env->NewStringUTF(hl_perf::line()); }
 
 extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *argv[])
 {
