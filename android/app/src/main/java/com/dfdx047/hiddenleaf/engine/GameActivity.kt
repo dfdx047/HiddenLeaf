@@ -33,7 +33,7 @@ import java.io.File
 import org.libsdl.app.SDLActivity
 
 /**
- * The game itself: SDL's activity, which loads libSDL3.so and libmain.so (the recompiled engine's host) and calls
+ * The game itself: SDL's activity, which loads libSDL3.so and libun5.so (the recompiled engine) and calls
  * SDL_main with the arguments below. It runs in a process of its own (":game" in the manifest): when the game ends
  * its process goes with it and the launcher stays as it was.
  *
@@ -67,6 +67,7 @@ class GameActivity : SDLActivity() {
         requestedOrientation = orientationFlag()
         store = TouchStore(paths.root)
         installDataList()
+        runCatching { copyGsxResources() }
         super.onCreate(savedInstanceState)
         addTouchPad()
     }
@@ -317,7 +318,44 @@ class GameActivity : SDLActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    override fun getLibraries(): Array<String> = arrayOf("SDL3", "main")
+    /** PCSX2's GS (libbt4gsx.so) reads its shaders and fonts from files: the APK's assets/gsx/resources go to gsx/resources,
+     *  again whenever the APK's copy is another version. Its Vulkan shaders compiled in advance go where it keeps its cache,
+     *  when there is none yet: without them the first start spends some 25 s compiling them. */
+    private fun copyGsxResources() {
+        val names = assets.list("gsx") ?: return
+        if ("version.txt" !in names) return
+        val want = assets.open("gsx/version.txt").use { it.readBytes().decodeToString().trim() }
+        val dst = File(paths.root, "gsx")
+        val cache = File(dst, "ARMSX2/cache")
+        val files = assets.list("gsx/cache").orEmpty()
+        files.filter { it.endsWith(".bin") && it.removeSuffix(".bin") + ".idx" in files }.forEach { bin ->
+            val idx = bin.removeSuffix(".bin") + ".idx"
+            if (File(cache, bin).exists() || File(cache, idx).exists()) return@forEach
+            cache.mkdirs()
+            for (name in listOf(bin, idx)) {
+                val tmp = File(cache, "$name.part")
+                assets.open("gsx/cache/$name").use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                tmp.renameTo(File(cache, name))
+            }
+        }
+        val mark = File(dst, "version.txt")
+        if (mark.exists() && mark.readText().trim() == want) return
+        File(dst, "resources").deleteRecursively()
+        fun copy(from: String, to: File) {
+            val kids = assets.list(from).orEmpty()
+            if (kids.isEmpty()) {
+                to.parentFile?.mkdirs()
+                assets.open(from).use { i -> to.outputStream().use { o -> i.copyTo(o) } }
+            } else {
+                to.mkdirs()
+                kids.forEach { copy("$from/$it", File(to, it)) }
+            }
+        }
+        copy("gsx/resources", File(dst, "resources"))
+        mark.writeText(want + "\n")
+    }
+
+    override fun getLibraries(): Array<String> = arrayOf("SDL3", EngineBridge.LIBRARY)
 
     /** The base ISO, opened here (the engine reads it through /proc/self/fd: a content:// address cannot be reopened
      *  by path from native code). Kept open for the life of the game's process. */

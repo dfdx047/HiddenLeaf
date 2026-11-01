@@ -1,0 +1,385 @@
+// SDL_main of the Hidden Leaf engine (libun5.so). GameActivity passes the game folder, the app's native libraries, the GPU
+// driver (folder and file, "" for the system's) and the base ISO as /proc/self/fd/N.
+//
+// Three threads: the game (the runtime's main(), with no window: its GS stream goes into a ring, hl_gs_live.cpp), PCSX2's GS
+// (libbt4gsx.so, reading the ring) and this one, which keeps the window, its events and the pad.
+#include "hl_host_pad.h"
+#include "ps2_live_ring.h"
+#include "runtime/gs/hl_gs_live.h"
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <android/log.h>
+#include <dlfcn.h>
+#include <jni.h>
+#include <pthread.h>
+#include <signal.h>
+#include <ucontext.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <thread>
+
+int ps2x_runtime_main(int argc, char *argv[]); // the runtime's main() (src/main.cpp, renamed by the build)
+
+namespace
+{
+    const char TAG[] = "HiddenLeaf";
+    std::atomic<bool> g_quit{false};
+    std::atomic<unsigned> g_touchButtons{0};
+    std::atomic<unsigned> g_touchAxes{0x80808080u};
+
+    // ---- everything the engine prints: logcat, and un5_log.txt in the game folder (the two before it are kept)
+    int g_pipe[2];
+    FILE *g_log = nullptr;
+
+    void *logThread(void *)
+    {
+        char buf[2048];
+        size_t used = 0;
+        for (;;)
+        {
+            const ssize_t n = read(g_pipe[0], buf + used, sizeof(buf) - 1 - used);
+            if (n <= 0)
+            {
+                if (n < 0 && errno == EINTR)
+                    continue;
+                break;
+            }
+            used += static_cast<size_t>(n);
+            for (;;)
+            {
+                char *nl = static_cast<char *>(std::memchr(buf, '\n', used));
+                size_t len = nl ? static_cast<size_t>(nl - buf) : used == sizeof(buf) - 1 ? used : 0;
+                if (len == 0 && !nl)
+                    break;
+                buf[len] = '\0';
+                __android_log_write(ANDROID_LOG_INFO, TAG, buf);
+                if (g_log)
+                {
+                    std::fprintf(g_log, "%s\n", buf);
+                    std::fflush(g_log);
+                }
+                len += nl != nullptr;
+                std::memmove(buf, buf + len, used - len);
+                used -= len;
+            }
+        }
+        return nullptr;
+    }
+
+    void redirectOutput(const std::string &dir)
+    {
+        const std::string path = dir + "/un5_log.txt", old = dir + "/un5_log.1.txt", older = dir + "/un5_log.2.txt";
+        std::rename(old.c_str(), older.c_str());
+        std::rename(path.c_str(), old.c_str());
+        g_log = std::fopen(path.c_str(), "w");
+        setvbuf(stdout, nullptr, _IOLBF, 0);
+        setvbuf(stderr, nullptr, _IONBF, 0);
+        if (pipe(g_pipe) == 0)
+        {
+            dup2(g_pipe[1], 1);
+            dup2(g_pipe[1], 2);
+            pthread_t th;
+            pthread_create(&th, nullptr, logThread, nullptr);
+            pthread_detach(th);
+        }
+    }
+
+    // ---- libbt4gsx.so (recomp/android/README.md)
+    struct GsxArgs
+    {
+        void *ring;
+        void *window;
+        int width, height;
+        const char *root;
+        const char *ini;
+        const char *renderer;
+        float upscale;
+        const char *driverDir;
+        const char *driverLib;
+        const char *hookDir;
+    };
+
+    // The GS settings: nothing of the game's own, only what suits a phone. HL_GS_SCALE: the internal resolution.
+    void writeIni(const std::string &path, float upscale)
+    {
+        FILE *f = std::fopen(path.c_str(), "w");
+        if (!f)
+            return;
+        std::fprintf(f,
+                     "; Ultimate Ninja 5 on PCSX2's GS: written by the game at every start\n"
+                     "[EmuCore/GS]\n"
+                     "upscale_multiplier = %g\n"
+                     "MaxAnisotropy = 0\n"
+                     "filter = 2\n"
+                     "fxaa = false\n"
+                     "CASMode = 0\n"
+                     "AspectRatio = 4:3\n"
+                     "OsdShowFPS = %s\n"
+                     "VsyncEnable = 0\n"
+                     "pcrtc_antiblur = false\n"
+                     "UserHacks = false\n"
+                     "DumpReplaceableTextures = false\n",
+                     static_cast<double>(upscale), std::getenv("HL_PERF") ? "true" : "false");
+        std::fclose(f);
+    }
+
+    void *windowHandle(SDL_Window *w, int *pw, int *ph)
+    {
+        SDL_GetWindowSizeInPixels(w, pw, ph);
+        return SDL_GetPointerProperty(SDL_GetWindowProperties(w), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+    }
+
+    // Player 1: the touch controller and the first gamepad, together.
+    SDL_Gamepad *g_pad = nullptr;
+
+    void updatePad()
+    {
+        unsigned buttons = g_touchButtons.load(std::memory_order_relaxed);
+        unsigned axes = g_touchAxes.load(std::memory_order_relaxed);
+        if (!g_pad)
+        {
+            int count = 0;
+            if (SDL_JoystickID *ids = SDL_GetGamepads(&count))
+            {
+                if (count > 0)
+                    g_pad = SDL_OpenGamepad(ids[0]);
+                SDL_free(ids);
+            }
+        }
+        if (g_pad)
+        {
+            static const struct { SDL_GamepadButton b; unsigned bit; } kMap[] = {
+                {SDL_GAMEPAD_BUTTON_BACK, 0x0001u}, {SDL_GAMEPAD_BUTTON_LEFT_STICK, 0x0002u}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, 0x0004u},
+                {SDL_GAMEPAD_BUTTON_START, 0x0008u}, {SDL_GAMEPAD_BUTTON_DPAD_UP, 0x0010u}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 0x0020u},
+                {SDL_GAMEPAD_BUTTON_DPAD_DOWN, 0x0040u}, {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 0x0080u}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 0x0400u},
+                {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0x0800u}, {SDL_GAMEPAD_BUTTON_NORTH, 0x1000u}, {SDL_GAMEPAD_BUTTON_EAST, 0x2000u},
+                {SDL_GAMEPAD_BUTTON_SOUTH, 0x4000u}, {SDL_GAMEPAD_BUTTON_WEST, 0x8000u}};
+            for (const auto &m : kMap)
+                if (SDL_GetGamepadButton(g_pad, m.b))
+                    buttons |= m.bit;
+            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000)
+                buttons |= 0x0100u;
+            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000)
+                buttons |= 0x0200u;
+            if ((axes & 0xFFFFu) == 0x8080u)
+            {   // (the touch stick is at rest: the gamepad's)
+                const auto axis = [](int v) { return static_cast<unsigned>((v + 32768) >> 8) & 0xFFu; };
+                const unsigned lx = axis(SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_LEFTX));
+                const unsigned ly = axis(SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_LEFTY));
+                const unsigned rx = axis(SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHTX));
+                const unsigned ry = axis(SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHTY));
+                axes = lx | ly << 8 | rx << 16 | ry << 24;
+            }
+        }
+        g_hlPadButtons.store(buttons, std::memory_order_relaxed);
+        g_hlPadAxes.store(axes, std::memory_order_relaxed);
+    }
+
+    // NAME=value lines in hl_env.txt in the game folder: the switches for testing (HL_AUTOPRESS, HL_PADROUTE, HL_PERF...)
+    void loadEnvFile(const std::string &path)
+    {
+        FILE *fp = std::fopen(path.c_str(), "r");
+        if (!fp)
+            return;
+        char line[2048];
+        while (std::fgets(line, sizeof(line), fp))
+        {
+            line[std::strcspn(line, "\r\n")] = '\0';
+            char *eq = std::strchr(line, '=');
+            if (line[0] != '#' && eq)
+            {
+                *eq = '\0';
+                setenv(line, eq + 1, 1);
+                std::fprintf(stderr, "un5: env %s=%s\n", line, eq + 1);
+            }
+        }
+        std::fclose(fp);
+    }
+
+    // A fault in any thread: where, with the registers. (PCSX2's handler says only "Aborting application".)
+    void faultHandler(int sig, siginfo_t *si, void *ctx)
+    {
+        const mcontext_t &m = static_cast<ucontext_t *>(ctx)->uc_mcontext;
+        Dl_info info{};
+        dladdr(reinterpret_cast<void *>(m.pc), &info);
+        std::fprintf(stderr, "un5: signal %d at address %p, pc %p (%s+0x%lx, %s)\n", sig, si->si_addr, reinterpret_cast<void *>(m.pc),
+                     info.dli_fname ? info.dli_fname : "?", static_cast<unsigned long>(m.pc - reinterpret_cast<uintptr_t>(info.dli_fbase)),
+                     info.dli_sname ? info.dli_sname : "?");
+        for (int i = 0; i < 31; i += 4)
+            std::fprintf(stderr, "un5:  x%-2d %016llx %016llx %016llx %016llx\n", i, static_cast<unsigned long long>(m.regs[i]),
+                         static_cast<unsigned long long>(i + 1 < 31 ? m.regs[i + 1] : 0), static_cast<unsigned long long>(i + 2 < 31 ? m.regs[i + 2] : 0),
+                         static_cast<unsigned long long>(i + 3 < 31 ? m.regs[i + 3] : 0));
+        std::fprintf(stderr, "un5:  sp %016llx\n", static_cast<unsigned long long>(m.sp));
+        usleep(200000); // (the log's thread)
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
+
+    void installFaultHandler()
+    {
+        struct sigaction sa{};
+        sa.sa_sigaction = faultHandler;
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGSEGV, &sa, nullptr);
+        sigaction(SIGBUS, &sa, nullptr);
+    }
+
+    void fail(const char *message)
+    {
+        std::fprintf(stderr, "un5: %s\n", message);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Hidden Leaf", message, nullptr);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPad(JNIEnv *, jclass, jint buttons, jint lx, jint ly,
+                                                                                              jint rx, jint ry)
+{
+    g_touchButtons.store(static_cast<unsigned>(buttons), std::memory_order_relaxed);
+    g_touchAxes.store(static_cast<unsigned>(lx & 0xFF) | static_cast<unsigned>(ly & 0xFF) << 8 | static_cast<unsigned>(rx & 0xFF) << 16 |
+                          static_cast<unsigned>(ry & 0xFF) << 24,
+                      std::memory_order_relaxed);
+}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuOpen(JNIEnv *, jclass) { return JNI_FALSE; }
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeScene(JNIEnv *, jclass) { return 0; }
+
+extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *argv[])
+{
+    const std::string root = argc > 1 ? argv[1] : ".";
+    const std::string libDir = argc > 2 ? argv[2] : "";
+    const std::string driverDir = argc > 3 ? argv[3] : "";
+    const std::string driverLib = argc > 4 ? argv[4] : "";
+    const std::string iso = argc > 5 ? argv[5] : "";
+    const std::string data = root + "/runtime/data";
+    redirectOutput(root);
+    std::fprintf(stderr, "un5: Hidden Leaf, Ultimate Ninja 5 engine\n");
+    loadEnvFile(root + "/hl_env.txt");
+    if (iso.empty())
+    {
+        fail("The game's disc image cannot be read. Import it again in the launcher.");
+        return 1;
+    }
+    if (chdir(data.c_str()) != 0)
+    {
+        fail("The game's files are not there. Import the game again in the launcher.");
+        return 1;
+    }
+    setenv("HL_CD_IMAGE", iso.c_str(), 1);
+    static std::string saves = root + "/saves";
+    setenv("HL_MC_ROOT", saves.c_str(), 0);
+
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
+    {
+        fail(SDL_GetError());
+        return 1;
+    }
+    SDL_Window *window = SDL_CreateWindow("Hidden Leaf", 0, 0, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    int width = 0, height = 0;
+    void *native = window ? windowHandle(window, &width, &height) : nullptr;
+    for (int i = 0; !native && window && i < 200; ++i)
+    {   // (the surface comes a little after the window)
+        SDL_PumpEvents();
+        SDL_Delay(10);
+        native = windowHandle(window, &width, &height);
+    }
+    if (!native)
+    {
+        fail("No window for the game.");
+        return 1;
+    }
+
+    const std::string gsxLib = libDir + "/libbt4gsx.so";
+    void *gsx = dlopen(gsxLib.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!gsx)
+    {
+        std::fprintf(stderr, "un5: %s\n", dlerror());
+        fail("The renderer (libbt4gsx.so) cannot be opened.");
+        return 1;
+    }
+    const auto gsxRun = reinterpret_cast<int (*)(const GsxArgs *)>(dlsym(gsx, "Bt4Gsx_Run"));
+    const auto gsxSurfaceChanged = reinterpret_cast<void (*)(void *, int, int)>(dlsym(gsx, "Bt4Gsx_SurfaceChanged"));
+    const auto gsxSurfaceDestroyed = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_SurfaceDestroyed"));
+    const auto gsxStop = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_Stop"));
+    if (!gsxRun || !gsxSurfaceChanged || !gsxSurfaceDestroyed || !gsxStop)
+    {
+        fail("The renderer (libbt4gsx.so) is not the expected one.");
+        return 1;
+    }
+
+    // the game, with its ELF from the boot files the launcher copied
+    static std::string elf = data + "/SLES_556.05";
+    std::thread([] {
+        static char arg0[] = "ps2EntryRunner";
+        static char *args[] = {arg0, elf.data(), nullptr};
+        const int code = ps2x_runtime_main(2, args);
+        std::fprintf(stderr, "un5: the game ended (%d)\n", code);
+        g_quit = true;
+    }).detach();
+
+    // the ring, once the game has sent its first GS packet
+    ps2live::RingHeader *ring = nullptr;
+    while (!g_quit && !(ring = static_cast<ps2live::RingHeader *>(hl_gslive::ring())))
+    {
+        SDL_PumpEvents();
+        updatePad();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!ring)
+        return 0;
+
+    const char *scale = std::getenv("HL_GS_SCALE");
+    const float upscale = scale ? static_cast<float>(std::atof(scale)) : 1.0f;
+    static const std::string gsxRoot = root + "/gsx", ini = gsxRoot + "/un5.ini";
+    writeIni(ini, upscale);
+    const char *api = std::getenv("HL_GS_API");
+    static GsxArgs a;
+    a = {ring, native, width, height, gsxRoot.c_str(), ini.c_str(), api ? api : "vulkan", upscale,
+         driverDir.c_str(), driverLib.c_str(), libDir.c_str()};
+    std::fprintf(stderr, "un5: PCSX2's GS, %s, %gx, window %dx%d\n", a.renderer, static_cast<double>(upscale), width, height);
+    std::atomic<bool> ended{false};
+    std::thread gs([&] {
+        const int code = gsxRun(&a);
+        std::fprintf(stderr, "un5: the GS ended (%d)\n", code);
+        ended = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300)); // (after PCSX2's handler went in, in its own start)
+    installFaultHandler();
+    while (!g_quit && !ended)
+    {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev))
+        {
+            if (ev.type == SDL_EVENT_QUIT)
+            {
+                gsxStop();
+                std::fflush(nullptr);
+                _exit(0);
+            }
+            if (ev.type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+                gsxSurfaceDestroyed(); // (the surface goes: no presenting into it)
+            else if (ev.type == SDL_EVENT_DID_ENTER_FOREGROUND || ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
+            {
+                int nw = 0, nh = 0;
+                if (void *n = windowHandle(window, &nw, &nh))
+                    gsxSurfaceChanged(n, nw, nh);
+            }
+        }
+        updatePad();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    gsxStop();
+    if (gs.joinable())
+        gs.join();
+    std::fprintf(stderr, "un5: leaving\n");
+    std::fflush(nullptr);
+    _exit(0);
+}

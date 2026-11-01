@@ -4,7 +4,7 @@ import android.content.Context
 
 /**
  * The link to the game engine: Naruto Shippuden: Ultimate Ninja 5 recompiled for arm64 (PS2Recomp) as libun5.so,
- * next to SDL3 (libSDL3.so) and the host (libmain.so). GameActivity starts it with the app's folder
+ * next to SDL3 (libSDL3.so) and PCSX2's GS (libbt4gsx.so). GameActivity starts it with the app's folder
  * (GamePaths.root) as its working directory and the base ISO as an open descriptor. A build of the app without the
  * engine still works as a launcher.
  */

@@ -1,0 +1,1346 @@
+diff --git a/ps2xIOP/CMakeLists.txt b/ps2xIOP/CMakeLists.txt
+index f8d3e44..0842c87 100644
+--- a/ps2xIOP/CMakeLists.txt
++++ b/ps2xIOP/CMakeLists.txt
+@@ -5,6 +5,7 @@ project(ps2xIOP LANGUAGES CXX)
+ option(PS2X_IOP_BUILD_TESTS "Build ps2xIOP emulator smoke tests" OFF)
+ 
+ add_library(ps2_iop STATIC
++    ../ps2xRuntime/src/lib/hl_image.cpp
+     src/ps2_path.cpp
+     src/iop_module_manager.cpp
+     src/iop_subsystem.cpp
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+index 268a0d2..504b63d 100644
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -1,3 +1,8 @@
++#include <cstdint>
++#include <string>
++// Hidden Leaf: the disc image, read in place (ps2xRuntime/src/lib/hl_image.cpp)
++bool hlImageActive();
++bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size);
+ #include "iop_cdvd.h"
+ 
+ #include "../core/iop_cpu.h"
+@@ -620,6 +625,19 @@ namespace ps2x::iop::detail
+                 return false;
+ 
+             const std::string guestPath = memory.readString(nameAddress, 1024u);
++            if (hlImageActive())
++            {   // Hidden Leaf: the disc's own directory
++                uint32_t isoLsn = 0u, isoSize = 0u;
++                if (!hlImageResolve(guestPath, isoLsn, isoSize))
++                    return false;
++                std::array<uint8_t, 32u> isoResult{};
++                writeLe32(isoResult.data(), isoLsn);
++                writeLe32(isoResult.data() + 4u, isoSize);
++                const size_t slash = guestPath.find_last_of("/\\");
++                const std::string isoLeaf = slash == std::string::npos ? guestPath : guestPath.substr(slash + 1u);
++                std::memcpy(isoResult.data() + 8u, isoLeaf.data(), std::min<size_t>(16u, isoLeaf.size()));
++                return memory.writeRam(resultAddress, isoResult.data(), isoResult.size());
++            }
+             IsoNode *node = findVirtualIsoNode(guestPath);
+             if (!node)
+                 return false;
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 0626846..4798954 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -371,6 +371,10 @@ public:
+     void publishSnapshot();
+ 
+ private:
++    [[noreturn]] void jumpToDispatcher();
++    template <typename F>
++    void guarded(F &&body);
++    void *m_transferJump = nullptr; // the innermost guarded() (a jmp_buf on its frame)
+     struct ScheduledEvent
+     {
+         uint64_t deadlineCycle = 0;
+diff --git a/ps2xRuntime/include/runtime/gs/hl_gs_live.h b/ps2xRuntime/include/runtime/gs/hl_gs_live.h
+new file mode 100644
+index 0000000..975fdda
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/gs/hl_gs_live.h
+@@ -0,0 +1,24 @@
++#pragma once
++// Hidden Leaf: the game's GS stream, live, in the format of a PCSX2 GS dump, into a ring in memory (ps2_live_ring.h), read
++// by PCSX2's GS in the same process (libbt4gsx.so, recomp/android). Only in the headless build (PS2X_HEADLESS_HOST): there the
++// runtime's own GS keeps the state (CSR, transfers) and draws nothing.
++#include <cstdint>
++#include <memory>
++
++class GSRasterBackend;
++struct GSRegisters;
++
++namespace hl_gslive
++{
++    // Packets as the GS receives them, in stream order. path: 1, 2 or 3.
++    void transfer(int path, const uint8_t *data, uint32_t sizeBytes);
++    // A register the runtime's stubs write straight into its GS: sent as an A+D packet.
++    void writeRegister(uint8_t reg, uint64_t value);
++    // GS -> EE: asks the host, waits for its answer and copies it. False if it did not answer.
++    bool readFifo(uint8_t *dst, uint32_t bytes);
++    // A guest vsync: the privileged registers and the VSync packet. Waits while the host is more than a few frames behind.
++    void vsync(const GSRegisters &regs);
++    // The ring, once the first packet made it (the host polls this).
++    void *ring();
++    std::unique_ptr<GSRasterBackend> nullBackend();
++}
+diff --git a/ps2xRuntime/include/runtime/hl_image.h b/ps2xRuntime/include/runtime/hl_image.h
+new file mode 100644
+index 0000000..c205dec
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/hl_image.h
+@@ -0,0 +1,17 @@
++#pragma once
++// Hidden Leaf: the disc image, read in place (src/lib/hl_image.cpp).
++#include <cstddef>
++#include <cstdint>
++#include <cstdio>
++#include <string>
++
++bool hlImageOpen(const std::string &path);
++bool hlImageActive();
++bool hlImageIs(const std::string &path);
++uint64_t hlImageSize();
++int hlImageDup();
++bool hlImageRead(uint64_t offset, void *dst, size_t bytes);
++// a path on the disc ("DATA/DATA.CVM;1"), in the image's own directory: its first sector and size
++bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size);
++// the same file as a read-only stream of its own; null if the disc does not have it
++std::FILE *hlImageOpenFile(const std::string &guestPath, uint64_t *sizeOut);
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index f1e7bd4..68c3d00 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,7 @@
++#include <csetjmp>
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/gs/hl_gs_live.h"
++#endif
+ #include <cstdio>
+ #include "runtime/ee_scheduler.h"
+ 
+@@ -172,6 +176,28 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+     publishSnapshot();
+ }
+ 
++// Hidden Leaf: back to the dispatcher. Guest threads switch thousands of times a frame in places, and a C++ throw costs
++// milliseconds on Android (the unwinder walks every loaded library for every frame on the way, in dl_iterate_phdr, twice).
++// What lies between here and run() is generated code and syscall stubs with nothing to destroy; the one caller with
++// something to destroy (invokeCurrentSequence) still throws.
++[[noreturn]] void EeScheduler::jumpToDispatcher()
++{
++    if (m_transferJump)
++        _longjmp(*static_cast<jmp_buf *>(m_transferJump), 1);
++    throw EeDispatcherTransfer{};
++}
++
++template <typename F>
++__attribute__((noinline)) void EeScheduler::guarded(F &&body)
++{
++    jmp_buf here;
++    void *const outer = m_transferJump;
++    m_transferJump = &here;
++    if (_setjmp(here) == 0)
++        body();
++    m_transferJump = outer;
++}
++
+ void EeScheduler::run()
+ {
+     assertExecutor();
+@@ -265,7 +291,7 @@ void EeScheduler::run()
+             running->resumeCompletion = {};
+             try
+             {
+-                completion(running->activeContext());
++                guarded([&] { completion(running->activeContext()); });
+             }
+             catch (const EeDispatcherTransfer &)
+             {
+@@ -299,7 +325,7 @@ void EeScheduler::run()
+                 {
+                     try
+                     {
+-                        completed.onComplete(completed.context, running->activeContext());
++                        guarded([&] { completed.onComplete(completed.context, running->activeContext()); });
+                     }
+                     catch (const EeDispatcherTransfer &)
+                     {
+@@ -375,9 +401,11 @@ void EeScheduler::run()
+ 
+         try
+         {
++            guarded([&] {
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
+             m_guestExecuting.store(true, std::memory_order_release);
+             function(m_rdram, &context, &m_runtime);
++            });
+             m_guestExecuting.store(false, std::memory_order_release);
+             m_insideInterrupt = false;
+         }
+@@ -615,7 +643,7 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+         m_runtime.guestFree(ownedStack);
+     }
+     publishSnapshot();
+-    throw EeDispatcherTransfer{};
++    jumpToDispatcher();
+ }
+ 
+ int EeScheduler::terminateThread(int id, uint32_t &ownedStack, bool interruptSafe)
+@@ -912,7 +940,7 @@ void EeScheduler::transferIfRequested(bool interruptSafe)
+     m_rescheduleRequested = false;
+     m_timeSliceExpired = false;
+     publishSnapshot();
+-    throw EeDispatcherTransfer{};
++    jumpToDispatcher();
+ }
+ 
+ int EeScheduler::createSemaphore(int initCount, int maxCount, uint32_t attr, uint32_t option)
+@@ -1215,7 +1243,7 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
+     invocation.sequence = ++m_invocationSequence;
+     owner->invocations.push_back(std::move(invocation));
+     publishSnapshot();
+-    throw EeDispatcherTransfer{};
++    jumpToDispatcher();
+ }
+ 
+ [[noreturn]] void EeScheduler::invokeCurrentSequence(std::vector<GuestInvocation> invocations)
+@@ -1830,7 +1858,7 @@ void EeScheduler::blockCurrent(EeWaitState wait)
+     self->status = self->suspendCount == 0 ? EeThreadStatus::Waiting : EeThreadStatus::WaitingSuspended;
+     m_currentThreadId = 0;
+     publishSnapshot();
+-    throw EeDispatcherTransfer{};
++    jumpToDispatcher();
+ }
+ 
+ void EeScheduler::makeReady(GuestThread &item, int result, bool interruptSafe)
+@@ -2020,6 +2048,9 @@ void EeScheduler::processEvent(const EeEvent &event)
+             hl_float_report(m_vsyncTick);
+         }
+         m_runtime.memory().gs().vsyncTick.store(m_vsyncTick, std::memory_order_release);
++#if defined(PS2X_HEADLESS_HOST)
++        hl_gslive::vsync(m_runtime.memory().gs());
++#endif
+         if ((m_vsyncTick & 1u) != 0u)
+         {
+             m_runtime.memory().gs().csr.fetch_or(0x2000ull, std::memory_order_acq_rel);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index efd95c2..b0a1361 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -1,3 +1,6 @@
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/gs/hl_gs_live.h"
++#endif
+ #include "Common.h"
+ #include "GS.h"
+ #include "ps2_log.h"
+@@ -745,7 +748,11 @@ namespace ps2_stubs
+         mem.processPendingTransfers();
+ 
+         ps2TraceGuestRangeWrite(rdram, dstAddr, totalImageBytes, "sceGsExecStoreImage", ctx);
++#if defined(PS2X_HEADLESS_HOST)
++        hl_gslive::readFifo(dst, totalImageBytes);
++#else
+         runtime->gs().consumeLocalToHostBytes(dst, totalImageBytes);
++#endif
+         runtime->guestFree(pktAddr);
+ 
+         setReturnS32(ctx, 0);
+@@ -783,6 +790,15 @@ namespace ps2_stubs
+         setReturnS32(ctx, 0);
+     }
+ 
++    // Hidden Leaf: DISPLAY as libgraph computes it. A picture spans the whole 2560 VCK of the line, magnified: on PCSX2
++    // UN5 (PAL, 512 wide) has MAGH 4, DW 2559, DX 656, DY 72. With DW = w - 1 PCSX2's GS sees a picture a fifth as wide.
++    static uint64_t hlLibgraphDisplay(uint32_t dx, uint32_t dy, uint32_t w, uint32_t h)
++    {
++        const bool pal = g_gparam.omode == 3u;
++        const uint32_t magh = std::max<uint32_t>(1u, 2560u / std::max<uint32_t>(w, 1u)) - 1u;
++        return makeDisplay((pal ? 656u : 636u) + dx, (pal ? 72u : 50u) + dy, magh, 0u, (magh + 1u) * w - 1u, h - 1u);
++    }
++
+     void sceGsResetGraph(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         uint32_t mode = getRegU32(ctx, 4);
+@@ -891,11 +907,11 @@ namespace ps2_stubs
+         }
+ 
+         const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
+-        const uint64_t pmode = makePmode(1u, 1u, 0u, 0u, 0u, 0x80u);
++        const uint64_t pmode = makePmode(1u, 1u, 1u, 1u, 0u, 0x80u); // (MMOD and AMOD as the real library: PCSX2 shows 0x7f67)
+         const uint64_t smode2 =
+             (static_cast<uint64_t>(g_gparam.interlace & 0x1u) << 0) |
+             (static_cast<uint64_t>(g_gparam.ffmode & 0x1u) << 1);
+-        const uint64_t display = makeDisplay(636u, 32u, 0u, 0u, w - 1u, h - 1u);
++        const uint64_t display = hlLibgraphDisplay(0u, 0u, w, h);
+ 
+         const int32_t drawWidth = static_cast<int32_t>(w);
+         const int32_t drawHeight = static_cast<int32_t>(h);
+@@ -962,12 +978,12 @@ namespace ps2_stubs
+         }
+ 
+         const uint32_t fbw = std::max<uint32_t>(1u, (w + 63u) / 64u);
+-        const uint64_t pmode = makePmode(1u, 1u, 0u, 0u, 0u, 0x80u);
++        const uint64_t pmode = makePmode(1u, 1u, 1u, 1u, 0u, 0x80u); // (MMOD and AMOD as the real library: PCSX2 shows 0x7f67)
+         const uint64_t smode2 =
+             (static_cast<uint64_t>(g_gparam.interlace & 0x1u) << 0) |
+             (static_cast<uint64_t>(g_gparam.ffmode & 0x1u) << 1);
+         const uint64_t dispfb = makeDispFb(0u, fbw, psm, 0u, 0u);
+-        const uint64_t display = makeDisplay(636u, 32u, 0u, 0u, w - 1u, h - 1u);
++        const uint64_t display = hlLibgraphDisplay(0u, 0u, w, h);
+ 
+         const int32_t drawWidth = static_cast<int32_t>(w);
+         const int32_t drawHeight = static_cast<int32_t>(h);
+@@ -1037,7 +1053,7 @@ namespace ps2_stubs
+ 
+         uint32_t fbw = (w + 63) / 64;
+         uint64_t dispfb = makeDispFb(0, fbw, psm, 0, 0);
+-        uint64_t display = makeDisplay(dx, dy, 0, 0, w - 1, h - 1);
++        uint64_t display = hlLibgraphDisplay(dx, dy, w, h);
+ 
+         writeGsDispEnv(rdram, envAddr, display, dispfb);
+         setReturnS32(ctx, 0);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index b1bb6d8..ac56d2d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1,3 +1,4 @@
++#include "runtime/hl_image.h"
+ #include <algorithm>
+ #include <cctype>
+ 
+@@ -189,6 +190,12 @@ namespace
+             return false;
+         }
+ 
++        if (hlImageIs(imagePath.string()))
++        {
++            g_cdImageSizeBytes = hlImageSize();
++            g_cdImageSizePath = imagePath;
++            g_cdImageSizeValid = true;
++        }
+         if (!g_cdImageSizeValid || g_cdImageSizePath != imagePath)
+         {
+             std::error_code ec;
+@@ -339,6 +346,24 @@ namespace
+             return true;
+         }
+ 
++        if (hlImageActive())
++        {   // Hidden Leaf: the file as the disc's own directory has it
++            uint32_t isoLbn = 0, isoSize = 0;
++            if (!hlImageResolve(normalizeCdPathNoPrefix(ps2Path), isoLbn, isoSize))
++            {
++                g_lastCdError = -1;
++                return false;
++            }
++            CdFileEntry isoEntry;
++            isoEntry.sizeBytes = isoSize;
++            isoEntry.baseLbn = isoLbn;
++            isoEntry.sectors = sectorsForBytes(isoSize);
++            g_cdFilesByKey.emplace(key, isoEntry);
++            entryOut = isoEntry;
++            g_lastCdError = 0;
++            return true;
++        }
++
+         const std::filesystem::path root = getCdRootPath();
+         std::filesystem::path path = cdHostPath(ps2Path);
+         std::error_code ec;
+@@ -434,6 +459,12 @@ namespace
+ 
+     bool readCdSectors(uint32_t lbn, uint32_t sectors, uint8_t *dst, size_t byteCount)
+     {
++        if (hlImageActive())
++        {   // Hidden Leaf: the disc's real sectors
++            std::memset(dst, 0, byteCount);
++            g_lastCdError = hlImageRead(static_cast<uint64_t>(lbn) * kCdSectorSize, dst, byteCount) ? 0 : -1;
++            return g_lastCdError == 0;
++        }
+         for (const auto &[key, entry] : g_cdFilesByKey)
+         {
+             const uint32_t endLbn = entry.baseLbn + entry.sectors;
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 01cd5ef..8229de6 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,4 +1,7 @@
+ #include "runtime/gs/gs_frontend.h"
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/gs/hl_gs_live.h"
++#endif
+ #include <filesystem>
+ #include <fstream>
+ #include <cstdio>
+@@ -109,7 +112,11 @@ namespace
+ 
+ 
+ GS::GS()
++#if defined(PS2X_HEADLESS_HOST)
++    : m_backend(hl_gslive::nullBackend())
++#else
+     : m_backend(std::make_unique<GSCpuBackend>())
++#endif
+ {
+     reset();
+ }
+@@ -1065,6 +1072,9 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+ 
+ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+ {
++#if defined(PS2X_HEADLESS_HOST)
++    hl_gslive::writeRegister(regAddr, value); // (only the runtime's stubs come here: the parse uses the unlocked one)
++#endif
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     writeRegisterUnlocked(regAddr, value);
+ }
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+new file mode 100644
+index 0000000..d7902f7
+--- /dev/null
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -0,0 +1,347 @@
++// Hidden Leaf: the live GS stream (see runtime/gs/hl_gs_live.h). The protocol is BT3-Recomp's ps2_gs_live.cpp (GPLv3), in turn
++// from PS2Recomp's gs_dump_writer.cpp, reduced to what one process needs: the ring is plain memory.
++#include "runtime/gs/hl_gs_live.h"
++#include "runtime/gs/gs_backend.h"
++#include "runtime/ps2_memory.h"
++#include "ps2_live_ring.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <mutex>
++#include <vector>
++
++namespace
++{
++    constexpr uint8_t kTypeTransfer = 0u, kTypeVSync = 1u, kTypeReadFifo2 = 2u, kTypeRegisters = 3u;
++    constexpr uint8_t kPath2 = 1u, kPath3 = 2u, kPath1New = 3u; // PCSX2's GSDumpTypes
++    constexpr uint32_t kPrivRegsSize = 8192u;
++    constexpr uint32_t kGsStateVersion = 9u; // GSState::STATE_VERSION in PCSX2 2.x
++    constexpr uint64_t kCapacity = 64ull << 20;
++    const char kSerial[] = "SLES-55605";
++
++#pragma pack(push, 4)
++    struct DumpHeader
++    {
++        uint32_t state_version, state_size, serial_offset, serial_size, crc;
++        uint32_t screenshot_width, screenshot_height, screenshot_offset, screenshot_size;
++    };
++#pragma pack(pop)
++
++    std::mutex s_mutex;
++    std::atomic<ps2live::RingHeader *> s_ring{nullptr};
++    ps2live::RingEvents *s_events = nullptr;
++    uint8_t *s_data = nullptr;
++    bool s_headerWritten = false;
++    uint32_t s_frames = 0;
++    std::vector<uint8_t> s_regs(kPrivRegsSize, 0);
++
++    void put(uint32_t offset, uint64_t value) { std::memcpy(s_regs.data() + offset, &value, sizeof(value)); }
++
++    void snapshot(const GSRegisters &r)
++    {
++        put(0x0000u, r.pmode);
++        put(0x0010u, r.smode1 ? r.smode1 : 0x0000000740834504ull); // the PAL value, when the CRTC was never programmed
++        put(0x0020u, r.smode2);
++        put(0x0030u, r.srfsh);
++        put(0x0040u, r.synch1);
++        put(0x0050u, r.synch2);
++        put(0x0060u, r.syncv);
++        put(0x0070u, r.dispfb1);
++        put(0x0080u, r.display1);
++        put(0x0090u, r.dispfb2);
++        put(0x00A0u, r.display2);
++        put(0x00B0u, r.extbuf);
++        put(0x00C0u, r.extdata);
++        put(0x00D0u, r.extwrite);
++        put(0x00E0u, r.bgcolor);
++        put(0x1000u, r.csr.load(std::memory_order_relaxed));
++        put(0x1010u, r.imr);
++        put(0x1040u, r.busdir);
++        put(0x1080u, r.siglblid);
++    }
++
++    void writeBytes(const void *src, size_t size)
++    {
++        ps2live::RingHeader *h = s_ring.load(std::memory_order_relaxed);
++        const auto *in = static_cast<const uint8_t *>(src);
++        while (size != 0u)
++        {
++            const int64_t w = h->writePos;
++            const int64_t r = __atomic_load_n(&h->readPos, __ATOMIC_ACQUIRE);
++            const uint64_t freeBytes = kCapacity - static_cast<uint64_t>(w - r);
++            if (freeBytes == 0u)
++            {
++                if (h->consumerQuit)
++                    std::_Exit(0);
++                h->producerWaiting = 1u;
++                __atomic_thread_fence(__ATOMIC_SEQ_CST);
++                if (h->readPos == r)
++                    ps2live::eventWait(&s_events->space, 20);
++                h->producerWaiting = 0u;
++                continue;
++            }
++            const uint64_t offset = static_cast<uint64_t>(w) % kCapacity;
++            const size_t chunk = static_cast<size_t>(std::min<uint64_t>({size, freeBytes, kCapacity - offset}));
++            std::memcpy(s_data + offset, in, chunk);
++            __atomic_store_n(&h->writePos, w + static_cast<int64_t>(chunk), __ATOMIC_RELEASE);
++            in += chunk;
++            size -= chunk;
++        }
++    }
++    void writeByte(uint8_t v) { writeBytes(&v, 1u); }
++    void writeWord(uint32_t v) { writeBytes(&v, 4u); }
++
++    void endPacket()
++    {
++        ps2live::RingHeader *h = s_ring.load(std::memory_order_relaxed);
++        __atomic_thread_fence(__ATOMIC_SEQ_CST);
++        if (h->consumerWaiting)
++            ps2live::eventSet(&s_events->data);
++    }
++
++    // The ring and the dump's header, with the first packet. No saved GS state: the stream starts with the GS fresh.
++    void ensureStarted()
++    {
++        if (!s_ring.load(std::memory_order_relaxed))
++        {
++            void *block = std::aligned_alloc(64, static_cast<size_t>(ps2live::mappingSize(kCapacity)));
++            if (!block)
++            {
++                std::fprintf(stderr, "[gslive] no memory for the ring\n");
++                std::_Exit(1);
++            }
++            auto *h = static_cast<ps2live::RingHeader *>(block);
++            std::memset(h, 0, sizeof(*h));
++            h->capacity = kCapacity;
++            h->padAxes = 0x80808080u;
++            h->version = ps2live::kVersion;
++            h->producerAlive = 1u;
++            h->producerFlags = 1u;
++            s_data = ps2live::ringData(h);
++            s_events = ps2live::ringEvents(h);
++            std::memset(s_events, 0, sizeof(*s_events));
++            __atomic_thread_fence(__ATOMIC_SEQ_CST);
++            h->magic = ps2live::kMagic;
++            s_ring.store(h, std::memory_order_release);
++        }
++        if (s_headerWritten)
++            return;
++        s_headerWritten = true;
++        const uint32_t serialSize = static_cast<uint32_t>(sizeof(kSerial) - 1u);
++        writeWord(0xFFFFFFFFu);
++        writeWord(static_cast<uint32_t>(sizeof(DumpHeader)) + serialSize);
++        DumpHeader header{};
++        header.state_version = kGsStateVersion;
++        header.serial_offset = sizeof(DumpHeader);
++        header.serial_size = serialSize;
++        header.screenshot_offset = header.serial_offset + serialSize;
++        writeBytes(&header, sizeof(header));
++        writeBytes(kSerial, serialSize);
++        writeBytes(s_regs.data(), s_regs.size());
++    }
++
++    void writeTransfer(uint8_t path, const uint8_t *data, uint32_t size)
++    {
++        writeByte(kTypeTransfer);
++        writeByte(path);
++        writeWord(size);
++        writeBytes(data, size);
++        endPacket();
++    }
++
++    // PCSX2's GS keeps a tag open from one packet to the next, and the game's VU1 and DMA packets can end in the middle of one
++    // (the runtime's own parser, and the PC build with it, starts every packet on a tag and drops what is missing). So every
++    // packet leaves here self-contained: its last tag says only what the packet has.
++    std::vector<uint8_t> s_trimmed;
++
++    uint32_t tagQwords(uint64_t lo)
++    {
++        const uint32_t nloop = static_cast<uint32_t>(lo & 0x7FFFu);
++        const uint32_t flg = static_cast<uint32_t>((lo >> 58) & 3u);
++        uint32_t nreg = static_cast<uint32_t>((lo >> 60) & 15u);
++        if (nreg == 0u)
++            nreg = 16u;
++        return flg == 0u ? nloop * nreg : (flg == 1u ? (nloop * nreg + 1u) / 2u : nloop);
++    }
++
++    // 1 + the offset of a tag that runs past the end, or 0
++    uint32_t cutOfLastTag(const uint8_t *data, uint32_t size)
++    {
++        uint32_t offset = 0u;
++        while (offset + 16u <= size)
++        {
++            uint64_t lo;
++            std::memcpy(&lo, data + offset, 8u);
++            const uint64_t end = static_cast<uint64_t>(offset) + 16u + static_cast<uint64_t>(tagQwords(lo)) * 16u;
++            if (end > size)
++                return offset + 1u;
++            offset = static_cast<uint32_t>(end);
++        }
++        return 0u;
++    }
++
++    uint32_t trimLastTag(uint8_t *data, uint32_t size, uint32_t tagOffset, int path)
++    {
++        uint64_t lo;
++        std::memcpy(&lo, data + tagOffset, 8u);
++        const uint32_t flg = static_cast<uint32_t>((lo >> 58) & 3u);
++        uint32_t nreg = static_cast<uint32_t>((lo >> 60) & 15u);
++        if (nreg == 0u)
++            nreg = 16u;
++        const uint32_t have = (size - tagOffset - 16u) / 16u;
++        const uint32_t nloop = flg == 0u ? have / nreg : (flg == 1u ? have * 2u / nreg : have);
++        static uint32_t s_count = 0;
++        if (std::getenv("HL_GSLIVE_LOG") && (++s_count <= 8u || (s_count & 1023u) == 0u))
++            std::fprintf(stderr, "[gslive] path %d packet of %u bytes ends inside a tag at %u (flg %u nreg %u nloop %u, has %u): #%u\n", path, size,
++                         tagOffset, flg, nreg, static_cast<uint32_t>(lo & 0x7FFFu), nloop, s_count);
++        const uint32_t qwords = flg == 0u ? nloop * nreg : (flg == 1u ? (nloop * nreg + 1u) / 2u : nloop);
++        lo = (lo & ~0x7FFFull) | (1ull << 15) | nloop; // (with EOP: nothing more of it is coming)
++        std::memcpy(data + tagOffset, &lo, 8u);
++        return tagOffset + 16u + qwords * 16u;
++    }
++
++    // The runtime's GS parses the stream for its state; this one draws nothing and keeps no memory.
++    class NullBackend final : public GSRasterBackend
++    {
++    public:
++        void Initialize(uint8_t *, uint32_t) override {}
++        void Reset() override {}
++        void Submit(const GSPrimitiveBatch &) override {}
++        void LoadClut(const GSTex0Reg &, const GSTexClutReg &) override {}
++        void BeginTransfer(const GSTransferCommand &) override {}
++        void UploadImage(const uint8_t *, uint32_t) override {}
++        void Flush() override {}
++        void TextureFlush() override {}
++        void Sync(GSSyncReason) override {}
++        PresentationFrame Present(const GSPresentationRequest &) override { return {}; }
++        bool ClearFramebuffer(const GSContext &, uint32_t) override { return true; }
++        uint32_t ConsumeLocalToHostBytes(uint8_t *, uint32_t) override { return 0u; }
++        uint32_t ReadVram(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) const override { return 0u; }
++        void WriteVram(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) override {}
++        void SnapshotVram(std::vector<uint8_t> &) const override {}
++        GSTransferSnapshot GetTransferSnapshot() const override { return {}; }
++    };
++}
++
++namespace hl_gslive
++{
++    void transfer(int path, const uint8_t *data, uint32_t sizeBytes)
++    {
++        const uint8_t type = path == 1 ? kPath1New : (path == 2 ? kPath2 : kPath3);
++        std::lock_guard<std::mutex> lock(s_mutex);
++        ensureStarted();
++        sizeBytes &= ~15u;
++        if (const uint32_t cut = cutOfLastTag(data, sizeBytes); cut != 0u)
++        {
++            s_trimmed.assign(data, data + sizeBytes);
++            sizeBytes = trimLastTag(s_trimmed.data(), sizeBytes, cut - 1u, path);
++            data = s_trimmed.data();
++        }
++        // PCSX2's path buffers hold 9 MB with 1 MB of margin. (Nothing this large was seen: only images could be, and an image
++        // can be cut anywhere.)
++        constexpr uint32_t kSlice = 4u << 20;
++        while (sizeBytes > kSlice)
++        {
++            writeTransfer(type, data, kSlice);
++            data += kSlice;
++            sizeBytes -= kSlice;
++        }
++        if (sizeBytes != 0u)
++            writeTransfer(type, data, sizeBytes);
++    }
++
++    void writeRegister(uint8_t reg, uint64_t value)
++    {
++        uint64_t packet[4];
++        packet[0] = 1ull | (1ull << 15) | (1ull << 60); // NLOOP 1, EOP, PACKED, one register
++        packet[1] = 0xEull;                             // A+D
++        packet[2] = value;
++        packet[3] = reg;
++        std::lock_guard<std::mutex> lock(s_mutex);
++        ensureStarted();
++        writeTransfer(kPath2, reinterpret_cast<const uint8_t *>(packet), sizeof(packet));
++    }
++
++    bool readFifo(uint8_t *dst, uint32_t bytes)
++    {
++        const uint32_t qwc = (bytes + 15u) / 16u;
++        if (qwc == 0u)
++            return false;
++        uint32_t seq0 = 0;
++        {
++            std::lock_guard<std::mutex> lock(s_mutex);
++            ensureStarted();
++            ps2live::RingHeader *h = s_ring.load(std::memory_order_relaxed);
++            const bool answers = (__atomic_load_n(&h->consumerFlags, __ATOMIC_ACQUIRE) & 2u) != 0u;
++            seq0 = __atomic_load_n(&s_events->readbackSeq, __ATOMIC_ACQUIRE);
++            writeByte(kTypeReadFifo2);
++            writeWord(qwc);
++            endPacket();
++            if (!answers)
++                return false;
++        }
++        for (int i = 0; i < 1000; ++i)
++        {   // (up to 10 s; PCSX2's GS has to finish what is queued before it)
++            if (__atomic_load_n(&s_events->readbackSeq, __ATOMIC_ACQUIRE) != seq0)
++            {
++                const uint32_t have = std::min<uint32_t>(s_events->readbackBytes, bytes);
++                std::memcpy(dst, ps2live::readbackData(s_ring.load(std::memory_order_relaxed)), have);
++                return true;
++            }
++            ps2live::eventWait(&s_events->readback, 10);
++        }
++        std::fprintf(stderr, "[gslive] no answer to a GS download of %u bytes\n", bytes);
++        return false;
++    }
++
++    void vsync(const GSRegisters &regs)
++    {
++        ps2live::RingHeader *h = nullptr;
++        int64_t target = -1;
++        {
++            std::lock_guard<std::mutex> lock(s_mutex);
++            snapshot(regs);
++            ensureStarted();
++            h = s_ring.load(std::memory_order_relaxed);
++            if (s_frames % 250u == 0u && std::getenv("HL_GSLIVE_LOG"))
++                std::fprintf(stderr, "[gslive] vsync %u: pmode %llx smode1 %llx smode2 %llx dispfb1 %llx display1 %llx dispfb2 %llx display2 %llx bg %llx, %lld MB so far\n", s_frames,
++                             (unsigned long long)regs.pmode, (unsigned long long)regs.smode1, (unsigned long long)regs.smode2, (unsigned long long)regs.dispfb1,
++                             (unsigned long long)regs.display1, (unsigned long long)regs.dispfb2, (unsigned long long)regs.display2, (unsigned long long)regs.bgcolor,
++                             (long long)(h->writePos >> 20));
++            writeByte(kTypeRegisters);
++            writeBytes(s_regs.data(), s_regs.size());
++            writeByte(kTypeVSync);
++            writeByte(static_cast<uint8_t>(s_frames & 1u));
++            endPacket();
++            static const uint32_t maxLag = []() -> uint32_t
++            {
++                const char *v = std::getenv("HL_GSLIVE_MAXLAG");
++                return v ? static_cast<uint32_t>(std::atoi(v)) : 3u;
++            }();
++            constexpr uint32_t kHist = 64u;
++            static int64_t s_vsyncPos[kHist] = {};
++            s_vsyncPos[s_frames % kHist] = h->writePos;
++            if (maxLag != 0u && s_frames >= maxLag)
++                target = s_vsyncPos[(s_frames - maxLag) % kHist];
++            ++s_frames;
++        }
++        // bounded lag: the game waits until the host has read up to the VSync maxLag frames back
++        while (target >= 0 && __atomic_load_n(&h->readPos, __ATOMIC_ACQUIRE) < target)
++        {
++            if (h->consumerQuit)
++                std::_Exit(0);
++            h->producerWaiting = 1u;
++            __atomic_thread_fence(__ATOMIC_SEQ_CST);
++            if (h->readPos < target)
++                ps2live::eventWait(&s_events->space, 5);
++            h->producerWaiting = 0u;
++        }
++    }
++
++    void *ring() { return s_ring.load(std::memory_order_acquire); }
++
++    std::unique_ptr<GSRasterBackend> nullBackend() { return std::make_unique<NullBackend>(); }
++}
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index c0507c7..ad0e4df 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -1,4 +1,7 @@
+ #include "runtime/gs/ps2_gif_arbiter.h"
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/gs/hl_gs_live.h"
++#endif
+ #include <algorithm>
+ #include <cstring>
+ 
+@@ -57,6 +60,9 @@ void GifArbiter::drain()
+         auto &pkt = m_queue[i];
+         if (!pkt.data.empty())
+         {
++#if defined(PS2X_HEADLESS_HOST)
++            hl_gslive::transfer(static_cast<int>(pkt.pathId), pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
++#endif
+             m_processFn(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+         }
+     }
+diff --git a/ps2xRuntime/src/lib/gs/ps2_live_ring.h b/ps2xRuntime/src/lib/gs/ps2_live_ring.h
+new file mode 100644
+index 0000000..0045f01
+--- /dev/null
++++ b/ps2xRuntime/src/lib/gs/ps2_live_ring.h
+@@ -0,0 +1,138 @@
++#pragma once
++
++// Shared-memory ring between the PS2Recomp runtime (producer) and the PCSX2-based GS host
++// (consumer, "pcsx2-gsrunner -live"). The byte stream is exactly a PCSX2 GS dump (.gs): the
++// file header, then Transfer / Registers / VSync / ReadFIFO2 packets. The consumer also
++// publishes the host window's keyboard state back, since that window has the focus.
++// Keep this file identical in both source trees.
++
++#include <cstdint>
++#include <string>
++
++#if defined(__APPLE__)
++#include <os/os_sync_wait_on_address.h>
++#elif defined(__EMSCRIPTEN__)
++#include <emscripten/threading.h>
++#elif defined(__linux__)
++#include <climits>
++#include <ctime>
++#include <linux/futex.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++#endif
++
++namespace ps2live
++{
++    constexpr uint32_t kMagic = 0x50324C52u; // "RL2P"
++    constexpr uint32_t kVersion = 2u; // 2: ReadFIFO2 replies (readback area after the events)
++    constexpr uint64_t kDefaultCapacity = 256ull << 20;
++
++    constexpr const wchar_t *kMappingName = L"Local\\PS2RecompGsLiveRing";
++    constexpr const wchar_t *kDataEventName = L"Local\\PS2RecompGsLiveData";
++    constexpr const wchar_t *kSpaceEventName = L"Local\\PS2RecompGsLiveSpace";
++
++    // Pad buttons, active high, in the libpad bit order (bit 0 = SELECT ... bit 15 = SQUARE).
++    struct alignas(64) RingHeader
++    {
++        uint32_t magic;
++        uint32_t version;
++        uint64_t capacity; // bytes of the data area after the header
++        volatile int64_t writePos; // monotonic byte counters
++        alignas(64) volatile int64_t readPos;
++        alignas(64) volatile uint32_t producerAlive;
++        volatile uint32_t consumerAlive;
++        volatile uint32_t consumerQuit; // window closed: the game should exit
++        volatile uint32_t padButtons;
++        volatile uint32_t padAxes; // lx | ly << 8 | rx << 16 | ry << 24 (0x80 = centre)
++        volatile uint32_t padSequence;
++        volatile uint32_t hostMenuOpen; // the host's options menu is open: the game gets no pad input
++        // Wake-ups only when needed: each side sets its *Flags to 1 at start (it understands the
++        // *Waiting fields) and raises *Waiting while blocked on its event. The other side then
++        // signals only if that side is waiting (or is an older build with no flags).
++        volatile uint32_t consumerFlags;
++        volatile uint32_t consumerWaiting; // host blocked on the data event
++        volatile uint32_t producerFlags;
++        volatile uint32_t producerWaiting; // game blocked on the space event (ring full)
++    };
++
++    // Object names for one game instance: base name + "_" + suffix (the game's process id, passed
++    // to the host as "-livering <suffix>"), so several instances never share a ring.
++    inline std::wstring objectName(const wchar_t *base, const std::wstring &suffix)
++    {
++        return suffix.empty() ? std::wstring(base) : std::wstring(base) + L"_" + suffix;
++    }
++
++    inline uint8_t *ringData(RingHeader *header)
++    {
++        return reinterpret_cast<uint8_t *>(header) + sizeof(RingHeader);
++    }
++
++#if !defined(_WIN32)
++    // POSIX: the ring is a shm_open object and the two Windows auto-reset events are words in
++    // the same mapping, after the data area (macOS: os_sync_wait_on_address, Linux: futex).
++    // macOS limits shm names to 31 characters, so the base name is short.
++    constexpr const char *kPosixMappingName = "/ps2lr";
++
++    struct alignas(64) RingEvents
++    {
++        alignas(64) uint32_t data;  // set by the producer: new bytes in the ring
++        alignas(64) uint32_t space; // set by the consumer: ring space freed
++        // GS -> EE downloads: for each ReadFIFO2 packet the consumer copies PCSX2's FIFO data into the readback
++        // area, stores its size, bumps readbackSeq and sets readback (the game waits for it).
++        alignas(64) uint32_t readback;
++        uint32_t readbackSeq;
++        uint32_t readbackBytes;
++    };
++    constexpr uint64_t kReadbackCapacity = 8ull << 20; // a 1024x1024 32-bit download plus slack
++
++    inline std::string objectName(const char *base, const std::string &suffix)
++    {
++        return suffix.empty() ? std::string(base) : std::string(base) + "_" + suffix;
++    }
++
++    inline uint64_t mappingSize(uint64_t capacity)
++    {
++        return sizeof(RingHeader) + capacity + sizeof(RingEvents) + kReadbackCapacity;
++    }
++
++    inline RingEvents *ringEvents(RingHeader *header)
++    {
++        return reinterpret_cast<RingEvents *>(ringData(header) + header->capacity);
++    }
++
++    inline uint8_t *readbackData(RingHeader *header)
++    {
++        return reinterpret_cast<uint8_t *>(ringEvents(header)) + sizeof(RingEvents);
++    }
++
++    // SetEvent on an auto-reset event.
++    inline void eventSet(uint32_t *word)
++    {
++        __atomic_store_n(word, 1u, __ATOMIC_SEQ_CST);
++#if defined(__APPLE__)
++        os_sync_wake_by_address_any(word, sizeof(*word), OS_SYNC_WAKE_BY_ADDRESS_SHARED);
++#elif defined(__EMSCRIPTEN__)
++        emscripten_futex_wake(word, 1);
++#elif defined(__linux__)
++        syscall(SYS_futex, word, FUTEX_WAKE, 1, nullptr, nullptr, 0);
++#endif
++    }
++
++    // WaitForSingleObject(event, timeoutMs) on an auto-reset event: true if it was signalled.
++    inline bool eventWait(uint32_t *word, uint32_t timeoutMs)
++    {
++        if (__atomic_exchange_n(word, 0u, __ATOMIC_ACQ_REL) != 0u)
++            return true;
++#if defined(__APPLE__)
++        os_sync_wait_on_address_with_timeout(word, 0u, sizeof(*word), OS_SYNC_WAIT_ON_ADDRESS_SHARED,
++                                             OS_CLOCK_MACH_ABSOLUTE_TIME, static_cast<uint64_t>(timeoutMs) * 1000000ull);
++#elif defined(__EMSCRIPTEN__)
++        emscripten_futex_wait(word, 0u, static_cast<double>(timeoutMs)); // never on the browser's main thread
++#elif defined(__linux__)
++        const timespec timeout{static_cast<time_t>(timeoutMs / 1000u), static_cast<long>(timeoutMs % 1000u) * 1000000l};
++        syscall(SYS_futex, word, FUTEX_WAIT, 0, &timeout, nullptr, 0);
++#endif
++        return __atomic_exchange_n(word, 0u, __ATOMIC_ACQ_REL) != 0u;
++    }
++#endif
++}
+diff --git a/ps2xRuntime/src/lib/hl_image.cpp b/ps2xRuntime/src/lib/hl_image.cpp
+new file mode 100644
+index 0000000..b5ceb44
+--- /dev/null
++++ b/ps2xRuntime/src/lib/hl_image.cpp
+@@ -0,0 +1,219 @@
++// Hidden Leaf: the disc image, read in place. On Android the launcher hands it over open, as /proc/self/fd/<n>: opening that
++// path again repeats the storage permission check, which an app without storage permission fails, so it is read through the
++// descriptor, with pread (no shared offset). Sectors are the disc's real ones; file names come from its ISO 9660 directory.
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <cstdio>
++bool hlImageRead(uint64_t offset, void *dst, size_t bytes);
++bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size);
++
++#include <algorithm>
++#include <cctype>
++#include <cstdlib>
++#include <cstring>
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <vector>
++
++namespace
++{
++    int s_fd = -1;
++    std::string s_path;
++    uint64_t s_size = 0;
++
++    constexpr uint32_t kSector = 2048u;
++
++    uint32_t le32(const uint8_t *p)
++    {
++        return static_cast<uint32_t>(p[0]) | static_cast<uint32_t>(p[1]) << 8 | static_cast<uint32_t>(p[2]) << 16 |
++               static_cast<uint32_t>(p[3]) << 24;
++    }
++
++    // finds `name` (upper case, no version) in a directory extent
++    bool findEntry(uint32_t lbn, uint32_t size, const std::string &name, uint32_t &outLbn, uint32_t &outSize)
++    {
++        std::vector<uint8_t> dir(size);
++        if (!hlImageRead(static_cast<uint64_t>(lbn) * kSector, dir.data(), size))
++            return false;
++        uint32_t pos = 0;
++        while (pos + 33u < size)
++        {
++            const uint32_t len = dir[pos];
++            if (len == 0u)
++            {   // the rest of this sector is padding
++                pos = (pos / kSector + 1u) * kSector;
++                continue;
++            }
++            const uint32_t nameLen = dir[pos + 32u];
++            std::string entry(reinterpret_cast<const char *>(&dir[pos + 33u]), nameLen);
++            const size_t semi = entry.find(';');
++            if (semi != std::string::npos)
++                entry.resize(semi);
++            if (entry == name)
++            {
++                outLbn = le32(&dir[pos + 2u]);
++                outSize = le32(&dir[pos + 10u]);
++                return true;
++            }
++            pos += len;
++        }
++        return false;
++    }
++}
++
++bool hlImageOpen(const std::string &path)
++{
++    static const char kPrefix[] = "/proc/self/fd/";
++    int fd = -1;
++    if (path.compare(0, sizeof(kPrefix) - 1, kPrefix) == 0)
++        fd = std::atoi(path.c_str() + sizeof(kPrefix) - 1);
++    else
++        fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
++    struct stat st{};
++    if (fd < 0 || ::fstat(fd, &st) != 0)
++        return false;
++    s_fd = fd;
++    s_path = path;
++    s_size = static_cast<uint64_t>(st.st_size);
++    return true;
++}
++
++bool hlImageActive() { return s_fd >= 0; }
++
++bool hlImageIs(const std::string &path) { return s_fd >= 0 && path == s_path; }
++
++uint64_t hlImageSize() { return s_size; }
++
++int hlImageDup() { return s_fd >= 0 ? ::dup(s_fd) : -1; }
++
++bool hlImageRead(uint64_t offset, void *dst, size_t bytes)
++{
++    auto *out = static_cast<uint8_t *>(dst);
++    while (bytes > 0u)
++    {
++        const ssize_t n = ::pread(s_fd, out, bytes, static_cast<off_t>(offset));
++        if (n <= 0)
++            return false;
++        out += n;
++        offset += static_cast<uint64_t>(n);
++        bytes -= static_cast<size_t>(n);
++    }
++    return true;
++}
++
++bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
++{
++    if (s_fd < 0)
++        return false;
++    uint8_t pvd[kSector];
++    if (!hlImageRead(16ull * kSector, pvd, kSector) || std::memcmp(pvd + 1, "CD001", 5) != 0)
++        return false;
++    uint32_t curLbn = le32(pvd + 156 + 2);
++    uint32_t curSize = le32(pvd + 156 + 10);
++    std::string part;
++    const auto step = [&]() -> bool
++    {
++        if (part.empty())
++            return true;
++        const size_t semi = part.find(';');
++        if (semi != std::string::npos)
++            part.resize(semi);
++        std::transform(part.begin(), part.end(), part.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
++        const bool found = findEntry(curLbn, curSize, part, curLbn, curSize);
++        part.clear();
++        return found;
++    };
++    const size_t device = guestPath.find(':');
++    for (const char c : device == std::string::npos ? guestPath : guestPath.substr(device + 1u))
++    {
++        if (c == '/' || c == '\\')
++        {
++            if (!step())
++                return false;
++        }
++        else
++            part.push_back(c);
++    }
++    if (!step())
++        return false;
++    lbn = curLbn;
++    size = curSize;
++    return true;
++}
++
++namespace
++{
++    // A file of the disc as a FILE: reads go straight to the image, each stream with its own position.
++    struct ExtentView
++    {
++        uint64_t base, size, pos;
++    };
++
++    int64_t viewReadBytes(ExtentView *v, char *dst, size_t bytes)
++    {
++        const uint64_t left = v->pos < v->size ? v->size - v->pos : 0u;
++        const size_t count = static_cast<size_t>(std::min<uint64_t>(left, bytes));
++        if (count != 0u && !hlImageRead(v->base + v->pos, dst, count))
++            return -1;
++        v->pos += count;
++        return static_cast<int64_t>(count);
++    }
++
++    int64_t viewSeekTo(ExtentView *v, int64_t offset, int whence)
++    {
++        const int64_t from = whence == SEEK_SET ? 0 : (whence == SEEK_CUR ? static_cast<int64_t>(v->pos) : static_cast<int64_t>(v->size));
++        const int64_t target = from + offset;
++        if (target < 0)
++            return -1;
++        v->pos = static_cast<uint64_t>(target);
++        return target;
++    }
++
++#if defined(__ANDROID__)
++    int viewRead(void *cookie, char *dst, int bytes) { return static_cast<int>(viewReadBytes(static_cast<ExtentView *>(cookie), dst, static_cast<size_t>(bytes))); }
++    fpos64_t viewSeek(void *cookie, fpos64_t offset, int whence) { return viewSeekTo(static_cast<ExtentView *>(cookie), offset, whence); }
++#else
++    ssize_t viewRead(void *cookie, char *dst, size_t bytes) { return viewReadBytes(static_cast<ExtentView *>(cookie), dst, bytes); }
++    int viewSeek(void *cookie, off64_t *offset, int whence)
++    {
++        const int64_t target = viewSeekTo(static_cast<ExtentView *>(cookie), *offset, whence);
++        if (target < 0)
++            return -1;
++        *offset = target;
++        return 0;
++    }
++#endif
++
++    int viewClose(void *cookie)
++    {
++        delete static_cast<ExtentView *>(cookie);
++        return 0;
++    }
++}
++
++std::FILE *hlImageOpenFile(const std::string &guestPath, uint64_t *sizeOut)
++{
++    uint32_t lbn = 0u, size = 0u;
++    if (!hlImageResolve(guestPath, lbn, size))
++        return nullptr;
++    auto *view = new ExtentView{static_cast<uint64_t>(lbn) * kSector, size, 0u};
++#if defined(__ANDROID__)
++    std::FILE *stream = funopen64(view, viewRead, nullptr, viewSeek, viewClose);
++#else
++    cookie_io_functions_t functions{};
++    functions.read = viewRead;
++    functions.seek = viewSeek;
++    functions.close = viewClose;
++    std::FILE *stream = fopencookie(view, "rb", functions);
++#endif
++    if (!stream)
++    {
++        delete view;
++        return nullptr;
++    }
++    if (sizeOut)
++        *sizeOut = size;
++    return stream;
++}
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+index 8d46e03..e721af2 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_image.h"
+ #include "ps2_iop_host.h"
+ 
+ #include "ps2_runtime.h"
+@@ -288,6 +289,12 @@ std::string PS2IopHostAdapter::hostPath(ps2x::iop::HostPathKind kind) const
+ 
+ std::string PS2IopHostAdapter::translateGuestPath(std::string_view path) const
+ {
++    if (hlImageActive() && ps2x::iop::parsePs2Path(path).device == ps2x::iop::Ps2PathDevice::Cdrom)
++    {   // Hidden Leaf: the disc's files are in its image (see openHostFile)
++        uint32_t lbn = 0u, size = 0u;
++        if (hlImageResolve(std::string(path), lbn, size))
++            return "hliso:" + std::string(path);
++    }
+     const PS2Runtime::IoPaths &paths = PS2Runtime::getIoPaths();
+     const PS2VfsMounts mounts{paths.hostRoot, paths.cdRoot, paths.mcRoot};
+     std::filesystem::path hostPath;
+@@ -303,7 +310,33 @@ uint64_t PS2IopHostAdapter::openHostFile(std::string_view path)
+         return 0u;
+     }
+ 
++    if (path.rfind("hliso:", 0) == 0)
++    {
++        uint64_t fileSize = 0u;
++        std::FILE *view = hlImageOpenFile(std::string(path.substr(6)), &fileSize);
++        if (!view)
++            return 0u;
++        std::lock_guard<std::mutex> lock(m_hostFileMutex);
++        uint64_t handle = m_nextHostFileHandle++;
++        if (handle == 0u)
++            handle = m_nextHostFileHandle++;
++        m_hostFiles.emplace(handle, HostFile{view, fileSize});
++        return handle;
++    }
+     const std::filesystem::path hostPath{std::string(path)};
++    if (hlImageIs(hostPath.string()))
++    {   // Hidden Leaf: the path of an image handed over open cannot be opened again
++        const int fd = hlImageDup();
++        std::FILE *image = fd >= 0 ? ::fdopen(fd, "rb") : nullptr;
++        if (!image)
++            return 0u;
++        std::lock_guard<std::mutex> lock(m_hostFileMutex);
++        uint64_t handle = m_nextHostFileHandle++;
++        if (handle == 0u)
++            handle = m_nextHostFileHandle++;
++        m_hostFiles.emplace(handle, HostFile{image, hlImageSize()});
++        return handle;
++    }
+ #if defined(_WIN32)
+     std::FILE *stream = ::_wfopen(hostPath.c_str(), L"rb");
+ #else
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 94da4a0..88c8711 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -2086,6 +2086,9 @@ void PS2Memory::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ 
+ bool PS2Memory::tryProcessNativeGifImageUploadChain(GS &gs, uint32_t tadr, uint32_t chcr)
+ {
++#if defined(PS2X_HEADLESS_HOST)
++    return false; // the image has to go through the GIF stream, to the host's GS
++#endif
+     static constexpr uint32_t GIF_CHANNEL = 0x1000A000u;
+     static constexpr uint32_t D_STAT = 0x1000E010u;
+     static constexpr uint32_t D_CTRL = 0x1000E000u;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 4cfc951..dfae56d 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_image.h"
+ #include "ps2_runtime.h"
+ #include "ps2_log.h"
+ #include "ps2_stubs.h"
+@@ -1154,6 +1155,15 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+ {
+     IoPaths paths = runtimeIoPaths();
+     paths.elfPath = normalizeAbsolutePath(std::filesystem::path(elfPath));
++    // Hidden Leaf: HL_CD_IMAGE=<iso or /proc/self/fd/N> reads the disc from its image; HL_MC_ROOT=<folder> the memory cards
++    const char *hlImage = std::getenv("HL_CD_IMAGE");
++    if (hlImage && hlImage[0])
++    {
++        if (hlImageOpen(hlImage))
++            paths.cdImage = hlImage;
++        else
++            std::cerr << "[hl] the disc image cannot be read: " << hlImage << std::endl;
++    }
+     if (!paths.elfPath.empty())
+     {
+         paths.elfDirectory = paths.elfPath.parent_path();
+@@ -1165,6 +1175,8 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+         paths.cdRoot = paths.elfDirectory;
+         paths.mcRoot = paths.elfDirectory / "mc0";
+     }
++    if (const char *hlMc = std::getenv("HL_MC_ROOT"); hlMc && hlMc[0])
++        paths.mcRoot = hlMc;
+ 
+     setIoPaths(paths);
+ }
+@@ -2485,11 +2497,14 @@ void PS2Runtime::run()
+ 
+     RUNTIME_LOG("Starting execution at address 0x" << std::hex << m_cpuContext.pc << std::dec);
+ 
++#if !defined(PS2X_HEADLESS_HOST)
+     // A blank image to use as a framebuffer
+     Image blank = GenImageColor(FB_WIDTH, FB_HEIGHT, BLANK);
+     Texture2D frameTex = LoadTextureFromImage(blank);
+     UnloadImage(blank);
+ 
++#endif
++
+     std::atomic<bool> gameThreadFinished{false};
+ 
+     std::thread gameThread([&]()
+@@ -2513,6 +2528,11 @@ void PS2Runtime::run()
+         }
+         gameThreadFinished.store(true, std::memory_order_release); });
+ 
++#if defined(PS2X_HEADLESS_HOST)
++    // No window here: the host draws the live GS stream and answers for the window
++    while (!isStopRequested() && !gameThreadFinished.load(std::memory_order_acquire))
++        std::this_thread::sleep_for(std::chrono::milliseconds(50));
++#else
+     uint64_t tick = 0;
+     while (!isStopRequested() && !gameThreadFinished.load(std::memory_order_acquire))
+     {
+@@ -2582,6 +2602,8 @@ void PS2Runtime::run()
+         }
+     }
+ 
++#endif
++
+     requestStop();
+     if (gameThread.joinable())
+     {
+@@ -2593,8 +2615,10 @@ void PS2Runtime::run()
+         m_debugUiShutdownCallback(*this, m_debugUiUserData);
+         m_debugUiInitialized = false;
+     }
++#if !defined(PS2X_HEADLESS_HOST)
+     UnloadTexture(frameTex);
+     CloseWindow();
++#endif
+ 
+     RUNTIME_LOG("[run] exiting loop");
+ }
+diff --git a/ps2xRuntime/src/lib/ps2_vfs.cpp b/ps2xRuntime/src/lib/ps2_vfs.cpp
+index aff25e6..3b6866b 100644
+--- a/ps2xRuntime/src/lib/ps2_vfs.cpp
++++ b/ps2xRuntime/src/lib/ps2_vfs.cpp
+@@ -1,3 +1,4 @@
++#include "runtime/hl_image.h"
+ #include "runtime/ps2_vfs.h"
+ 
+ #include "runtime/ps2_memory.h"
+@@ -171,6 +172,10 @@ int32_t PS2Vfs::open(std::string_view path, uint32_t flags, const PS2VfsMounts &
+             return -1;
+         file = std::make_unique<MemoryOpenFile>(std::move(bytes));
+     }
++    else if (std::FILE *image = (parsed.device == ps2x::iop::Ps2PathDevice::Cdrom && hlImageActive()) ? hlImageOpenFile(std::string(path), nullptr) : nullptr)
++    {   // Hidden Leaf: the disc's files are in its image
++        file = std::make_unique<HostOpenFile>(image);
++    }
+     else
+     {
+         std::filesystem::path hostPath;
+@@ -246,6 +251,16 @@ bool PS2Vfs::stat(std::string_view path, const PS2VfsMounts &mounts, const PS2Ro
+         return true;
+     }
+ 
++    if (parsed.device == ps2x::iop::Ps2PathDevice::Cdrom && hlImageActive())
++    {   // Hidden Leaf: the disc's files are in its image
++        uint32_t lbn = 0u, size = 0u;
++        if (hlImageResolve(std::string(path), lbn, size))
++        {
++            result.size = size;
++            result.readOnly = true;
++            return true;
++        }
++    }
+     std::filesystem::path hostPath;
+     if (!resolveHostPath(path, mounts, hostPath))
+         return false;
+diff --git a/ps2xRuntime/src/main.cpp b/ps2xRuntime/src/main.cpp
+index 563bcbd..dd26e0f 100644
+--- a/ps2xRuntime/src/main.cpp
++++ b/ps2xRuntime/src/main.cpp
+@@ -166,7 +166,7 @@ namespace
+ 
+ int main(int argc, char *argv[])
+ {
+-#if defined(__ANDROID__)
++#if defined(__ANDROID__) && !defined(PS2X_HEADLESS_HOST)
+     redirectStdioToLogcat();
+ #endif
+     setupTerminateLogger();

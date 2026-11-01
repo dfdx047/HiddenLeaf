@@ -42,3 +42,7 @@ android/.kotlin/
 __pycache__/
 *.pyc
 .DS_Store
+
+# --- Android: the engine carries the game code; the renderer resources are a copy of a build product
+android/app/src/main/jniLibs/
+android/app/src/main/assets/gsx/
