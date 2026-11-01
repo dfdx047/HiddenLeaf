@@ -1,0 +1,90 @@
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index e453fba..0626846 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -320,6 +320,7 @@ public:
+     [[noreturn]] void invokeCurrentSequence(std::vector<GuestInvocation> invocations);
+     [[nodiscard]] bool hasInvocation(GuestInvocationKind kind, uint64_t tag) const;
+     [[nodiscard]] uint32_t invocationStackTop();
++    void releaseInvocationStacks(int id);
+ 
+     int addIrqHandler(bool dmac,
+                       uint32_t cause,
+@@ -462,6 +463,7 @@ private:
+     uint32_t m_gsVSyncCallbackGp = 0;
+     uint32_t m_gsVSyncCallbackSp = 0;
+     std::unordered_map<uint64_t, uint32_t> m_invocationStackTops;
++    std::vector<uint32_t> m_freeInvocationStacks;
+     std::atomic<uint64_t> m_nextDeadlineCycle{0};
+ 
+     mutable std::mutex m_snapshotMutex;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index a0d6b0d..fd3eff6 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ #include "runtime/ee_scheduler.h"
+ 
+ #include "ps2_log.h"
+@@ -563,6 +564,7 @@ int EeScheduler::deleteThread(int id, uint32_t &ownedStack)
+     {
+         ownedStack = it->second.stack;
+     }
++    releaseInvocationStacks(id);
+     m_threads.erase(it);
+     publishSnapshot();
+     return KE_OK;
+@@ -611,6 +613,7 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+     m_currentThreadId = 0;
+     if (deleteThreadRecord && id != kMainThreadId)
+     {
++        releaseInvocationStacks(id);
+         m_threads.erase(id);
+     }
+     if (ownedStack != 0u)
+@@ -1271,15 +1274,43 @@ uint32_t EeScheduler::invocationStackTop()
+         return existing->second;
+     }
+     constexpr uint32_t kInvocationStackSize = 0x4000u;
+-    const uint32_t top = m_runtime.reserveAsyncCallbackStack(kInvocationStackSize, 16u);
++    // Hidden Leaf: the stack of a deleted thread goes back to use. UN5 creates a loader thread per file: with a new
++    // stack per thread id, the area ran out in the loading of the first fight
++    uint32_t top = 0u;
++    if (!m_freeInvocationStacks.empty())
++    {
++        top = m_freeInvocationStacks.back();
++        m_freeInvocationStacks.pop_back();
++    }
++    else
++    {
++        top = m_runtime.reserveAsyncCallbackStack(kInvocationStackSize, 16u);
++    }
+     if (top == 0u)
+     {
++        std::fprintf(stderr, "[ee] invocation stacks exhausted: thread %d depth %zu, %zu stacks\n", owner->id, depth, m_invocationStackTops.size());
+         throw std::runtime_error("EE invocation stack space exhausted");
+     }
+     m_invocationStackTops.emplace(key, top);
+     return top;
+ }
+ 
++void EeScheduler::releaseInvocationStacks(int id)
++{
++    for (auto it = m_invocationStackTops.begin(); it != m_invocationStackTops.end();)
++    {
++        if (static_cast<uint32_t>(it->first >> 32u) == static_cast<uint32_t>(id))
++        {
++            m_freeInvocationStacks.push_back(it->second);
++            it = m_invocationStackTops.erase(it);
++        }
++        else
++        {
++            ++it;
++        }
++    }
++}
++
+ int EeScheduler::addIrqHandler(bool dmac,
+                                uint32_t cause,
+                                uint32_t handler,
