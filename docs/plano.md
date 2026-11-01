@@ -279,6 +279,7 @@ Notas da investigação (para referência):
 | `HL_DMA_LOG=1` | cada cadeia DMA (`[dma-chain] ch chcr tags bytes next lastTag`) (0012) |
 | `HL_RPC_LOG=1` | cada chamada SIF RPC (0008) |
 | `HL_IOP_TRACE=pc,pc` | registradores do IOP nesses PCs, em hexa (0009) |
+| `HL_PADROUTE="650:CROSS,3179:DOWN WAIT WAIT CROSS"` | a mesma coisa do arquivo `hl_pad`, por vsync: a rota não depende da velocidade do PC (0039) |
 | `HL_AUTOPRESS="15:CROSS,140:START"` | aperta botões sozinho (segundos desde a 1ª leitura do controle:botão, 0,25 s cada) (0014) |
 | `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
 | `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
