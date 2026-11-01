@@ -58,10 +58,19 @@ namespace
 	enum : uint32_t { P_PRIM = 0, P_RGBA = 1, P_STQ = 2, P_UV = 3, P_XYZF2 = 4, P_XYZ2 = 5, P_FOG = 0xA, P_AD = 0xE, P_NOP = 0xF };
 	enum : uint32_t { PSM_CT32 = 0x00, PSM_T8 = 0x13, PSM_T4 = 0x14, PSM_T8H = 0x1B, PSM_T4HL = 0x24, PSM_T4HH = 0x2C };
 
-	// A fight's targets, the only ones drawn here. (Others: the silhouettes at page 0x1C0, read back as a CT24 texture, and the
-	// copy of the finished frame to page 0x70 that the display reads. Those stay with PCSX2's GS.)
-	constexpr uint32_t kSceneFbp = 0, kSceneFbw = 8, kSceneZbp = 0xF0;
-	constexpr int kSceneW = 512, kSceneH = 448;
+	// A fight's targets. The scene (page 0, Z at page 0xF0) is PCSX2's own target: it goes on from there, and the copy of the
+	// finished frame to page 0x70 that the display reads stays with it. The rest of what a frame does (shadows, bloom) happens
+	// in smaller targets that only these same passes read, and those are private images here:
+	//
+	//   - shadows, page 0x1C0, 256x256 for the whole 512x448: shadow volumes add or take 1 from red where they pass the Z test,
+	//     against a copy of the scene's Z the game shrinks to page 0x1E0. Here the image has the scene's size and the test is
+	//     against the scene's Z itself: same pixels, finer, and no copy. It is read as CT24 with TEXA's AEM: no colour, no shade;
+	//   - bloom, page 0x1C0 again, then pages 0x1E0 and 0x1E8 (128 and 64): shrink, blur, and added back to the scene.
+	constexpr uint32_t kSceneFbp = 0, kSceneFbw = 8, kSceneZbp = 0xF0, kPostFbp = 0x1C0, kHalfFbp = 0x1E0, kQuarterFbp = 0x1E8, kDisplayFbp = 0x70;
+	constexpr int kSceneW = 512, kSceneH = 448, kDisplayW = 512, kDisplayH = 512;
+	enum Target : uint8_t { kTScene, kTShadow, kTBloom, kTHalf, kTQuarter, kTDisplay, kTargets };
+	constexpr int32_t texOfTarget(int target) { return -2 - target; }
+	constexpr int targetOfTex(int32_t tex) { return -2 - tex; }
 
 	// ---- what a frame is made of
 	struct Vertex
@@ -73,17 +82,17 @@ namespace
 	};
 	static_assert(sizeof(Vertex) == 32);
 
-	enum Blend : uint8_t { kBlendAlpha, kBlendSub, kBlendAdd, kBlendNone, kBlends };
+	enum Blend : uint8_t { kBlendAlpha, kBlendSub, kBlendAdd, kBlendNone, kBlendZOnly, kBlends };
 	enum ZMode : uint8_t { kZAlways, kZGequal, kZGreater, kZModes };
 	enum AMode : uint8_t { kANone, kAKeep, kAFbOnly }; // (alpha test: none; failing is dropped; failing writes colour, not Z)
 
 	struct DrawKey
 	{
-		int32_t tex;       // -1: no texture
+		int32_t tex;       // -1: no texture; below that, a target (texOfTarget)
 		uint32_t fogcol;
 		uint16_t sc[4];    // scissor: x0, y0, x1, y1 (inclusive, as the GS)
 		uint8_t blend, zmode, zwrite, amode;
-		uint8_t aref, sampler, textured, pad;
+		uint8_t aref, sampler, textured, target; // (textured: 0 no, 1 yes, 2 with alpha from the vertex, 3 the shadow's CT24)
 		bool operator==(const DrawKey& o) const { return std::memcmp(this, &o, sizeof(DrawKey)) == 0; }
 	};
 	static_assert(sizeof(DrawKey) == 24);
@@ -99,6 +108,9 @@ namespace
 		int32_t id;
 		int w, h;
 		std::vector<uint8_t> rgba;
+		// (or read from the GS's memory when the GS thread gets to it: see readFromMemory)
+		bool fromMemory = false;
+		uint32_t tbp = 0, tbw = 0, psm = 0, cbp = 0;
 	};
 
 	struct Frame
@@ -152,6 +164,7 @@ namespace
 	uint32_t s_i0 = 0, s_i1 = 0;    // indices of the last two
 	Vertex s_spriteFirst{};
 
+	enum TextureUse : uint8_t { kTexNone, kTexModulate, kTexNoAlpha, kTexShadow };
 	enum Verdict : uint8_t { kNative, kToGs, kDrop };
 	bool s_dirty = true;
 	Verdict s_verdict = kToGs;
@@ -188,6 +201,7 @@ namespace
 		size_t operator()(const TexKey& k) const { return static_cast<size_t>(k.texHash ^ (k.clutHash * 31u) ^ (static_cast<uint64_t>(k.psm) << 40) ^ k.size); }
 	};
 	std::unordered_map<TexKey, int32_t, TexKeyHash> s_textureIds;
+	uint32_t s_memoryGeneration = 0; // (a copy inside the GS's memory may have changed what the textures read from it hold)
 	int32_t s_nextTexture = 0;
 
 	// counters for the log
@@ -451,19 +465,65 @@ namespace
 		const uint32_t tbp = tex0 & 0x3FFFu, psm = (tex0 >> 20) & 63u, tw = (tex0 >> 26) & 15u, th = (tex0 >> 30) & 15u;
 		const uint32_t cbp = (tex0 >> 37) & 0x3FFFu;
 		const int cls = psmClass(psm);
-		if (cls <= 0 || tw > 10u || th > 10u)
+		static uint32_t s_shownMisses = 0;
+		const auto missed = [&](const char* why) {
+			static std::unordered_map<uint64_t, bool> s_shown;
+			if (s_shownMisses < 40u && !s_shown[tbp | (static_cast<uint64_t>(psm) << 32)])
+			{
+				s_shown[tbp | (static_cast<uint64_t>(psm) << 32)] = true;
+				++s_shownMisses;
+				std::fprintf(stderr, "[native] texture %x psm %x %ux%u cbp %x: %s\n", tbp, psm, 1u << tw, 1u << th, cbp, why);
+			}
 			return -1;
+		};
+		if (cls <= 0 || tw > 10u || th > 10u)
+			return missed("format");
 		const auto ti = s_uploads[cls].find(tbp);
 		const auto ci = s_uploads[0].find(cbp);
 		if (ti == s_uploads[cls].end() || ci == s_uploads[0].end())
-			return -1;
+		{
+			// Not sent as such (the stage's effect textures live in the high bits of the display buffer and of Z, put there by copies
+			// inside the GS's memory when the stage loads): it is in the GS's memory, and only the GS thread may read that. Whatever
+			// of it is still waiting for the GS goes first, and the texture is read when the GS thread reaches this point.
+			const uint32_t tbw = (tex0 >> 14) & 63u;
+			if (tbw == 0u)
+				return missed("no width");
+			const TexKey key{(static_cast<uint64_t>(tbp) | (static_cast<uint64_t>(tbw) << 16) | (static_cast<uint64_t>(s_memoryGeneration) << 32)) ^ 0xA5A5000000000000ull, cbp, psm, (tw << 8) | th};
+			const auto found = s_textureIds.find(key);
+			if (found != s_textureIds.end())
+				return found->second;
+			flushFrame();
+			emitOne(3u, tbp, psm);
+			emitOne(3u, cbp, PSM_CT32);
+			const int32_t id = s_nextTexture++;
+			s_textureIds.emplace(key, id);
+			s_stats.miss++;
+			if (!s_frame)
+				s_frame = takeFrame();
+			s_frame->textures.emplace_back();
+			NewTexture& n = s_frame->textures.back();
+			n.id = id;
+			n.w = 1 << tw;
+			n.h = 1 << th;
+			n.fromMemory = true;
+			n.tbp = tbp;
+			n.tbw = tbw;
+			n.psm = psm;
+			n.cbp = cbp;
+			return id;
+		}
 		Upload& tex = *ti->second;
 		Upload& clut = *ci->second;
 		const int w = 1 << tw, h = 1 << th;
 		const bool eight = psm == PSM_T8 || psm == PSM_T8H;
 		if (!tex.complete || !clut.complete || tex.trxpos != 0u || clut.trxpos != 0u || tex.w < static_cast<uint32_t>(w) || tex.h < static_cast<uint32_t>(h)
 			|| clut.bytes.size() < (eight ? 1024u : 64u))
-			return -1;
+		{
+			char why[160];
+			std::snprintf(why, sizeof(why), "upload %ux%u complete %d pos %llx, clut %zu bytes complete %d pos %llx", tex.w, tex.h, tex.complete ? 1 : 0, static_cast<unsigned long long>(tex.trxpos),
+				clut.bytes.size(), clut.complete ? 1 : 0, static_cast<unsigned long long>(clut.trxpos));
+			return missed(why);
+		}
 		const TexKey key{hashOf(tex), hashOf(clut), psm, (tw << 8) | th};
 		const auto found = s_textureIds.find(key);
 		if (found != s_textureIds.end())
@@ -502,9 +562,32 @@ namespace
 			TO_GS("AA1");
 		if (s_seen[R_PRMODECONT] && !(s_regs[R_PRMODECONT] & 1u))
 			TO_GS("PRMODE");
-		if ((frame & 0x1FFu) != kSceneFbp || ((frame >> 16) & 63u) != kSceneFbw || ((frame >> 24) & 63u) != PSM_CT32)
-			TO_GS("frame buffer");
+		const uint32_t fbp = frame & 0x1FFu, fbw = (frame >> 16) & 63u, fpsm = (frame >> 24) & 63u;
 		const uint32_t fbmsk = static_cast<uint32_t>(frame >> 32);
+		// (the copy of the scene's Z for the shadows: they test against the scene's own. And alpha alone: nothing reads the frame's alpha.)
+		static const char* const s_debugKeep = std::getenv("HL_NATIVE_OFF");
+		if (fbp == kHalfFbp && fbw == 4u && fpsm == 0x31u && s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneZbp * 32u && !(s_debugKeep && std::strchr(s_debugKeep, 'p')))
+			return kDrop;
+		if (fbmsk == 0x00FFFFFFu)
+			return kDrop;
+		uint32_t target;
+		if (fpsm != PSM_CT32)
+			TO_GS("frame buffer");
+		static const char* const s_debugOff = std::getenv("HL_NATIVE_OFF"); // (letters: p the targets of the passes, z writing Z alone)
+		if (s_debugOff && std::strchr(s_debugOff, 'p') && fbp != kSceneFbp)
+			TO_GS("frame buffer");
+		if (fbp == kSceneFbp && fbw == kSceneFbw)
+			target = kTScene;
+		else if (fbp == kPostFbp && fbw == 4u)
+			target = s_tme ? kTBloom : kTShadow;
+		else if (fbp == kHalfFbp && fbw == 2u)
+			target = kTHalf;
+		else if (fbp == kQuarterFbp && fbw == 1u)
+			target = kTQuarter;
+		else if (fbp == kDisplayFbp && fbw == kSceneFbw)
+			target = kTDisplay;
+		else
+			TO_GS("frame buffer");
 		if (fbmsk != 0u && fbmsk != 0xFF000000u)
 			TO_GS("FBMSK");
 		if ((s_regs[R_PABE] & 1u) || (s_regs[R_FBA + c] & 1u) || (s_regs[R_DTHE] & 1u) || (s_seen[R_COLCLAMP] && !(s_regs[R_COLCLAMP] & 1u)))
@@ -513,6 +596,7 @@ namespace
 			TO_GS("SCANMSK");
 
 		DrawKey k{};
+		k.target = static_cast<uint8_t>(target);
 		const uint64_t sc = s_regs[R_SCISSOR + c];
 		k.sc[0] = sc & 0x7FFu;
 		k.sc[2] = (sc >> 16) & 0x7FFu;
@@ -530,12 +614,27 @@ namespace
 		const bool sceneZ = (zbuf & 0x1FFu) == kSceneZbp;
 		if (((zbuf >> 24) & 15u) != 1u && sceneZ)
 			TO_GS("Z format");
-		if (!zte || ztst == 0u)
+		if ((!zte || ztst == 0u) && target != kTDisplay)
 			TO_GS("Z test");
 		k.zmode = ztst == 1u ? kZAlways : (ztst == 2u ? kZGequal : kZGreater);
 		k.zwrite = zmsk ? 0u : 1u;
-		if (!sceneZ && (!zmsk || ztst != 1u))
-			TO_GS("Z buffer");
+		if (target == kTScene)
+		{
+			if (!sceneZ && (!zmsk || ztst != 1u))
+				TO_GS("Z buffer");
+		}
+		else if (target == kTDisplay)
+		{
+			k.zmode = kZAlways;
+			k.zwrite = 0u;
+		}
+		else
+		{
+			// (none, or the shadows' test, which here goes against the scene's Z)
+			const bool shadowTest = target == kTShadow && ztst == 3u && (zbuf & 0x1FFu) == kHalfFbp;
+			if (!zmsk || (ztst != 1u && !shadowTest))
+				TO_GS("Z buffer");
+		}
 
 		// alpha test
 		k.amode = kANone;
@@ -547,6 +646,12 @@ namespace
 				k.amode = kANone;
 			else if (atst == 0u && afail == 1u)
 				k.zwrite = 0u; // (never passes, but colour is written: colour and no Z)
+			else if (atst == 0u && afail == 2u && target == kTScene && !s_tme && !(s_debugOff && std::strchr(s_debugOff, 'z')))
+			{
+				// (never passes, but Z is written: how the game clears it)
+				k.blend = kBlendZOnly;
+				k.zwrite = zmsk ? 0u : 1u;
+			}
 			else if ((atst == 5u || (atst == 6u && aref < 255u)) && (afail == 0u || afail == 1u))
 			{
 				k.amode = afail == 0u ? kAKeep : kAFbOnly;
@@ -557,7 +662,9 @@ namespace
 		}
 
 		// blend
-		if (!((prim >> 6) & 1u))
+		if (k.blend == kBlendZOnly)
+			;
+		else if (!((prim >> 6) & 1u))
 			k.blend = kBlendNone;
 		else
 		{
@@ -581,9 +688,24 @@ namespace
 		{
 			const uint64_t tex0 = s_regs[R_TEX0 + c];
 			const uint32_t tcc = (tex0 >> 34) & 1u, tfx = (tex0 >> 35) & 3u, cpsm = (tex0 >> 51) & 15u, csm = (tex0 >> 55) & 1u, csa = (tex0 >> 56) & 31u;
-			if (tfx != 0u || tcc != 1u)
+			const uint32_t tbp = tex0 & 0x3FFFu, tbw = (tex0 >> 14) & 63u, tpsm = (tex0 >> 20) & 63u;
+			// one of the targets, read back?
+			int source = -1;
+			if (tbp == kSceneFbp * 32u && tbw == kSceneFbw && tpsm == PSM_CT32)
+				source = kTScene;
+			else if (tbp == kPostFbp * 32u && tbw == 4u && tpsm == 1u)
+				source = kTShadow;
+			else if (tbp == kPostFbp * 32u && tbw == 4u && tpsm == PSM_CT32)
+				source = kTBloom;
+			else if (tbp == kHalfFbp * 32u && tbw == 2u && tpsm == PSM_CT32)
+				source = kTHalf;
+			else if (tbp == kQuarterFbp * 32u && tbw == 1u && tpsm == PSM_CT32)
+				source = kTQuarter;
+			if (source >= 0 && s_debugOff && std::strchr(s_debugOff, 'p'))
+				TO_GS("target read");
+			if (tfx != 0u || (tcc != 1u && source < 0))
 				TO_GS("TFX");
-			if (cpsm != 0u || csm != 0u || csa != 0u)
+			if (source < 0 && (cpsm != 0u || csm != 0u || csa != 0u))
 				TO_GS("CLUT");
 			const uint64_t clamp = s_regs[R_CLAMP + c];
 			const uint32_t wms = clamp & 3u, wmt = (clamp >> 2) & 3u;
@@ -591,12 +713,39 @@ namespace
 				TO_GS("clamp");
 			const bool linear = (s_regs[R_TEX1 + c] >> 5) & 1u;
 			k.sampler = static_cast<uint8_t>(wms | (wmt << 1) | (linear ? 4u : 0u));
-			k.tex = resolveTexture(tex0);
-			if (k.tex < 0)
-				TO_GS("texture not known");
-			k.textured = 1u;
 			s_tw = 1u << ((tex0 >> 26) & 15u);
 			s_th = 1u << ((tex0 >> 30) & 15u);
+			if (source >= 0)
+			{
+				// (their alpha is not kept here; CT24's comes from the colour and TEXA)
+				if (!s_fst || static_cast<uint32_t>(source) == target)
+					TO_GS("target read");
+				if (source == kTShadow)
+				{
+					if (tcc != 1u || (s_regs[R_TEXA] & 0xFFFFu) != 0x8020u)
+						TO_GS("target read");
+					k.textured = kTexShadow;
+				}
+				else
+				{
+					if (tcc != 0u)
+						TO_GS("target read");
+					k.textured = kTexNoAlpha;
+				}
+				k.tex = texOfTarget(source);
+				if (source == kTScene)
+				{
+					s_tw = kSceneW;
+					s_th = kSceneH;
+				}
+			}
+			else
+			{
+				k.tex = resolveTexture(tex0);
+				if (k.tex < 0)
+					TO_GS("texture not known");
+				k.textured = kTexModulate;
+			}
 		}
 #undef TO_GS
 		const uint64_t xy = s_regs[R_XYOFFSET + c];
@@ -715,6 +864,19 @@ namespace
 		s_current = nullptr;
 		s_currentNeed = 0u;
 		const int cls = psmClass(dpsm);
+		{
+			// (what uploads exist, once each: to know what the persistent textures are made of)
+			static std::unordered_map<uint64_t, bool> s_shown;
+			static uint32_t s_count = 0;
+			const uint64_t id = dbp | (static_cast<uint64_t>(dpsm) << 16);
+			if (std::getenv("HL_NATIVE_UPLOADS") && s_count < 300u && !s_shown[id] && dpsm != PSM_T4 && dpsm != PSM_T8 && (dpsm != PSM_CT32 || (s_regs[R_TRXREG] & 0xFFFu) > 16u))
+			{
+				s_shown[id] = true;
+				++s_count;
+				std::fprintf(stderr, "[native] upload to %x psm %x dbw %llu %llux%llu at %llx\n", dbp, dpsm, static_cast<unsigned long long>((bb >> 48) & 63u),
+					static_cast<unsigned long long>(s_regs[R_TRXREG] & 0xFFFu), static_cast<unsigned long long>((s_regs[R_TRXREG] >> 32) & 0xFFFu), static_cast<unsigned long long>(s_regs[R_TRXPOS]));
+			}
+		}
 		if (cls < 0)
 			return;
 		Upload*& slot = s_uploads[cls][dbp];
@@ -1043,6 +1205,7 @@ namespace
 										// a copy inside the GS's memory or a read back: only the GS can do those
 										const uint64_t head[2] = {1u | (1ull << 60), 0xEull};
 										s_why = "local copy";
+										++s_memoryGeneration;
 										beforeGs(path);
 										pushBytes(path, head, sizeof(head));
 										pushBytes(path, q, 16);
@@ -1126,6 +1289,7 @@ namespace
 		float scale[4];
 		float fog[4];
 		float test[4]; // reference, 1 to keep what fails instead, the colour's scale
+		float uv[4];   // the part of an image the texture coordinates mean
 	};
 
 	struct GpuTexture
@@ -1140,15 +1304,24 @@ namespace
 	VkPipelineLayout s_layout = VK_NULL_HANDLE;
 	VkDescriptorPool s_pool = VK_NULL_HANDLE;
 	VkSampler s_samplers[8] = {};
-	VkShaderModule s_vs = VK_NULL_HANDLE, s_fsPlain = VK_NULL_HANDLE, s_fsTest = VK_NULL_HANDLE;
+	VkShaderModule s_vs = VK_NULL_HANDLE;
+	enum FsVariant { kFsPlain, kFsTest, kFsNoAlpha, kFsNoAlphaTest, kFsShadow, kFsVariants };
+	VkShaderModule s_fs[kFsVariants] = {};
+	// the targets: the scene's is PCSX2's; the others live here. (logical size * sx, sy = pixels)
+	struct NativeTarget
+	{
+		GpuTexture tex;
+		float sx = 1.0f, sy = 1.0f;
+	};
+	NativeTarget s_targets[kTargets];
 	VKStreamBuffer s_vb, s_ib;
 	GSTextureVK* s_white = nullptr;
 	GpuTexture s_whiteTex;
-	VkRenderPass s_renderPass = VK_NULL_HANDLE;
+	VkRenderPass s_renderPass = VK_NULL_HANDLE, s_renderPassColor = VK_NULL_HANDLE;
 	std::unordered_map<uint32_t, VkPipeline> s_pipelines;
 
 	const char kVS[] = R"(#version 450
-layout(push_constant) uniform PC { vec4 scale; vec4 fog; vec4 test; } pc;
+layout(push_constant) uniform PC { vec4 scale; vec4 fog; vec4 test; vec4 uv; } pc;
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_stq;
 layout(location = 2) in vec4 a_col;
@@ -1159,13 +1332,13 @@ layout(location = 2) noperspective out float v_fog;
 void main()
 {
 	gl_Position = vec4(a_pos.xy * pc.scale.xy + pc.scale.zw, a_pos.z, 1.0);
-	v_stq = a_stq;
+	v_stq = vec3(a_stq.xy * pc.uv.xy, a_stq.z);
 	v_col = a_col;
 	v_fog = a_fog;
 }
 )";
 	const char kFS[] = R"(
-layout(push_constant) uniform PC { vec4 scale; vec4 fog; vec4 test; } pc;
+layout(push_constant) uniform PC { vec4 scale; vec4 fog; vec4 test; vec4 uv; } pc;
 layout(set = 0, binding = 0) uniform sampler2D u_tex;
 layout(location = 0) noperspective in vec3 v_stq;
 layout(location = 1) noperspective in vec4 v_col;
@@ -1173,9 +1346,20 @@ layout(location = 2) noperspective in float v_fog;
 layout(location = 0) out vec4 o_col;
 void main()
 {
-	vec4 t = texture(u_tex, v_stq.xy / v_stq.z);
+	vec2 st = v_stq.xy / v_stq.z;
+	vec4 t = texture(u_tex, st);
 	// the GS's modulate: colour * texture / 128, and alpha the same; 8-bit alpha of 128 is 1 in a blend
+#if defined(SHADOW)
+	// (CT24 with AEM: texels with no colour have alpha 0, the others TA0, and the GS filters those)
+	vec4 g = textureGather(u_tex, st, 0);
+	vec4 on = step(vec4(0.5 / 255.0), g);
+	vec2 f = fract(st * vec2(textureSize(u_tex, 0)) - 0.5);
+	float a = mix(mix(on.w, on.z, f.x), mix(on.x, on.y, f.x), f.y) * 32.0 * v_col.a * 255.0 / 128.0;
+#elif defined(NO_ALPHA)
+	float a = v_col.a * 255.0;
+#else
 	float a = t.a * v_col.a * 255.0 * pc.test.z;
+#endif
 #ifdef ALPHA_TEST
 	if ((a + 0.5 >= pc.test.x) == (pc.test.y > 0.5))
 		discard;
@@ -1187,13 +1371,15 @@ void main()
 
 	VkPipeline getPipeline(GSDeviceVK* dev, const DrawKey& k, bool test, bool zwrite)
 	{
-		const uint32_t id = k.blend | (k.zmode << 2) | ((zwrite ? 1u : 0u) << 4) | ((test ? 1u : 0u) << 5);
+		const bool withDepth = k.target == kTScene || k.target == kTShadow;
+		const uint32_t variant = k.textured == kTexShadow ? kFsShadow : (k.textured == kTexNoAlpha ? (test ? kFsNoAlphaTest : kFsNoAlpha) : (test ? kFsTest : kFsPlain));
+		const uint32_t id = k.blend | (k.zmode << 3) | ((zwrite ? 1u : 0u) << 5) | (variant << 6) | ((withDepth ? 1u : 0u) << 9);
 		const auto found = s_pipelines.find(id);
 		if (found != s_pipelines.end())
 			return found->second;
 		Vulkan::GraphicsPipelineBuilder gb;
 		gb.SetPipelineLayout(s_layout);
-		gb.SetRenderPass(s_renderPass, 0u);
+		gb.SetRenderPass(withDepth ? s_renderPass : s_renderPassColor, 0u);
 		gb.AddVertexBuffer(0u, sizeof(Vertex));
 		gb.AddVertexAttribute(0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u);
 		gb.AddVertexAttribute(1u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 12u);
@@ -1203,7 +1389,7 @@ void main()
 		gb.SetNoCullRasterizationState();
 		gb.SetDynamicViewportAndScissorState();
 		gb.SetVertexShader(s_vs);
-		gb.SetFragmentShader(test ? s_fsTest : s_fsPlain);
+		gb.SetFragmentShader(s_fs[variant]);
 		gb.SetDepthState(k.zmode != kZAlways || zwrite, zwrite, k.zmode == kZAlways ? VK_COMPARE_OP_ALWAYS : (k.zmode == kZGequal ? VK_COMPARE_OP_GREATER_OR_EQUAL : VK_COMPARE_OP_GREATER));
 		gb.SetNoStencilState();
 		const VkColorComponentFlags rgb = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
@@ -1217,6 +1403,9 @@ void main()
 				break;
 			case kBlendAdd:
 				gb.SetBlendAttachment(0u, true, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, rgb);
+				break;
+			case kBlendZOnly:
+				gb.SetBlendAttachment(0u, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, 0u);
 				break;
 			default:
 				gb.SetBlendAttachment(0u, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, rgb);
@@ -1290,9 +1479,14 @@ void main()
 				return false;
 		}
 		s_vs = g_vulkan_shader_cache->GetVertexShader(kVS);
-		s_fsPlain = g_vulkan_shader_cache->GetFragmentShader(std::string("#version 450\n") + kFS);
-		s_fsTest = g_vulkan_shader_cache->GetFragmentShader(std::string("#version 450\n#define ALPHA_TEST 1\n") + kFS);
-		if (!s_vs || !s_fsPlain || !s_fsTest)
+		static const char* const kDefines[kFsVariants] = {"", "#define ALPHA_TEST 1\n", "#define NO_ALPHA 1\n", "#define NO_ALPHA 1\n#define ALPHA_TEST 1\n", "#define SHADOW 1\n"};
+		bool compiled = s_vs != VK_NULL_HANDLE;
+		for (int i = 0; i < kFsVariants; ++i)
+		{
+			s_fs[i] = g_vulkan_shader_cache->GetFragmentShader(std::string("#version 450\n") + kDefines[i] + kFS);
+			compiled = compiled && s_fs[i] != VK_NULL_HANDLE;
+		}
+		if (!compiled)
 		{
 			std::fprintf(stderr, "hl_native: shaders did not compile\n");
 			return false;
@@ -1300,7 +1494,8 @@ void main()
 		if (!s_vb.Create(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 16u << 20, "hl_native vertices") || !s_ib.Create(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 8u << 20, "hl_native indices"))
 			return false;
 		s_renderPass = dev->GetRenderPass(color, depth);
-		if (!s_renderPass)
+		s_renderPassColor = dev->GetRenderPass(color, VK_FORMAT_UNDEFINED);
+		if (!s_renderPass || !s_renderPassColor)
 			return false;
 		s_white = static_cast<GSTextureVK*>(g_gs_device->CreateTexture(1, 1, 1, GSTexture::Format::Color));
 		if (!s_white)
@@ -1310,6 +1505,72 @@ void main()
 		s_whiteTex.texture = s_white;
 		return true;
 	}
+
+	// A texture from the GS's memory, as the stream has left it up to here.
+	void readFromMemory(const NewTexture& n, std::vector<uint8_t>& out)
+	{
+		const GSLocalMemory& mem = g_gs_renderer->m_mem;
+		const bool eight = n.psm == PSM_T8 || n.psm == PSM_T8H;
+		uint32_t palette[256];
+		for (uint32_t i = 0; i < (eight ? 256u : 16u); ++i)
+		{
+			const uint32_t at = eight ? ((i & 0xE7u) | ((i & 8u) << 1) | ((i & 16u) >> 1)) : i; // (the CLUT's own order of blocks)
+			palette[i] = eight ? mem.ReadPixel32(static_cast<int>(at & 15u), static_cast<int>(at >> 4), n.cbp, 1u) : mem.ReadPixel32(static_cast<int>(at & 7u), static_cast<int>(at >> 3), n.cbp, 1u);
+		}
+		out.resize(static_cast<size_t>(n.w) * n.h * 4u);
+		uint32_t* to = reinterpret_cast<uint32_t*>(out.data());
+		for (int y = 0; y < n.h; ++y)
+		{
+			for (int x = 0; x < n.w; ++x)
+			{
+				uint32_t index;
+				switch (n.psm)
+				{
+					case PSM_T8: index = mem.ReadPixel8(x, y, n.tbp, n.tbw); break;
+					case PSM_T8H: index = mem.ReadPixel8H(x, y, n.tbp, n.tbw); break;
+					case PSM_T4: index = mem.ReadPixel4(x, y, n.tbp, n.tbw); break;
+					case PSM_T4HL: index = mem.ReadPixel4HL(x, y, n.tbp, n.tbw); break;
+					default: index = mem.ReadPixel4HH(x, y, n.tbp, n.tbw); break;
+				}
+				*to++ = palette[index];
+			}
+		}
+	}
+
+	// The private targets, sized from the scene's; and the scene's own image, which PCSX2 may have replaced.
+	void prepareTargets(GSTextureVK* color, float scale)
+	{
+		NativeTarget& scene = s_targets[kTScene];
+		if (scene.tex.texture != color)
+			scene.tex = GpuTexture{color};
+		scene.sx = scene.sy = scale;
+		const auto ensure = [&](NativeTarget& t, int w, int h) {
+			if (t.tex.texture && t.tex.texture->GetWidth() == w && t.tex.texture->GetHeight() == h)
+				return;
+			t.tex = GpuTexture{static_cast<GSTextureVK*>(g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::Color, false, false))};
+			if (!t.tex.texture)
+				std::fprintf(stderr, "hl_native: no target of %dx%d\n", w, h);
+		};
+		ensure(s_targets[kTShadow], color->GetWidth(), color->GetHeight());
+		s_targets[kTShadow].sx = 2.0f * scale;
+		s_targets[kTShadow].sy = (static_cast<float>(kSceneH) / 256.0f) * scale;
+		ensure(s_targets[kTBloom], 256, 256);
+		ensure(s_targets[kTHalf], 128, 128);
+		ensure(s_targets[kTQuarter], 64, 64);
+	}
+
+	// GSDeviceVK::SetInitialState is private. (An explicit instantiation may name a private member.)
+	struct InitialState
+	{
+		using Type = void (GSDeviceVK::*)(VkCommandBuffer);
+		friend Type privateMember(InitialState);
+	};
+	template <typename Tag, typename Tag::Type Member>
+	struct ExposePrivate
+	{
+		friend typename Tag::Type privateMember(Tag) { return Member; }
+	};
+	template struct ExposePrivate<InitialState, &GSDeviceVK::SetInitialState>;
 
 	void execute(Frame* f)
 	{
@@ -1325,7 +1586,13 @@ void main()
 				if (s_gpuTextures.size() <= static_cast<size_t>(n.id))
 					s_gpuTextures.resize(n.id + 1u);
 				GSTextureVK* t = static_cast<GSTextureVK*>(g_gs_device->CreateTexture(n.w, n.h, 1, GSTexture::Format::Color));
-				if (t)
+				if (t && n.fromMemory)
+				{
+					static std::vector<uint8_t> s_read;
+					readFromMemory(n, s_read);
+					t->Update(GSVector4i(0, 0, n.w, n.h), s_read.data(), static_cast<u32>(n.w) * 4u);
+				}
+				else if (t)
 					t->Update(GSVector4i(0, 0, n.w, n.h), n.rgba.data(), static_cast<u32>(n.w) * 4u);
 				s_gpuTextures[n.id].texture = t;
 			}
@@ -1342,11 +1609,52 @@ void main()
 			const GSVector4i rc(0, 0, kSceneW, kSceneH);
 			GSTextureCache::Target* rt = g_texture_cache->LookupDrawTarget(frameTex, size, scale, GSTextureCache::RenderTarget, true, 0u, false, true, true, rc);
 			GSTextureCache::Target* ds = g_texture_cache->LookupDrawTarget(zTex, size, scale, GSTextureCache::DepthStencil, true, 0u, false, true, true, rc);
+			{
+				static GSTextureCache::Target* s_lastRt = nullptr;
+				static uint32_t s_rtShown = 0;
+				if (rt != s_lastRt && s_rtShown < 12u)
+				{
+					++s_rtShown;
+					s_lastRt = rt;
+					std::fprintf(stderr, "hl_native: scene target now %p tex %p (TBP %x TBW %u PSM %x, %dx%d, drawn %d %d %d %d)\n", static_cast<void*>(rt), rt ? static_cast<void*>(rt->m_texture) : nullptr,
+						rt ? rt->m_TEX0.TBP0 : 0u, rt ? rt->m_TEX0.TBW : 0u, rt ? rt->m_TEX0.PSM : 0u, rt ? rt->m_texture->GetWidth() : 0, rt ? rt->m_texture->GetHeight() : 0,
+						rt ? rt->m_drawn_since_read.x : 0, rt ? rt->m_drawn_since_read.y : 0, rt ? rt->m_drawn_since_read.z : 0, rt ? rt->m_drawn_since_read.w : 0);
+				}
+			}
 			// (the GS has not drawn with one of them yet)
 			if (!rt)
 				rt = g_texture_cache->CreateTarget(frameTex, size, size, scale, GSTextureCache::RenderTarget, true, 0u, false, false, true, rc);
 			if (!ds)
 				ds = g_texture_cache->CreateTarget(zTex, size, size, scale, GSTextureCache::DepthStencil, true, 0u, false, false, true, rc);
+			// (a GS draw would do this first: with something dirty in them, the GS's own reads of these targets go to its memory instead)
+			static uint32_t s_dirtyShown = 0;
+			if (rt && ds)
+			{
+				if (s_dirtyShown < 6u && (!rt->m_dirty.empty() || !ds->m_dirty.empty()))
+				{
+					++s_dirtyShown;
+					std::fprintf(stderr, "hl_native: dirty parts in the targets: %zu %zu\n", rt->m_dirty.size(), ds->m_dirty.size());
+				}
+				rt->Update();
+				ds->Update();
+			}
+			// the page the display reads, if this frame copies to it
+			GSTextureCache::Target* displayRt = nullptr;
+			const GSVector4i displayRc(0, 0, kDisplayW, kDisplayH);
+			for (const Draw& d : f->draws)
+			{
+				if (d.key.target != kTDisplay)
+					continue;
+				GIFRegTEX0 displayTex{};
+				displayTex.TBP0 = kDisplayFbp * 32u;
+				displayTex.TBW = kSceneFbw;
+				displayTex.PSM = PSMCT32;
+				const GSVector2i displaySize(kDisplayW, kDisplayH);
+				displayRt = g_texture_cache->LookupDrawTarget(displayTex, displaySize, scale, GSTextureCache::RenderTarget, true, 0u, false, true, true, displayRc);
+				if (!displayRt)
+					displayRt = g_texture_cache->CreateTarget(displayTex, displaySize, displaySize, scale, GSTextureCache::RenderTarget, true, 0u, false, false, true, displayRc);
+				break;
+			}
 			GSTextureVK* color = rt ? static_cast<GSTextureVK*>(rt->m_texture) : nullptr;
 			GSTextureVK* depth = ds ? static_cast<GSTextureVK*>(ds->m_texture) : nullptr;
 			if (!color || !depth)
@@ -1389,78 +1697,129 @@ void main()
 								if (t && t->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 									t->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 							}
-							color->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
-							depth->TransitionToLayout(GSTextureVK::Layout::DepthStencilAttachment);
-							VkCommandBuffer cmd = dev->GetCurrentCommandBuffer();
-							const int w = std::min(color->GetWidth(), depth->GetWidth()), h = std::min(color->GetHeight(), depth->GetHeight());
-							VkRenderPassBeginInfo rpi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-							rpi.renderPass = s_renderPass;
-							rpi.framebuffer = color->GetLinkedFramebuffer(depth, false, false);
-							rpi.renderArea.extent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
-							vkCmdBeginRenderPass(cmd, &rpi, VK_SUBPASS_CONTENTS_INLINE);
-							const VkBuffer vb = s_vb.GetBuffer();
-							vkCmdBindVertexBuffers(cmd, 0u, 1u, &vb, &voffset);
-							vkCmdBindIndexBuffer(cmd, s_ib.GetBuffer(), 0u, VK_INDEX_TYPE_UINT32);
-							const VkViewport vp{0.0f, 0.0f, static_cast<float>(color->GetWidth()), static_cast<float>(color->GetHeight()), 0.0f, 1.0f};
-							vkCmdSetViewport(cmd, 0u, 1u, &vp);
-
-							PushConstants pc{};
-							const float cw = static_cast<float>(color->GetWidth()), ch = static_cast<float>(color->GetHeight());
-							pc.scale[0] = 2.0f * scale / cw;
-							pc.scale[1] = 2.0f * scale / ch;
-							pc.scale[2] = 1.0f / cw - 1.0f;
-							pc.scale[3] = 1.0f / ch - 1.0f;
-							VkPipeline lastPipeline = VK_NULL_HANDLE;
-							VkDescriptorSet lastSet = VK_NULL_HANDLE;
-							uint16_t lastSc[4] = {0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu};
-							const auto drawPass = [&](const Draw& d, bool test, bool zwrite, float invert) {
-								const VkPipeline p = getPipeline(dev, d.key, test, zwrite);
-								if (p != lastPipeline)
-								{
-									vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
-									lastPipeline = p;
-								}
-								pc.test[0] = static_cast<float>(d.key.aref);
-								pc.test[1] = invert;
-								vkCmdPushConstants(cmd, s_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(pc), &pc);
-								vkCmdDrawIndexed(cmd, d.count, 1u, ifirst + d.first, 0, 0u);
-							};
-							for (const Draw& d : f->draws)
+							prepareTargets(color, scale);
 							{
-								GpuTexture* gt = d.key.tex >= 0 ? &s_gpuTextures[d.key.tex] : &s_whiteTex;
-								if (!gt->texture)
-									continue;
-								gt->texture->SetUseFenceCounter(fence);
-								const VkDescriptorSet set = setFor(dev, *gt, d.key.tex >= 0 ? d.key.sampler : 0u);
-								if (set == VK_NULL_HANDLE)
-									continue;
-								if (set != lastSet)
-								{
-									vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_layout, 0u, 1u, &set, 0u, nullptr);
-									lastSet = set;
-								}
-								if (std::memcmp(lastSc, d.key.sc, sizeof(lastSc)) != 0)
-								{
-									std::memcpy(lastSc, d.key.sc, sizeof(lastSc));
-									const int x0 = std::min(static_cast<int>(d.key.sc[0] * scale), w), y0 = std::min(static_cast<int>(d.key.sc[1] * scale), h);
-									const int x1 = std::min(static_cast<int>((d.key.sc[2] + 1) * scale), w), y1 = std::min(static_cast<int>((d.key.sc[3] + 1) * scale), h);
-									const VkRect2D sc{{x0, y0}, {static_cast<uint32_t>(std::max(x1 - x0, 0)), static_cast<uint32_t>(std::max(y1 - y0, 0))}};
-									vkCmdSetScissor(cmd, 0u, 1u, &sc);
-								}
-								pc.fog[0] = static_cast<float>(d.key.fogcol & 255u) / 255.0f;
-								pc.fog[1] = static_cast<float>((d.key.fogcol >> 8) & 255u) / 255.0f;
-								pc.fog[2] = static_cast<float>((d.key.fogcol >> 16) & 255u) / 255.0f;
-								pc.test[2] = d.key.textured ? 255.0f / 128.0f : 1.0f;
-								if (d.key.amode == kANone)
-									drawPass(d, false, d.key.zwrite != 0u, 0.0f);
-								else
-								{
-									drawPass(d, true, d.key.zwrite != 0u, 0.0f);
-									if (d.key.amode == kAFbOnly)
-										drawPass(d, true, false, 1.0f); // (what failed the test: colour, no Z)
-								}
+								GSTextureVK* displayImage = displayRt ? static_cast<GSTextureVK*>(displayRt->m_texture) : nullptr;
+								NativeTarget& display = s_targets[kTDisplay];
+								if (displayImage && display.tex.texture != displayImage)
+									display.tex = GpuTexture{displayImage};
+								display.sx = display.sy = scale;
 							}
-							vkCmdEndRenderPass(cmd);
+							VkCommandBuffer cmd = dev->GetCurrentCommandBuffer();
+							const VkBuffer vb = s_vb.GetBuffer();
+							// (what the scene's image holds of the logical size, in its own width and height: it has a little more)
+							const float sceneU = static_cast<float>(kSceneW) * scale / static_cast<float>(color->GetWidth());
+							const float sceneV = static_cast<float>(kSceneH) * scale / static_cast<float>(color->GetHeight());
+							bool sceneDrawn = false;
+
+							// in runs of the same target, with a render pass each
+							for (size_t run = 0; run < f->draws.size();)
+							{
+								const uint32_t targetId = f->draws[run].key.target;
+								size_t runEnd = run + 1u;
+								while (runEnd < f->draws.size() && f->draws[runEnd].key.target == targetId)
+									++runEnd;
+								NativeTarget& target = s_targets[targetId];
+								GSTextureVK* out = target.tex.texture;
+								if (!out)
+								{
+									run = runEnd;
+									continue;
+								}
+								const bool withDepth = targetId == kTScene || targetId == kTShadow;
+								for (size_t i = run; i < runEnd; ++i)
+								{
+									if (f->draws[i].key.tex >= -1)
+										continue;
+									GSTextureVK* source = s_targets[targetOfTex(f->draws[i].key.tex)].tex.texture;
+									if (source && source->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
+										source->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
+								}
+								out->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
+								if (withDepth)
+									depth->TransitionToLayout(GSTextureVK::Layout::DepthStencilAttachment);
+								const int w = withDepth ? std::min(out->GetWidth(), depth->GetWidth()) : out->GetWidth();
+								const int h = withDepth ? std::min(out->GetHeight(), depth->GetHeight()) : out->GetHeight();
+								VkRenderPassBeginInfo rpi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+								rpi.renderPass = withDepth ? s_renderPass : s_renderPassColor;
+								rpi.framebuffer = out->GetLinkedFramebuffer(withDepth ? depth : nullptr, false, false);
+								rpi.renderArea.extent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+								vkCmdBeginRenderPass(cmd, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+								vkCmdBindVertexBuffers(cmd, 0u, 1u, &vb, &voffset);
+								vkCmdBindIndexBuffer(cmd, s_ib.GetBuffer(), 0u, VK_INDEX_TYPE_UINT32);
+								const float cw = static_cast<float>(out->GetWidth()), ch = static_cast<float>(out->GetHeight());
+								const VkViewport vp{0.0f, 0.0f, cw, ch, 0.0f, 1.0f};
+								vkCmdSetViewport(cmd, 0u, 1u, &vp);
+
+								PushConstants pc{};
+								pc.scale[0] = 2.0f * target.sx / cw;
+								pc.scale[1] = 2.0f * target.sy / ch;
+								pc.scale[2] = 1.0f / cw - 1.0f;
+								pc.scale[3] = 1.0f / ch - 1.0f;
+								VkPipeline lastPipeline = VK_NULL_HANDLE;
+								VkDescriptorSet lastSet = VK_NULL_HANDLE;
+								uint16_t lastSc[4] = {0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu};
+								const auto drawPass = [&](const Draw& d, bool test, bool zwrite, float invert) {
+									const VkPipeline p = getPipeline(dev, d.key, test, zwrite);
+									if (p != lastPipeline)
+									{
+										vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+										lastPipeline = p;
+									}
+									pc.test[0] = static_cast<float>(d.key.aref);
+									pc.test[1] = invert;
+									vkCmdPushConstants(cmd, s_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(pc), &pc);
+									vkCmdDrawIndexed(cmd, d.count, 1u, ifirst + d.first, 0, 0u);
+								};
+								for (size_t i = run; i < runEnd; ++i)
+								{
+									const Draw& d = f->draws[i];
+									GpuTexture* gt = d.key.tex >= 0 ? &s_gpuTextures[d.key.tex] : (d.key.tex == -1 ? &s_whiteTex : &s_targets[targetOfTex(d.key.tex)].tex);
+									if (!gt->texture)
+										continue;
+									gt->texture->SetUseFenceCounter(fence);
+									const VkDescriptorSet set = setFor(dev, *gt, d.key.tex != -1 ? d.key.sampler : 0u);
+									if (set == VK_NULL_HANDLE)
+										continue;
+									if (set != lastSet)
+									{
+										vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_layout, 0u, 1u, &set, 0u, nullptr);
+										lastSet = set;
+									}
+									if (std::memcmp(lastSc, d.key.sc, sizeof(lastSc)) != 0)
+									{
+										std::memcpy(lastSc, d.key.sc, sizeof(lastSc));
+										const int x0 = std::min(static_cast<int>(d.key.sc[0] * target.sx), w), y0 = std::min(static_cast<int>(d.key.sc[1] * target.sy), h);
+										const int x1 = std::min(static_cast<int>((d.key.sc[2] + 1) * target.sx), w), y1 = std::min(static_cast<int>((d.key.sc[3] + 1) * target.sy), h);
+										const VkRect2D sc{{x0, y0}, {static_cast<uint32_t>(std::max(x1 - x0, 0)), static_cast<uint32_t>(std::max(y1 - y0, 0))}};
+										vkCmdSetScissor(cmd, 0u, 1u, &sc);
+									}
+									pc.fog[0] = static_cast<float>(d.key.fogcol & 255u) / 255.0f;
+									pc.fog[1] = static_cast<float>((d.key.fogcol >> 8) & 255u) / 255.0f;
+									pc.fog[2] = static_cast<float>((d.key.fogcol >> 16) & 255u) / 255.0f;
+									pc.test[2] = d.key.textured ? 255.0f / 128.0f : 1.0f;
+									const bool sceneSized = d.key.tex == texOfTarget(kTScene) || d.key.tex == texOfTarget(kTShadow);
+									pc.uv[0] = sceneSized ? sceneU : 1.0f;
+									pc.uv[1] = sceneSized ? sceneV : 1.0f;
+									if (d.key.amode == kANone)
+										drawPass(d, false, d.key.zwrite != 0u, 0.0f);
+									else
+									{
+										drawPass(d, true, d.key.zwrite != 0u, 0.0f);
+										if (d.key.amode == kAFbOnly)
+											drawPass(d, true, false, 1.0f); // (what failed the test: colour, no Z)
+									}
+								}
+								vkCmdEndRenderPass(cmd);
+								out->SetUseFenceCounter(fence);
+								out->SetState(GSTexture::State::Dirty);
+								sceneDrawn = sceneDrawn || targetId == kTScene;
+								run = runEnd;
+							}
+							(void)sceneDrawn;
+							// (the device binds its vertex buffer once per command buffer, and no dirty flag brings it back: without
+							// this, its next draws in this command buffer, the display's merge among them, read our vertices)
+							(dev->*privateMember(InitialState{}))(cmd);
 							color->SetUseFenceCounter(fence);
 							depth->SetUseFenceCounter(fence);
 							color->SetState(GSTexture::State::Dirty);
@@ -1478,6 +1837,17 @@ void main()
 							rt->m_alpha_range = true;
 							ds->UpdateValidity(rc);
 							ds->UpdateDrawn(rc);
+							if (displayRt)
+							{
+								displayRt->UpdateValidity(displayRc);
+								displayRt->UpdateDrawn(displayRc);
+								displayRt->m_valid_rgb = true;
+								static_cast<GSTextureVK*>(displayRt->m_texture)->SetState(GSTexture::State::Dirty);
+								g_texture_cache->InvalidateVideoMem(g_gs_renderer->m_mem.GetOffset(kDisplayFbp * 32u, kSceneFbw, PSMCT32), displayRc, false);
+							}
+							// (what the GS made from these targets before is old now: its copy to the display must read them again)
+							g_texture_cache->InvalidateVideoMem(g_gs_renderer->m_mem.GetOffset(kSceneFbp * 32u, kSceneFbw, PSMCT32), rc, false);
+							g_texture_cache->InvalidateVideoMem(g_gs_renderer->m_mem.GetOffset(kSceneZbp * 32u, kSceneFbw, PSMZ24), rc, false);
 						}
 						else
 							std::fprintf(stderr, "hl_native: frame too large (%u, %u bytes)\n", vbytes, ibytes);

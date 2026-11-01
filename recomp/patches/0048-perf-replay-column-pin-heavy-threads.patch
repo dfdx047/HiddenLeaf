@@ -1,0 +1,119 @@
+diff --git a/ps2xRuntime/src/lib/hl_perf.cpp b/ps2xRuntime/src/lib/hl_perf.cpp
+index 42ba4f9..3b4f8e5 100644
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -8,6 +8,8 @@
+ #include <atomic>
+ #include <chrono>
+ #include <cstdio>
++#include <sched.h>
++#include <algorithm>
+ #include <cstdlib>
+ #include <cstring>
+ #include <mutex>
+@@ -55,7 +57,7 @@ namespace hl_perf
+         {
+             uint64_t startTick = 0;
+             uint64_t ticks[kCount] = {};
+-            uint64_t gsNs = 0;
++            uint64_t gsNs = 0, replayNs = 0;
+             uint64_t vuNs = 0;
+             uint64_t bytes = 0;
+             uint32_t frames = 0;
+@@ -91,6 +93,38 @@ namespace hl_perf
+                 {
+                     const int r = setpriority(PRIO_PROCESS, static_cast<id_t>(std::atoi(entry->d_name)), std::atoi(value));
+                     std::fprintf(stderr, "[perf] nice %s tid %s: %d (errno %d)\n", comm, entry->d_name, r, r ? errno : 0);
++                    // HL_PIN=0 turns this off: the EE and the VU1 on the big cores only (the scheduler otherwise moves them to small ones as soon as there is room)
++                    const char *pin = std::getenv("HL_PIN");
++                    if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0))
++                    {
++                        cpu_set_t set;
++                        CPU_ZERO(&set);
++                        int lowest = 1 << 30, highest = 0, capacity[32] = {};
++                        int count = 0;
++                        for (; count < 32; ++count)
++                        {
++                            char cap[96];
++                            std::snprintf(cap, sizeof(cap), "/sys/devices/system/cpu/cpu%d/cpu_capacity", count);
++                            FILE *c = std::fopen(cap, "r");
++                            if (!c || std::fscanf(c, "%d", &capacity[count]) != 1)
++                            {
++                                if (c)
++                                    std::fclose(c);
++                                break;
++                            }
++                            std::fclose(c);
++                            lowest = std::min(lowest, capacity[count]);
++                            highest = std::max(highest, capacity[count]);
++                        }
++                        for (int i = 0; i < count; ++i)
++                            if (capacity[i] > lowest)
++                                CPU_SET(i, &set);
++                        if (CPU_COUNT(&set) > 0)
++                        {
++                            const int a = sched_setaffinity(static_cast<pid_t>(std::atoi(entry->d_name)), sizeof(set), &set);
++                            std::fprintf(stderr, "[perf] pin %s to the cores above capacity %d: %d\n", comm, lowest, a);
++                        }
++                    }
+                     ++done;
+                 }
+             }
+@@ -143,6 +177,12 @@ namespace hl_perf
+             static const char *const names[] = {"GS\n", "CPU Thread\n"};
+             return threadsNs(names);
+         }
++        // of those, the replay thread alone: it feeds the GS and holds hl_native's parser, and it can live on a small core
++        uint64_t replayThreadNs()
++        {
++            static const char *const names[] = {"CPU Thread\n"};
++            return threadsNs(names);
++        }
+         // hl_vu_worker: VIF1, VU1, the GIF and the ring, when they are not on the game thread
+         uint64_t vuThreadNs()
+         {
+@@ -159,12 +199,13 @@ namespace hl_perf
+         enum class Phase { Off, Waiting, Warm, Measuring, Done } s_phase = Phase::Off;
+         uint32_t s_from = 0;
+ 
+-        void accumulate(Window &w, const uint64_t *deltaTicks, uint64_t gsNs, uint64_t vuNs, uint64_t bytes)
++        void accumulate(Window &w, const uint64_t *deltaTicks, uint64_t gsNs, uint64_t vuNs, uint64_t replayNs, uint64_t bytes)
+         {
+             for (int i = 0; i < kCount; ++i)
+                 w.ticks[i] += deltaTicks[i];
+             w.gsNs += gsNs;
+             w.vuNs += vuNs;
++            w.replayNs += replayNs;
+             w.bytes += bytes;
+         }
+ 
+@@ -172,10 +213,10 @@ namespace hl_perf
+         {
+             const double frames = std::max<uint32_t>(w.frames, 1u);
+             const auto ms = [&](Cat c) { return static_cast<double>(w.ticks[c]) / tpm / frames; };
+-            char text[256];
+-            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f waitVU %.1f idle %.1f ms | %.2f MB/f",
++            char text[280];
++            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f waitVU %.1f idle %.1f ms | replay %.1f | %.2f MB/f",
+                           fps, ms(kEe), ms(kVu0), ms(kVu1) + static_cast<double>(w.vuNs) / 1e6 / frames, static_cast<double>(w.gsNs) / 1e6 / frames, ms(kIop), ms(kGifParse), ms(kRing), ms(kWaitGs), ms(kWaitVu), ms(kIdle),
+-                          static_cast<double>(w.bytes) / 1048576.0 / frames);
++                          static_cast<double>(w.replayNs) / 1e6 / frames, static_cast<double>(w.bytes) / 1048576.0 / frames);
+             return text;
+         }
+     }
+@@ -293,9 +334,13 @@ namespace hl_perf
+         const uint64_t vuDelta = vuNow - s_vuLast;
+         s_vuLast = vuNow;
+         const uint64_t bytes = s_bytes.exchange(0, std::memory_order_relaxed);
+-        accumulate(s_second, delta, gsDelta, vuDelta, bytes);
++        static uint64_t s_replayLast = 0;
++        const uint64_t replayNow = replayThreadNs();
++        const uint64_t replayDelta = replayNow - s_replayLast;
++        s_replayLast = replayNow;
++        accumulate(s_second, delta, gsDelta, vuDelta, replayDelta, bytes);
+         if (s_phase == Phase::Measuring)
+-            accumulate(s_measure, delta, gsDelta, vuDelta, bytes);
++            accumulate(s_measure, delta, gsDelta, vuDelta, replayDelta, bytes);
+ 
+         const double fps = s_second.frames * 1000.0 / (static_cast<double>(t - s_secondStart) / tpm);
+         const std::string text = describe(s_second, fps, tpm);
