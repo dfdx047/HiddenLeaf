@@ -154,6 +154,21 @@ com a rota por vsync (chave em `0x1c391f0`), o que permite watchpoint por `mprot
 `calculatePairReadyCycle` 6%), `DrawSpriteFast` 15,6%, `DrawTriangleFast` 3%; o EE quase não aparece. Para 50 vsyncs/s falta
 um caminho rápido do VU1 (~4×).
 
+**Regressão aparente depois do `8a3902d` e causa real (0041):** a luta parecia não começar (cenário estável, sem START
+BATTLE, personagens ou HUD). Não era lógica: a máquina de fluxo `0x1f5eb0` passa por 0 → 2 → 3 → 4 no tempo certo (estado 2
+é o banner, ~100 vsyncs; 4 é a luta correndo). O runtime parava a cadeia de DMA em `kMaxChainTags = 4096`, e a lista de um
+quadro de luta tem ~11700 tags (11642 no savestate): o cenário cabia, o resto nunca chegava ao VIF. Com a matemática do
+runtime a câmera virava NaN, o cenário sumia da lista e o HUD cabia nas 4096 tags; por isso parecia que o `8a3902d` tirara o
+HUD. Ele só deixou o cenário correto. O 0040 não tem relação (reverter não muda nada). Como se achou: o fluxo do GIF de três
+quadros tinha o mesmo tamanho exato e terminava no meio do cenário.
+
+**Com o 0041:** banner START BATTLE, personagens, HUD, cronômetro e contador de golpes aparecem (vsync 5264 e 5358 em diante;
+`build/runs/fight_2026-11-01.png`). A luta caiu para ~5 vsyncs/s, porque agora o quadro inteiro é processado. Nos dumps a
+imagem ocupa só os 512 pixels da esquerda de 640 (a causa não foi investigada).
+
+**Laboratório:** os scripts (`route.sh`, `fightram.sh`, `bannerdump.sh`, `dl.py`, `gifwin.py`…) e os dumps ficam em
+`build/lab/` (ignorado). Nada em `/tmp`: a queda de energia apagou o scratchpad.
+
 **Pendências vistas:** "(null)" no menu de memory card segue sem causa (fora do caminho New Game); filmes têm quadros
 pretos em alguns dumps desde o 0032 (o stub de `sceGsSwapDBuff` limpa o quadro); um osso do objeto do título (`+1c`, osso 5)
 com matriz errada (R -3e38/nan contra P 0.425,-0.425,-0.85), provavelmente o cursor.

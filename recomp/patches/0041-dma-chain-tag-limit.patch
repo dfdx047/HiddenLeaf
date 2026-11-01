@@ -1,0 +1,16 @@
+DMA chains: the walk stopped at 4096 tags, and a UN5 fight frame has about 12000. The tail of the display list (characters,
+HUD, START BATTLE banner) never reached the VIF. The limit stays only to stop a chain that loops forever.
+
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1350,7 +1350,9 @@
+                     uint32_t asr1 = m_ioRegisters[channelBase + 0x50];
+                     uint32_t asp = (chcr >> 4) & 0x3u;
+                     const bool tieEnabled = (chcr & (1u << 7)) != 0u;
+-                    const int kMaxChainTags = 4096;
++                    // The hardware has no limit; this only stops a chain that loops forever. A UN5 fight frame has about
++                    // 12000 tags, and at 4096 the walk stopped after the scenery: no characters, HUD or banner.
++                    const int kMaxChainTags = 1 << 20;
+                     std::vector<uint8_t> chainBuf;
+
+                     auto appendData = [&](uint32_t srcAddr, uint32_t qwCount)
