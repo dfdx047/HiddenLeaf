@@ -447,6 +447,9 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 16,3 | 11,2 | 0,4 | 14,8 | 17,3 | 3,7 | - | - | 3,21 | idle 4,5; pares > 44 ms 11,6%, pior 1% 64 ms. Só o nice (medido antes do IOP): 22,2% → 14,5%. `texture_preloading=1;hw_mipmap=false` não ajudou (GS 18,0, 25,1%) |
 | 2026-11-01 | +SPU2 do ARMSX2, heap do IOP, `PHMADH`/`PMADDH` | RG Cube | sem limite | 50,0 | 27,7 | 8,8 | 0,3 | 13,3 | 11,1 | 2,2 | - | - | 3,19 | idle 9,2; pares > 44 ms 0,4%, pior 1% 41,8 ms. **Velocidade cheia com som**. O relógio e a mixagem do SPU2 entram na coluna IOP |
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,5 | 15,3 | 11,9 | 0,5 | 14,9 | 17,3 | 3,0 | - | - | 3,21 | idle 4,3, waitVU 1,2; pares > 44 ms 11,3%, pior 1% 67,9 ms. Som não custou fps. EE+VU1+GS = 44 ms/vsync contra 40 ms dos 2 núcleos grandes do perfil |
+| 2026-11-01 | LTO + armv8.2 no `libbt4gsx` (build à parte, não adotado) | Retroid Pocket 5 | sd480p | 49,7 | 17,7 | 11,4 | 0,5 | 14,6 | 16,9 | 3,0 | - | - | 3,19 | hipótese (GS -5 a -10%) refutada: -2%, pares > 44 ms 10,8%, dentro do ruído. Voltou ao `libbt4gsx` do Dragon Rage |
+| 2026-11-01 | +vértices nas formas com laço próprio do GS (`compactVertices`) | Retroid Pocket 5 | sd480p | 49,7 | 17,3 | 11,3 | 0,5 | 14,4 | 15,8 | 3,0 | - | - | 3,15 | idle 5,1, waitVU 0,7; pares > 44 ms 8,1%, pior 1% 61,6 ms; imagem igual |
+| 2026-11-01 | idem | RG Cube | sem limite | 50,0 | 28,3 | 8,9 | 0,3 | 13,5 | 10,3 | 2,2 | - | - | 3,20 | idle 9,3; pares > 44 ms 0,4%, pior 1% 41,6 ms |
 
 **Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
 `1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
@@ -467,6 +470,14 @@ Variações de até uns 3% no fps e de 0,3 ms nas colunas estão dentro do ruíd
   programa que não faça isso veria stickies a menos, e o verificador só compara os bits baixos nas imagens sem leitor de sticky.
 
 A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
+
+### O que uma luta manda ao GS (2026-11-01, `HL_GSCAP` + `tools/gscap.py`)
+
+Um quadro (2 vsyncs): ~61 mil vértices, ~4000 pacotes, 6 MB, 1,9 MB de textura reenviada, ~1800 grupos de estado, 700 trocas de
+estado reais; tudo no framebuffer 0. Quase tudo vem do VU1 em tiras: `FOG/STQ/RGBA/XYZ2` (28,5 mil), `NOP/STQ/RGBA/XYZ2` (14,7 mil),
+`STQ/NOP/NOP/XYZ2` (7 mil), `NOP/NOP/NOP/XYZ2` (6,8 mil). O GS do ARMSX2 tem laços NEON só para as formas sem NOP, então cada
+registro era uma chamada por ponteiro. `compactVertices` (`hl_gs_live.cpp`) reescreve os tags no anel: fog vai em `XYZF2` e os NOPs saem.
+`HL_GSCOMPACT=0` desliga. Um tag com Z acima de 24 bits fica como veio.
 
 ### Áudio (2026-11-01)
 

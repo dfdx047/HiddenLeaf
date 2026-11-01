@@ -1,0 +1,181 @@
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index 5b66d67..a2bee88 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -152,8 +152,34 @@ namespace
+         writeBytes(s_regs.data(), s_regs.size());
+     }
+ 
++    // HL_GSCAP=<file>:<vsync>:<count>: the GIF packets of <count> vsyncs from <vsync>: [path u32][size u32][bytes], and a
++    // record with path 0xFF at each vsync (to look at a frame on the PC: tools/gscap.py)
++    uint32_t s_capVsync = 0u;
++    FILE *capFile()
++    {
++        static uint32_t s_from = 0u, s_count = 0u;
++        static FILE *const s_file = []() -> FILE * {
++            const char *env = std::getenv("HL_GSCAP");
++            if (!env)
++                return nullptr;
++            char path[256]{};
++            if (std::sscanf(env, "%255[^:]:%u:%u", path, &s_from, &s_count) != 3)
++                return nullptr;
++            return std::fopen(path, "wb");
++        }();
++        if (!s_file || s_capVsync < s_from || s_capVsync >= s_from + s_count)
++            return nullptr;
++        return s_file;
++    }
++
+     void writeTransfer(uint8_t path, const uint8_t *data, uint32_t size)
+     {
++        if (FILE *cap = capFile())
++        {
++            const uint32_t head[2] = {path, size};
++            std::fwrite(head, sizeof(head), 1, cap);
++            std::fwrite(data, 1, size, cap);
++        }
+         writeByte(kTypeTransfer);
+         writeByte(path);
+         writeWord(size);
+@@ -212,6 +238,111 @@ namespace
+         return tagOffset + 16u + qwords * 16u;
+     }
+ 
++    // The VU1 programs of this game send {FOG, STQ, RGBA, XYZ2} and the same with NOPs in it, four registers per vertex, and
++    // PCSX2's GS has loops for vertices only in the shapes without NOPs: this way each register is a call through a pointer.
++    // The same vertices fit those shapes: the fog goes in XYZF2, which also has room for Z as long as it fits 24 bits (a tag
++    // with a larger Z stays as it came). HL_GSCOMPACT=0 turns it off.
++    std::vector<uint8_t> s_compact;
++
++    uint32_t compactVertices(const uint8_t *data, uint32_t size)
++    {
++        if (s_compact.size() < size)
++            s_compact.resize(size);
++        uint8_t *out = s_compact.data();
++        uint32_t offset = 0u;
++        while (offset + 16u <= size)
++        {
++            uint64_t lo, hi;
++            std::memcpy(&lo, data + offset, 8u);
++            std::memcpy(&hi, data + offset + 8u, 8u);
++            const uint32_t qwords = tagQwords(lo);
++            const uint8_t *from = data + offset + 16u;
++            const uint32_t nloop = static_cast<uint32_t>(lo & 0x7FFFu);
++            uint32_t newNreg = 0u;
++            uint64_t newRegs = 0u;
++            if (((lo >> 58) & 3u) == 0u && ((lo >> 60) & 15u) == 4u && nloop != 0u)
++            {
++                switch (hi & 0xFFFFu)
++                {
++                case 0x512Au:
++                {
++                    bool fits = true;
++                    for (uint32_t i = 0u; i < nloop && fits; ++i)
++                    {
++                        uint32_t z;
++                        std::memcpy(&z, from + i * 64u + 48u + 8u, 4u);
++                        fits = z <= 0xFFFFFFu;
++                    }
++                    if (fits)
++                    {
++                        newNreg = 3u;
++                        newRegs = 0x412u;
++                    }
++                    break;
++                }
++                case 0x512Fu:
++                    newNreg = 3u;
++                    newRegs = 0x512u;
++                    break;
++                case 0x5FF2u:
++                    newNreg = 2u;
++                    newRegs = 0x52u;
++                    break;
++                case 0x5FFFu:
++                    newNreg = 1u;
++                    newRegs = 0x5u;
++                    break;
++                default:
++                    break;
++                }
++            }
++            if (newNreg == 0u)
++            {
++                std::memcpy(out, data + offset, 16u + qwords * 16u);
++                out += 16u + qwords * 16u;
++            }
++            else
++            {
++                lo = (lo & ~(15ull << 60)) | (static_cast<uint64_t>(newNreg) << 60);
++                std::memcpy(out, &lo, 8u);
++                std::memcpy(out + 8u, &newRegs, 8u);
++                out += 16u;
++                if (newRegs == 0x412u)
++                {
++                    for (uint32_t i = 0u; i < nloop; ++i, from += 64u, out += 48u)
++                    {
++                        std::memcpy(out, from + 16u, 32u + 8u);
++                        uint64_t fog, xyz;
++                        std::memcpy(&fog, from + 8u, 8u);
++                        std::memcpy(&xyz, from + 48u + 8u, 8u);
++                        xyz = ((xyz & 0xFFFFFFull) << 4) | (fog & (0xFFull << 36)) | (xyz & (1ull << 47));
++                        std::memcpy(out + 40u, &xyz, 8u);
++                    }
++                }
++                else if (newNreg == 3u)
++                {
++                    for (uint32_t i = 0u; i < nloop; ++i, from += 64u, out += 48u)
++                        std::memcpy(out, from + 16u, 48u);
++                }
++                else if (newNreg == 2u)
++                {
++                    for (uint32_t i = 0u; i < nloop; ++i, from += 64u, out += 32u)
++                    {
++                        std::memcpy(out, from, 16u);
++                        std::memcpy(out + 16u, from + 48u, 16u);
++                    }
++                }
++                else
++                {
++                    for (uint32_t i = 0u; i < nloop; ++i, from += 64u, out += 16u)
++                        std::memcpy(out, from + 48u, 16u);
++                }
++            }
++            offset += 16u + qwords * 16u;
++        }
++        return static_cast<uint32_t>(out - s_compact.data());
++    }
++
+     // The runtime's GS parses the stream for its state; this one draws nothing and keeps no memory.
+     class NullBackend final : public GSRasterBackend
+     {
+@@ -251,6 +382,15 @@ namespace hl_gslive
+             sizeBytes = trimLastTag(s_trimmed.data(), sizeBytes, cut - 1u, path);
+             data = s_trimmed.data();
+         }
++        static const bool s_compactOn = [] {
++            const char *value = std::getenv("HL_GSCOMPACT");
++            return !(value && value[0] == '0');
++        }();
++        if (path == 1 && s_compactOn)
++        {
++            sizeBytes = compactVertices(data, sizeBytes);
++            data = s_compact.data();
++        }
+         // PCSX2's path buffers hold 9 MB with 1 MB of margin. (Nothing this large was seen: only images could be, and an image
+         // can be cut anywhere.)
+         constexpr uint32_t kSlice = 4u << 20;
+@@ -341,6 +481,13 @@ namespace hl_gslive
+             h = s_ring.load(std::memory_order_relaxed);
+             writeByte(kTypeRegisters);
+             writeBytes(s_regs.data(), s_regs.size());
++            if (FILE *cap = capFile())
++            {
++                const uint32_t head[2] = {0xFFu, s_capVsync};
++                std::fwrite(head, sizeof(head), 1, cap);
++                std::fflush(cap);
++            }
++            ++s_capVsync;
+             writeByte(kTypeVSync);
+             writeByte(static_cast<uint8_t>(s_frames & 1u));
+             endPacket(true);
