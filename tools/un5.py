@@ -507,7 +507,12 @@ def cmd_fnmap(a):
             if v in starts:
                 continue
             w = word(v)
-            if w is not None and (w >> 16) == 0x27BD and (w & 0x8000) and after_return(v):
+            if not w or not after_return(v):
+                continue
+            # a prologue, or a leaf at the 16-byte alignment of the compiler's functions (BTL's empty virtual methods,
+            # jr ra at 0x6ea220, known only to vtables built at run time). If that is the arm of a function after one
+            # of its returns, the branch to it becomes a tail call on the same registers.
+            if ((w >> 16) == 0x27BD and (w & 0x8000)) or not v & 15:
                 starts.add(v)
                 own += 1
     print("%d more after a return in this ELF's code" % own)

@@ -120,6 +120,15 @@ diferem em 1–64 bytes (pixels de borda de triângulo, arredondamento); nada vi
 overlays (602 funções a mais, entre elas a `0x3d1f60` que o BTL chama e que dava `missing-target` e tela branca depois de
 Free Battle).
 
+**Da seleção à luta (0035–0037 e `fnmap`):** o BTL está residente e a luta roda (HUD, cronômetro, câmera). No caminho:
+pilhas de invocação do EE esgotadas (uma por id de thread; o loader cria uma por arquivo: 0035 recicla as de threads
+apagadas); `SNDBASE.IRX` em laço com `ioman` sem implementação (`open/read/lseek/close` no IOP, 0036; `close` tem de
+devolver o descritor); `_strtod_r` em laço infinito porque `_Balloc` devolvia 0 (o jogo toma o heap inteiro no boot: o
+0037 dá a libc blocos pequenos da área de pilhas); e funções sem nome: `fnmap` agora marca prólogos depois de retorno
+e folhas alinhadas a 16 bytes (métodos virtuais vazios como `0x6ea220`), o BTL foi de 2810 para ~5700 funções.
+**Rota de teste:** `HL_AUTOPRESS="15:CROSS,35:START,50:START,58:START,64:UP,68:CROSS"`, aos 92 s `DOWN WAIT WAIT CROSS`,
+aos 110 s `CROSS WAIT WAIT CROSS`, aos 118 s `CROSS`, depois CROSS a cada 6 s; a luta começa perto de ~210 s.
+
 **Pendências vistas:** "(null)" no menu de memory card segue sem causa (fora do caminho New Game); filmes têm quadros
 pretos em alguns dumps desde o 0032 (o stub de `sceGsSwapDBuff` limpa o quadro); um osso do objeto do título (`+1c`, osso 5)
 com matriz errada (R -3e38/nan contra P 0.425,-0.425,-0.85), provavelmente o cursor.
