@@ -54,6 +54,9 @@ target_include_directories(ps2_runtime PUBLIC "${RT}/include" "${L}/Kernel" "${L
 target_compile_definitions(ps2_runtime PUBLIC PS2X_IOP_RPC_TRACE=0 PS2X_ENABLE_IOP_RPC_TRACE=0)
 target_compile_definitions(ps2_runtime PRIVATE PS2X_HAS_FFMPEG=1)
 target_compile_options(ps2_runtime PRIVATE -O3)
+# The threaded VU: without these LLVM folds every "goto *op->label" into one indirect branch, and the predictor has
+# one entry for the whole program
+set_source_files_properties(${L}/vu/ps2_vu_fast.cpp PROPERTIES COMPILE_FLAGS "-mllvm -tail-dup-pred-size=4096 -mllvm -tail-dup-succ-size=4096")
 target_link_libraries(ps2_runtime PUBLIC ffmpeg ps2_iop)
 
 # The generated game code: one translation unit per 32 functions, or the build takes hours.

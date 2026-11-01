@@ -1,0 +1,286 @@
+diff --git a/ps2xRuntime/include/runtime/hl_vu_worker.h b/ps2xRuntime/include/runtime/hl_vu_worker.h
+index 1db58d1..ef8a296 100644
+--- a/ps2xRuntime/include/runtime/hl_vu_worker.h
++++ b/ps2xRuntime/include/runtime/hl_vu_worker.h
+@@ -20,5 +20,6 @@ namespace hl_vuworker
+     void post(PS2Memory *memory, Kind kind, std::vector<uint8_t> &&data);
+     void postCall(std::function<void()> call, bool frameEnd);
+     void sync();                                    // back when the worker has done everything posted (no-op on the worker)
++    bool busy();                                    // something posted is not done yet (false on the worker)
+     std::vector<uint8_t> takeBuffer();              // an emptied buffer to fill, with its capacity
+ }
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index 2cde527..5b66d67 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -266,8 +266,12 @@ namespace hl_gslive
+ 
+     void writeRegister(uint8_t reg, uint64_t value)
+     {
++        if (hl_vuworker::enabled() && !hl_vuworker::onWorker())
++        {   // (after what the game sent before this, without waiting for it)
++            hl_vuworker::postCall([reg, value] { writeRegister(reg, value); }, false);
++            return;
++        }
+         uint64_t packet[4];
+-        hl_vuworker::sync();
+         packet[0] = 1ull | (1ull << 15) | (1ull << 60); // NLOOP 1, EOP, PACKED, one register
+         packet[1] = 0xEull;                             // A+D
+         packet[2] = value;
+diff --git a/ps2xRuntime/src/lib/hl_perf.cpp b/ps2xRuntime/src/lib/hl_perf.cpp
+index 263ce2e..21b0606 100644
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -213,6 +213,24 @@ namespace hl_perf
+             ++s_measure.frames;
+             s_measure.frameMs.push_back(frameMs);
+         }
++        // HL_PERF_SLOW=<ms>: every frame over that, with where it went (in the measure only)
++        {
++            static const float s_slow = []
++            {
++                const char *v = std::getenv("HL_PERF_SLOW");
++                return v ? static_cast<float>(std::atof(v)) : 0.0f;
++            }();
++            static uint64_t s_at[kCount] = {};
++            if (s_slow > 0.0f)
++            {
++                if (s_phase == Phase::Measuring && frameMs > s_slow)
++                {
++                    const auto ms = [&](Cat c) { return static_cast<double>(s_ticks[c] - s_at[c]) / tpm; };
++                    std::fprintf(stderr, "[slow] v%u %.1f ms: EE %.1f VU0 %.1f IOP %.1f waitVU %.1f idle %.1f\n", tick, frameMs, ms(kEe), ms(kVu0), ms(kIop), ms(kWaitVu), ms(kIdle));
++                }
++                std::memcpy(s_at, s_ticks, sizeof(s_at));
++            }
++        }
+ 
+         if (static_cast<double>(t - s_secondStart) / tpm < 1000.0)
+             return;
+@@ -261,6 +279,17 @@ namespace hl_perf
+             const double low = sum > 0.0 ? 1000.0 / (sum / static_cast<double>(worst)) : 0.0;
+             const std::string result = describe(s_measure, s_measure.frames / seconds, tpm);
+             std::fprintf(stderr, "[perf] RESULT low1 %.1f fps, %u frames in %.1f s: %s\n", low, s_measure.frames, seconds, result.c_str());
++            // The game works in cycles of 2 vsyncs (25 frames per second): what the player sees is the time of a pair
++            std::vector<float> pairs;
++            for (size_t i = 1; i < s_measure.frameMs.size(); i += 2)
++                pairs.push_back(s_measure.frameMs[i - 1] + s_measure.frameMs[i]);
++            std::sort(pairs.begin(), pairs.end(), [](float a, float b) { return a > b; });
++            size_t over = 0u;
++            for (const float p : pairs)
++                over += p > 44.0f ? 1u : 0u;
++            if (!pairs.empty())
++                std::fprintf(stderr, "[perf] PAIRS %zu of 2 vsyncs: %.1f%% over 44 ms, median %.1f ms, 1%% worst %.1f ms, worst %.1f ms\n", pairs.size(),
++                             100.0 * static_cast<double>(over) / static_cast<double>(pairs.size()), pairs[pairs.size() / 2u], pairs[pairs.size() / 100u], pairs[0]);
+         }
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/hl_vu_worker.cpp b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+index 1c377a9..0907188 100644
+--- a/ps2xRuntime/src/lib/hl_vu_worker.cpp
++++ b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+@@ -35,6 +35,9 @@ namespace hl_vuworker
+         };
+ 
+         constexpr uint64_t kMaxQueuedBytes = 48ull << 20;
++        // How many vsyncs of work the game can be ahead of the worker: it works in bursts of 2 vsyncs, and each side keeps
++        // up over the pair even when one runs late inside it
++        constexpr uint32_t kMaxFramesAhead = 1u;
+ 
+         std::mutex s_mutex;
+         std::condition_variable s_wakeWorker, s_wakeGame;
+@@ -131,12 +134,12 @@ namespace hl_vuworker
+         {
+             start();
+             std::unique_lock lock(s_mutex);
+-            if (s_queuedBytes > kMaxQueuedBytes || (command.frameEnd && s_framesQueued >= 1u))
++            if (s_queuedBytes > kMaxQueuedBytes || (command.frameEnd && s_framesQueued >= kMaxFramesAhead))
+             {   // (the game is too far ahead of the worker)
+                 hl_perf::Scope wait(hl_perf::kWaitVu);
+                 s_gameWaiting = true;
+                 const bool frameEnd = command.frameEnd;
+-                s_wakeGame.wait(lock, [frameEnd] { return s_queuedBytes <= kMaxQueuedBytes && (!frameEnd || s_framesQueued < 1u); });
++                s_wakeGame.wait(lock, [frameEnd] { return s_queuedBytes <= kMaxQueuedBytes && (!frameEnd || s_framesQueued < kMaxFramesAhead); });
+                 s_gameWaiting = false;
+             }
+             s_queuedBytes += command.data.size();
+@@ -191,6 +194,14 @@ namespace hl_vuworker
+         s_gameWaiting = false;
+     }
+ 
++    bool busy()
++    {
++        if (t_worker || !enabled())
++            return false;
++        std::lock_guard lock(s_mutex);
++        return !s_queue.empty() || s_running;
++    }
++
+     std::vector<uint8_t> takeBuffer()
+     {
+         std::lock_guard lock(s_mutex);
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index f6b9069..2a1a628 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -2458,6 +2458,14 @@ int PS2Memory::pollDmaRegisters()
+ 
+ uint32_t PS2Memory::readIORegister(uint32_t address)
+ {
++#if defined(PS2X_HEADLESS_HOST)
++    // sceGsSyncPath asks these two whether anything is still going. The game saw its DMA end at the kick; here too what
++    // the worker has queued counts as done, and the queue keeps the order of whatever comes next. (Only the bits it asks
++    // about: FQC and VPS, APATH and OPH. The rest is what the worker left, and a transfer back from VIF1 syncs at its write.)
++    static const bool s_statSync = std::getenv("HL_STATSYNC") != nullptr; // (the old way, to compare)
++    if (!s_statSync && (address == 0x10003C00u || address == 0x10003020u) && hl_vuworker::busy())
++        return address == 0x10003C00u ? (vif1_regs.stat & ~0x1F000003u) : (m_path3Masked ? 0x2u : 0u);
++#endif
+     if ((address >= 0x10003C00u && address < 0x10003E00u) || (address >= 0x10003000u && address < 0x10003100u) ||
+         (address >= 0x10005000u && address < 0x10007000u))
+         HL_VU_SYNC();
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index 307a51b..e226bd4 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -623,6 +623,86 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ 
+             const bool zeroExtend = (imm & 0x4000u) != 0u;
+ 
++            // The formats of a game's geometry, with no mask, no row added and every source vector present: the same
++            // result as the general loop below (lanes past the format's components keep what the memory had, a
++            // single component goes to all four), without deciding all of that again for each field of each vector.
++            if (m_vu1Data && totalBytes > 0 && pos + totalBytes <= sizeBytes && !maskEnable && (vif1_regs.mode & 3u) == 0u && cl >= wl && vl != 3u)
++            {
++                const uint8_t *src = data + pos;
++                uint8_t *const vu = m_vu1Data;
++                const uint32_t skip = cl - wl;
++                const auto run = [&](auto one, uint32_t step)
++                {
++                    uint32_t dest = vuAddr;
++                    uint32_t inCycle = 0u;
++                    for (uint32_t i = 0u; i < writeVectorCount; ++i)
++                    {
++                        one(vu + (dest & 0x3FFu) * 16u, src);
++                        src += step;
++                        ++dest;
++                        if (++inCycle == wl)
++                        {
++                            inCycle = 0u;
++                            dest += skip;
++                        }
++                    }
++                };
++                const auto put = [](uint8_t *out, uint32_t lane, uint32_t value) { std::memcpy(out + lane * 4u, &value, 4); };
++                const auto get16 = [zeroExtend](const uint8_t *p) -> uint32_t
++                {
++                    uint16_t raw;
++                    std::memcpy(&raw, p, 2);
++                    return zeroExtend ? static_cast<uint32_t>(raw) : static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(raw)));
++                };
++                const auto get8 = [zeroExtend](const uint8_t *p) -> uint32_t
++                {
++                    return zeroExtend ? static_cast<uint32_t>(*p) : static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(*p)));
++                };
++                switch ((static_cast<uint32_t>(vl) << 2) | vn)
++                {
++                case 0: // V1-32
++                    run([&](uint8_t *o, const uint8_t *p) { for (uint32_t c = 0u; c < 4u; ++c) std::memcpy(o + c * 4u, p, 4); }, 4u);
++                    break;
++                case 1: // V2-32
++                    run([&](uint8_t *o, const uint8_t *p) { std::memcpy(o, p, 8); }, 8u);
++                    break;
++                case 2: // V3-32
++                    run([&](uint8_t *o, const uint8_t *p) { std::memcpy(o, p, 12); }, 12u);
++                    break;
++                case 3: // V4-32
++                    run([&](uint8_t *o, const uint8_t *p) { std::memcpy(o, p, 16); }, 16u);
++                    break;
++                case 4: // V1-16
++                    run([&](uint8_t *o, const uint8_t *p) { const uint32_t v = get16(p); for (uint32_t c = 0u; c < 4u; ++c) put(o, c, v); }, 2u);
++                    break;
++                case 5: // V2-16
++                    run([&](uint8_t *o, const uint8_t *p) { put(o, 0u, get16(p)); put(o, 1u, get16(p + 2)); }, 4u);
++                    break;
++                case 6: // V3-16
++                    run([&](uint8_t *o, const uint8_t *p) { put(o, 0u, get16(p)); put(o, 1u, get16(p + 2)); put(o, 2u, get16(p + 4)); }, 6u);
++                    break;
++                case 7: // V4-16
++                    run([&](uint8_t *o, const uint8_t *p) { for (uint32_t c = 0u; c < 4u; ++c) put(o, c, get16(p + c * 2u)); }, 8u);
++                    break;
++                case 8: // V1-8
++                    run([&](uint8_t *o, const uint8_t *p) { const uint32_t v = get8(p); for (uint32_t c = 0u; c < 4u; ++c) put(o, c, v); }, 1u);
++                    break;
++                case 9: // V2-8
++                    run([&](uint8_t *o, const uint8_t *p) { put(o, 0u, get8(p)); put(o, 1u, get8(p + 1)); }, 2u);
++                    break;
++                case 10: // V3-8
++                    run([&](uint8_t *o, const uint8_t *p) { put(o, 0u, get8(p)); put(o, 1u, get8(p + 1)); put(o, 2u, get8(p + 2)); }, 3u);
++                    break;
++                default: // V4-8
++                    run([&](uint8_t *o, const uint8_t *p) { for (uint32_t c = 0u; c < 4u; ++c) put(o, c, get8(p + c)); }, 4u);
++                    break;
++                }
++                pos += totalBytes;
++                if (pos > sizeBytes)
++                    break;
++                continue;
++            }
++
+             if (m_vu1Data && totalBytes > 0 && pos + totalBytes <= sizeBytes)
+             {
+                 const uint8_t *srcBase = data + pos;
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+index aa80b86..c324b1e 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu_fast.cpp
+@@ -214,7 +214,10 @@ struct VU1Interpreter::FastImage
+     std::vector<int32_t> entry; // pair -> index of its block's first op, -1 not translated
+     std::vector<uint8_t> code;
+     uint32_t pairs = 0;
+-    bool statusLive = false; // some FS* reader in the code: every FMAC counts for the status flags
++    bool statusLive = false; // some FS* reader in the code: the FMACs give the status flags too
++    bool stickyLive = false; // one of them can see a sticky bit: every FMAC counts. (Those it cannot: only the ones read
++                             // before being replaced, like the MAC. A later program reading stickies it did not clear
++                             // would see too few; in this game each one clears them with FSSET first.)
+ 
+     struct Stalls
+     {
+@@ -489,7 +492,7 @@ namespace
+         if ((upper & 0x80000000u) != 0u)
+             return false;
+         const uint8_t opHi = (lower >> 25) & 0x7Fu;
+-        return opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu;
++        return opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu || opHi == 0x16u; // (FSAND of current bits, when it gets here)
+     }
+ }
+ 
+@@ -576,7 +579,7 @@ void VU1Interpreter::fastEmitBlock(FastImage &image, uint32_t start)
+         const bool accGroup = uop >= 0x3Cu;
+         FmacOp fop;
+         FmacSrc fsrc;
+-        const bool live = macLive[index] || image.statusLive;
++        const bool live = macLive[index] || image.stickyLive;
+         if (dest != 0u || code == 0x2Fu)
+         {
+             if (decodeFmac(code, fop, fsrc))
+@@ -895,7 +898,12 @@ bool VU1Interpreter::fastExecute(uint8_t *vuCode, uint32_t codeSize, uint8_t *vu
+                 std::memcpy(&upper, vuCode + k * 8u + 4u, 4);
+                 const uint8_t opHi = (lower >> 25) & 0x7Fu;
+                 if ((upper & 0x80000000u) == 0u && (opHi == 0x14u || opHi == 0x16u || opHi == 0x17u))
++                {
+                     image->statusLive = true;
++                    const uint32_t mask = ((lower >> 21) & 1u) << 11 | (lower & 0x7FFu);
++                    if (opHi != 0x16u || (mask & 0xFC0u) != 0u)
++                        image->stickyLive = true;
++                }
+             }
+             found = m_fastImages.emplace(hash, std::move(image)).first;
+         }
+@@ -1560,7 +1568,7 @@ bool VU1Interpreter::fastRun(uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData
+         std::snprintf(what, sizeof(what), "i interp %g fast %g", a.i, b.i);
+     else if (a.pc != b.pc)
+         std::snprintf(what, sizeof(what), "pc interp 0x%x fast 0x%x", a.pc, b.pc);
+-    else if (m_fastImage && m_fastImage->statusLive && (a.status & 0x0C3u) != (b.status & 0x0C3u))
++    else if (m_fastImage && m_fastImage->statusLive && (a.status & (m_fastImage->stickyLive ? 0x0C3u : 0x003u)) != (b.status & (m_fastImage->stickyLive ? 0x0C3u : 0x003u)))
+         std::snprintf(what, sizeof(what), "status interp %03x fast %03x", a.status, b.status);
+     else if (std::memcmp(shadowData.data(), vuData, dataSize) != 0)
+     {

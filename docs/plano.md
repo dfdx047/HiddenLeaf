@@ -435,6 +435,32 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 45,8 | 16,5 | 10,9 | 0,5 | 15,8 | 16,0 | 4,7 | - | - | 3,14 | waitVU 5,7 |
 | 2026-11-01 | +vsync recupera até 4 atrasados | RG Cube | sem limite | 49,4 | 20,5 | 9,0 | 0,3 | 14,9 | 11,2 | 3,6 | - | - | 3,19 | maioria dos segundos em 50; quedas em efeitos pesados (38 no pior segundo, 4,5 MB/f) |
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 46,6 | 15,4 | 10,7 | 0,5 | 15,8 | 15,7 | 4,6 | - | - | 3,14 | três threads pesadas (jogo, VuWorker, GS) em 2 núcleos grandes; pior segundo 31 fps |
+| 2026-11-01 | +um salto indireto por operação da VU (clang `tail-dup`) | RG Cube | sem limite | 49,6 | 21,0 | 8,9 | 0,3 | 14,3 | 11,0 | 3,6 | - | - | 3,14 | hipótese (-10% na VU1) refutada: -0,1 ms; pares > 44 ms 11,8% → 8,3% |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 46,9 | 16,5 | 10,7 | 0,4 | 15,5 | 15,8 | 4,6 | - | - | 3,12 | -0,4 ms na VU1; pares > 44 ms 33,3% → 30,0% |
+| 2026-11-01 | +UNPACK direto | RG Cube | sem limite | 49,7 | 22,1 | 8,8 | 0,3 | 13,8 | 10,8 | 3,5 | - | - | 3,13 | esperava -1,5 ms, deu -0,5; pares > 44 ms 7,9% |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 47,4 | 18,1 | 10,8 | 0,4 | 15,2 | 16,2 | 4,7 | - | - | 3,20 | pares > 44 ms 29,2% |
+| 2026-11-01 | +MAC morto não calculado (`stickyLive`) | RG Cube | sem limite | 49,8 | 22,7 | 9,3 | 0,3 | 12,7 | 11,1 | 3,7 | - | - | 3,17 | pares > 44 ms 4,1% |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 48,2 | 17,0 | 10,6 | 0,4 | 14,3 | 16,3 | 4,8 | - | - | 3,19 | pares > 44 ms 21,5% |
+| 2026-11-01 | +`sceGsSyncPath` não esvazia a fila; escrita no GS vai pela fila | RG Cube | sem limite | **50,0** | 26,1 | 8,9 | 0,3 | 13,1 | 10,6 | 3,4 | - | - | 3,14 | waitVU 5,3 → 0,1, idle 7,5; pares > 44 ms 0,9%, pior 1% 43,8 ms. **Velocidade cheia (sem áudio)** |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 17,7 | 10,9 | 0,4 | 15,2 | 17,3 | 4,8 | - | - | 3,20 | waitVU 1,1, idle 3,7; pares > 44 ms 22,2%, quedas a 39 fps nos efeitos pesados. GS é o maior custo |
+
+**Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
+`1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
+par no prazo. Por isso a medida também registra `PAIRS`: o tempo de cada par de vsyncs (alvo 40 ms; acima de 44 ms é falha
+visível). A cena de medida não é determinística entre rodadas: é a mesma luta e os mesmos personagens, mas os golpes variam.
+Variações de até uns 3% no fps e de 0,3 ms nas colunas estão dentro do ruído.
+
+**Decisões desta rodada.**
+- `HL_STATSYNC=1` volta ao comportamento antigo (ler `VIF1_STAT`/`GIF_STAT` esvazia a fila), para comparar. A/B no Retroid
+  com 12 prints de cada modo: 48,4 fps sem a espera, 45,2 com ela.
+- Um print do Retroid mostrou o cenário em dupla exposição (relógio 86). Não reproduziu em 24 prints (12 em cada modo).
+  Causa não determinada; pode ser efeito do jogo. Se voltar a aparecer, comparar com o PCSX2.
+- `kMaxFramesAhead` 1 → 2 não mudou nada enquanto a espera real era o `SyncPath`; ficou em 1, com menos latência.
+- O verificador da VU no PC continua aceitando: 1,2M execuções com `stickyLive`, 2 divergências na VU1, ambas da classe já
+  conhecida em `0x1820` (`vf16.x`), nenhuma de status. Rodada anterior (`verify8`, sem `stickyLive`): 5,84M execuções, 13 na
+  VU1, 9 em `0x1820` e 4 em `0xf0` (bytes de um XGKICK). Essas duas classes **não foram explicadas**.
+- `stickyLive` assume que nenhum programa lê sticky sem antes limpar com `FSSET`. Vale para as imagens que conferi; um
+  programa que não faça isso veria stickies a menos, e o verificador só compara os bits baixos nas imagens sem leitor de sticky.
 
 A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
 
