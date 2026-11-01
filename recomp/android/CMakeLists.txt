@@ -40,6 +40,8 @@ target_link_libraries(ffmpeg INTERFACE "${FFMPEG}/lib/libavformat.a" "${FFMPEG}/
     "${FFMPEG}/lib/libswscale.a" "${FFMPEG}/lib/libavutil.a")
 
 add_subdirectory("${PS2R}/ps2xIOP" ps2xIOP EXCLUDE_FROM_ALL)
+# (its read32 and the like are called once per IOP instruction, across files)
+target_compile_options(ps2_iop PRIVATE -flto=thin)
 
 set(L "${RT}/src/lib")
 file(GLOB_RECURSE KERNEL_SRC CONFIGURE_DEPENDS "${L}/Kernel/*.cpp")
@@ -68,4 +70,4 @@ set(UN5_RUNNER_OPT "-O2" CACHE STRING "Optimisation of the generated game code")
 target_compile_options(un5 PRIVATE ${UN5_RUNNER_OPT})
 target_include_directories(un5 PRIVATE "${RT}/include" "${L}" "${L}/Kernel" "${SDL3}/include")
 target_link_libraries(un5 PRIVATE ps2_runtime "${SDL3}/lib/libSDL3.so" android log z m dl)
-target_link_options(un5 PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384 -static-libstdc++)
+target_link_options(un5 PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,-Bsymbolic-functions -flto=thin -static-libstdc++)

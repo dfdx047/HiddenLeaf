@@ -430,6 +430,11 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | +sem desperdício no DMA | Retroid Pocket 5 | sd480p | 28,9 | 10,4 | 14,7 | 0,4 | 12,9 | 11,5 | 5,5 | 0,6 | 1,6 | 3,26 | idem; waitGS 0 |
 | 2026-11-01 | +thread VuWorker | Retroid Pocket 5 | sd480p | 44,0 | 16,9 | 11,9 | 0,4 | 16,2 (VuWorker: VIF+VU1+GIF+anel) | 16,8 | 5,5 | - | - | 3,20 | VIF1/VU1/GIF numa thread (hl_vu_worker.cpp); waitVU 5,5; picos de 48, efeitos pesados caem a 31 (4,5 MB/f) |
 | 2026-11-01 | +thread VuWorker | RG Cube | sem limite | 24,1 | 4,9 | 12,1 | 0,4 | 16,4 (idem) | 17,8 | 5,1 | - | - | 3,25 | waitGS 23,4, waitVU 25,1: quem limita é a GPU: PerfLog do PCSX2: GPU 74%, GS 30% |
+| 2026-11-01 | +ForceMaliFramebufferFetch | RG Cube | sem limite | 47,4 | 19,5 | 10,3 | 0,3 | 14,9 (idem) | 11,1 | 4,9 | - | - | 3,14 | barreiras 1878 → 0, passes 519 → 22, GPU 75% → 13%; imagem certa; waitVU 4,8 |
+| 2026-11-01 | +IOP e timers em lote, Bsymbolic, LTO no IOP | RG Cube | sem limite | 48,7 | 20,5 | 9,0 | 0,3 | 15,0 | 11,2 | 3,6 | - | - | 3,21 | waitVU 6,3, idle 1,9 |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 45,8 | 16,5 | 10,9 | 0,5 | 15,8 | 16,0 | 4,7 | - | - | 3,14 | waitVU 5,7 |
+| 2026-11-01 | +vsync recupera até 4 atrasados | RG Cube | sem limite | 49,4 | 20,5 | 9,0 | 0,3 | 14,9 | 11,2 | 3,6 | - | - | 3,19 | maioria dos segundos em 50; quedas em efeitos pesados (38 no pior segundo, 4,5 MB/f) |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 46,6 | 15,4 | 10,7 | 0,5 | 15,8 | 15,7 | 4,6 | - | - | 3,14 | três threads pesadas (jogo, VuWorker, GS) em 2 núcleos grandes; pior segundo 31 fps |
 
 A primeira tentativa (mesmo build, sem o escopo no `VU1Interpreter::run`) dava "EE 600 ms": era a VU contada como EE.
 

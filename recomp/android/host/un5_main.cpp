@@ -127,8 +127,21 @@ namespace
                      "VsyncEnable = 0\n"
                      "pcrtc_antiblur = false\n"
                      "UserHacks = false\n"
+                     // Mali without dual-source blending: blending by fetch instead of a barrier per primitive (Mali-G57, RG Cube:
+                     // barriers 1878 -> 0, passes 519 -> 22, GPU 75% -> 13%, right image; ARMSX2's list denies it on this part).
+                     // Adreno ignores it.
+                     "ForceMaliFramebufferFetch = true\n"
                      "DumpReplaceableTextures = false\n",
                      static_cast<double>(upscale), std::getenv("HL_PERF") ? "true" : "false");
+        // HL_GS_EXTRA="key=value;key=value": GS settings to try (bench only)
+        if (const char *extra = std::getenv("HL_GS_EXTRA"))
+        {
+            std::string text = extra;
+            for (char &c : text)
+                if (c == ';')
+                    c = '\n';
+            std::fprintf(f, "%s\n", text.c_str());
+        }
         std::fclose(f);
     }
 
