@@ -1,0 +1,125 @@
+diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
+index 435db3a..4c0dfbf 100644
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -58,7 +58,8 @@ namespace ps2recomp
+                                    "ctx->f[{}] = FPU_DIV_S(ctx->f[{}], ctx->f[{}]); }}",
+                                    ft, fd, fs, ft);
+             case COP1_S_SQRT:
+-                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, fs);
++                // SQRT.S fd, ft: on the EE the operand is in the ft field; fs is zero.
++                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, ft);
+             case COP1_S_ABS:
+                 return fmt::format("ctx->f[{}] = FPU_ABS_S(ctx->f[{}]);", fd, fs);
+             case COP1_S_MOV:
+diff --git a/ps2xRecomp/src/lib/vu_translation_helpers.cpp b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+index 1b7bd51..b9174c3 100644
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -75,21 +75,23 @@ namespace ps2recomp
+         uint8_t fs_reg = inst.rd;
+         uint8_t ft_reg = inst.rt;
+ 
+-        return fmt::format("{{ float fs = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = (ft != 0.0f) ? (fs / ft) : 0.0f; }}", fs_reg, fs_reg, fsf, ft_reg, ft_reg, ftf);
++        return fmt::format("{{ float fs = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = ps2_fdiv(fs, ft); }}", fs_reg, fs_reg, fsf, ft_reg, ft_reg, ftf);
+     }
+ 
+     std::string CodeGenerator::translateVU_VSQRT(const Instruction &inst)
+     {
+         uint8_t ftf = inst.vectorInfo.ftf;
+         uint8_t ft_reg = inst.rt;
+-        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = sqrtf(std::max(0.0f, ft)); }}", ft_reg, ft_reg, ftf);
++        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = ps2_fsqrt(ft); }}", ft_reg, ft_reg, ftf);
+     }
+ 
+     std::string CodeGenerator::translateVU_VRSQRT(const Instruction &inst)
+     {
++        uint8_t fsf = inst.vectorInfo.fsf;
+         uint8_t ftf = inst.vectorInfo.ftf;
++        uint8_t fs_reg = inst.rd;
+         uint8_t ft_reg = inst.rt;
+-        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = (ft > 0.0f) ? (1.0f / sqrtf(ft)) : 0.0f; }}", ft_reg, ft_reg, ftf);
++        return fmt::format("{{ float fs = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = ps2_frsqrt(fs, ft); }}", fs_reg, fs_reg, fsf, ft_reg, ft_reg, ftf);
+     }
+ 
+     std::string CodeGenerator::translateVU_VMTIR(const Instruction &inst)
+@@ -753,10 +755,7 @@ namespace ps2recomp
+         uint8_t dest_mask = inst.vectorInfo.vectorField;
+         float scale = (shift == 0) ? 1.0f : static_cast<float>(1 << shift);
+ 
+-        return fmt::format("{{ __m128 src = ctx->vu0_vf[{}]; "
+-                           "src = _mm_mul_ps(src, _mm_set1_ps({})); "
+-                           "__m128i res_i = _mm_cvttps_epi32(src); "
+-                           "__m128 res = _mm_castsi128_ps(res_i); "
++        return fmt::format("{{ __m128 res = ps2_vftoi(ctx->vu0_vf[{}], {}); "
+                            "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+                            "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+                            vfs, codegen::formatFloatLiteral(scale),
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0f91229..30a5a6d 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -197,15 +197,17 @@ inline void ps2_fcmp_audit(float a, float b)
+         hl_float_note(HlFloatEvent::Compare255);
+ }
+ 
+-// HL_FLOAT_LOG: cvt.w.s as the runtime does it (nearest), noted where the EE's truncation gives another value
+-inline int32_t ps2_cvt_w_s_audit(float a)
++// cvt.w.s on the EE: always truncates, whatever the rounding mode, and saturates out of range (exponent 158 and up,
++// Inf and NaN patterns included) by the sign of the operand.
++inline int32_t ps2_cvt_w_s(float a)
+ {
+-    const int32_t r = static_cast<int32_t>(nearbyintf(a));
+-    if ((std::bit_cast<uint32_t>(a) & 0x7F800000u) >= 0x4F000000u)
++    const uint32_t bits = std::bit_cast<uint32_t>(a);
++    if ((bits & 0x7F800000u) >= 0x4F000000u)
++    {
+         hl_float_note(HlFloatEvent::CvtRange);
+-    else if (static_cast<float>(r) != truncf(a))
+-        hl_float_note(HlFloatEvent::CvtRound);
+-    return r;
++        return (bits & 0x80000000u) != 0u ? INT32_MIN : INT32_MAX;
++    }
++    return static_cast<int32_t>(a);
+ }
+ 
+ inline double ps2_to_double(float x)
+@@ -427,6 +429,15 @@ inline __m128 ps2_vmul(__m128 a, __m128 b)
+ #define PS2_VSUB(a, b) ps2_vsub((__m128)(a), (__m128)(b))
+ #define PS2_VMUL(a, b) ps2_vmul((__m128)(a), (__m128)(b))
+ #define PS2_VDIV(a, b) _mm_div_ps((__m128)(a), (__m128)(b))
++
++// VFTOI: truncates and saturates by the sign of the operand; the host gives 0x80000000 for every overflow.
++inline __m128 ps2_vftoi(__m128 src, float scale)
++{
++    const __m128i host = _mm_cvttps_epi32(_mm_mul_ps(src, _mm_set1_ps(scale)));
++    const __m128i overflow = _mm_cmpeq_epi32(host, _mm_set1_epi32(INT32_MIN));
++    const __m128i negative = _mm_srai_epi32(_mm_castps_si128(src), 31);
++    return _mm_castsi128_ps(_mm_xor_si128(host, _mm_andnot_si128(negative, overflow)));
++}
+ #define PS2_VMULQ(a, q) _mm_mul_ps((__m128)(a), _mm_set1_ps(q))
+ #define PS2_VBLEND(a, b, mask) PS2_BLENDV_PS((__m128)(a), (__m128)(b), (__m128)(mask))
+ 
+@@ -906,7 +917,7 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+ #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
+ #define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+ #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
+-#define FPU_CVT_W_S(a) ps2_cvt_w_s_audit((float)(a))
++#define FPU_CVT_W_S(a) ps2_cvt_w_s((float)(a))
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 6c9454d..d8e6ebf 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -502,6 +502,9 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+             // and the GS local memory as the GS lays it out (4 MB, swizzled), in hl_frames/vram_<tick>.bin
+             std::snprintf(name, sizeof(name), "hl_frames/vram_%06llu.bin", static_cast<unsigned long long>(currentTick));
+             std::ofstream(name, std::ios::binary).write(reinterpret_cast<const char *>(rt->memory().getGSVRAM()), PS2_GS_VRAM_SIZE);
++            // and the VU1 data memory (16 KB), to compare with vu1Memory.bin of a PCSX2 savestate
++            std::snprintf(name, sizeof(name), "hl_frames/vu1_%06llu.bin", static_cast<unsigned long long>(currentTick));
++            std::ofstream(name, std::ios::binary).write(reinterpret_cast<const char *>(rt->memory().getVU1Data()), 16384);
+         }
+     }
+     if (shotRequested || (s_frameDumpEvery != 0u && currentTick % s_frameDumpEvery == 0u))
