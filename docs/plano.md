@@ -443,6 +443,8 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 48,2 | 17,0 | 10,6 | 0,4 | 14,3 | 16,3 | 4,8 | - | - | 3,19 | pares > 44 ms 21,5% |
 | 2026-11-01 | +`sceGsSyncPath` não esvazia a fila; escrita no GS vai pela fila | RG Cube | sem limite | **50,0** | 26,1 | 8,9 | 0,3 | 13,1 | 10,6 | 3,4 | - | - | 3,14 | waitVU 5,3 → 0,1, idle 7,5; pares > 44 ms 0,9%, pior 1% 43,8 ms. **Velocidade cheia (sem áudio)** |
 | 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 17,7 | 10,9 | 0,4 | 15,2 | 17,3 | 4,8 | - | - | 3,20 | waitVU 1,1, idle 3,7; pares > 44 ms 22,2%, quedas a 39 fps nos efeitos pesados. GS é o maior custo |
+| 2026-11-01 | +nice -10 nas 3 threads pesadas, IOP sem chamada por acesso à RAM | RG Cube | sem limite | 50,0 | 27,3 | 8,9 | 0,3 | 13,3 | 11,3 | 2,7 | - | - | 3,17 | idle 8,6; pares > 44 ms 0,7%, pior 1% 42,0 ms |
+| 2026-11-01 | idem | Retroid Pocket 5 | sd480p | 49,3 | 16,3 | 11,2 | 0,4 | 14,8 | 17,3 | 3,7 | - | - | 3,21 | idle 4,5; pares > 44 ms 11,6%, pior 1% 64 ms. Só o nice (medido antes do IOP): 22,2% → 14,5%. `texture_preloading=1;hw_mipmap=false` não ajudou (GS 18,0, 25,1%) |
 
 **Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
 `1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
