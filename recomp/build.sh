@@ -73,7 +73,12 @@ python3 "$here/tools/un5.py" stubfix un5_config.toml
 rm -rf output
 "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
 # second pass: plus the functions only reached through pointers in the data (constructors, vtables, callbacks)
-python3 "$here/tools/un5.py" fnmap un5_split.elf output un5_map.csv
+# ... and the ones only the overlays call
+for bin in "$B"/disc/PRG/*.BIN; do
+    head -c 4 "$bin" | grep -q MWo3 && python3 "$here/tools/un5.py" ovlelf "$bin" "ovl_$(basename "$bin" .BIN).elf" >/dev/null
+done
+python3 "$here/tools/un5.py" fnmap un5_split.elf output un5_map.csv --also ovl_*.elf
+rm -f ovl_*.elf
 sed -i 's|^ghidra_output = .*|ghidra_output = "un5_map.csv"|' un5_config.toml
 rm -rf output
 "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
@@ -95,7 +100,7 @@ for bin in "$B"/disc/PRG/*.BIN; do
       "$B/PS2Recomp/build-tools/ps2xAnalyzer/ps2_analyzer" "$n.elf" cfg.toml > analyzer.log 2>&1
       sed -i 's|^output = .*|output = "./output/"|' cfg.toml
       "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1
-      python3 "$here/tools/un5.py" fnmap "$n.elf" output map.csv >/dev/null
+      python3 "$here/tools/un5.py" fnmap "$n.elf" output map.csv --also "$B/gen/un5_split.elf" >/dev/null
       sed -i 's|^ghidra_output = .*|ghidra_output = "map.csv"|' cfg.toml
       rm -rf output
       "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1

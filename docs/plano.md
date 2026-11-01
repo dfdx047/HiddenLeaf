@@ -96,7 +96,35 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
   código de fim de programa), overlays com o código em addr+0x40 e os construtores estáticos (código dentro dos dados,
   tabela nos dois últimos campos do cabeçalho `MWo3`) marcados como código.
 
-### Tela de título (2026-10-26): cores certas desde o 0030; falta a malha do pós-efeito e a velocidade
+### Noite de 2026-11-01: título, menu e velocidade
+
+**"Malha ampliada" era Z e quadro sem limpar (0032).** O título parecia ampliado por uma malha de pós-efeito, mas a causa
+é outra: o stub de `sceGsSetDefDBuff` lia os argumentos da pilha (na ABI do EE, a0–a3 e t0–t3 vêm em registradores) e
+ignorava `clear`. O fim do pacote de cada quadro (`0x9391a0`: TEST, PRIM, RGBAQ, XYZ2×2, TEST) ficava zerado no recomp, e
+os pixels da animação de abertura (logo gigante, Z alto) ficavam na tela para sempre. Comparado entre a RAM do PCSX2 e a
+do recomp. Com o 0032 o NOW LOADING e o **Mode Select** batem com o vídeo de referência.
+
+**Caminho até o menu:** START pula os filmes; o título abre com o cursor em Load Game; sem memory card, Load Game dá
+"No data… / Return to title". **New Game = UP, CROSS** → NOW LOADING → Mode Select. Em Mode Select, `DOWN WAIT WAIT CROSS`
+(arquivo `hl_pad`) entra em Free Battle.
+
+**Velocidade (0034).** Perfil antes: 85% do tempo no GS, 20 vsyncs/s no menu. `src/lib/gs/gs_cpu_fast.inl` refaz
+triângulo e sprite com tudo decodificado por primitiva: tabela de swizzle lida direto, paleta decodificada em cache,
+filtro bilinear em inteiros, spans calculados por linha. **Menu e filmes agora a 50 vsyncs/s** (com folga de CPU por
+medir); título com a cena completa ~37 vsyncs/s. O caminho antigo continua como referência: formato desconhecido ou
+textura lida das páginas sendo desenhadas (a textura e o quadro se sobrepõem) vão por ele. `HL_GS_VERIFY=N` desenha uma
+primitiva em N pelos dois caminhos e reporta bytes que diferem mais de 3. No título/menu: ~10% das primitivas conferidas
+diferem em 1–64 bytes (pixels de borda de triângulo, arredondamento); nada visível.
+
+**Funções do ELF principal só alcançadas por overlays:** `un5.py fnmap --also PRG/*.BIN` varre JAL/J e ponteiros dos
+overlays (602 funções a mais, entre elas a `0x3d1f60` que o BTL chama e que dava `missing-target` e tela branca depois de
+Free Battle).
+
+**Pendências vistas:** "(null)" no menu de memory card segue sem causa (fora do caminho New Game); filmes têm quadros
+pretos em alguns dumps desde o 0032 (o stub de `sceGsSwapDBuff` limpa o quadro); um osso do objeto do título (`+1c`, osso 5)
+com matriz errada (R -3e38/nan contra P 0.425,-0.425,-0.85), provavelmente o cursor.
+
+### Tela de título (2026-10-26, histórico: a malha era o 0032)
 
 **0030, cor e alpha zerados:** com o 0029 a cena saía escura e falhada. No log das primitivas do GS, ~18 mil dos
 triângulos que o VU1 manda por quadro chegavam com RGBA = 0 (invisíveis, alpha 0). O microprograma do VU1 que desenha a
@@ -230,6 +258,9 @@ Notas da investigação (para referência):
 - Patch 0011 corrige o VIF1: o IMAGE que fica devendo dados é completado pelo próximo DIRECT, não pelos bytes crus.
 
 ### Variáveis de depuração
+
+- `HL_GS_VERIFY=N`: compara o caminho rápido do GS com o antigo em uma primitiva a cada N (0034).
+- Arquivo `hl_steps`: despeja o FRAME do contexto 1 nos próximos 40 TEXFLUSH em `hl_frames/step_NNN.ppm` (0033).
 
 | Variável | O quê |
 |---|---|

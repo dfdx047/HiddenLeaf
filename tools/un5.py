@@ -14,7 +14,7 @@ outside the tree (or into build/, which git ignores).
   un5.py unpack   <elf> <out>            unpacks an ELF packed with SjCRUNCH (the Brazilian version's)
   un5.py prepelf  <elf> <out>            the ELF for the recompiler: its one big section split into code and data
   un5.py ovlelf   <overlay.BIN> <out>    an overlay (MWo3) as an ELF at its load address, code and data apart
-  un5.py fnmap    <elf> <recomp output> <map.csv>
+  un5.py fnmap    <elf> <recomp output> <map.csv> [--also <other ELF>...]
                                          the function map for a second pass of the recompiler: the functions it
                                          found, plus every function only reached through a pointer in the data
                                          (constructors, vtables, callbacks), in the CSV format of a Ghidra export
@@ -499,6 +499,43 @@ def cmd_fnmap(a):
             if ((w >> 16) == 0x27BD and (w & 0x8000)) or after_return(v):
                 starts.add(v)
                 added += 1
+    # a prologue right after a return is a function even when nothing here names it: the analyzer follows calls only, and
+    # left half of BTL out (entered from the main ELF, from pointers made at run time)
+    own = 0
+    for lo, hi, off in code:
+        for v in range(lo, hi - 3, 4):
+            if v in starts:
+                continue
+            w = word(v)
+            if w is not None and (w >> 16) == 0x27BD and (w & 0x8000) and after_return(v):
+                starts.add(v)
+                own += 1
+    print("%d more after a return in this ELF's code" % own)
+
+    # other ELFs call into this one (the BTL overlay calls 0x3d1f60, which nothing here calls; the main ELF calls
+    # 0x72f340, in BTL): JAL and J in their code, and pointers in anything they load. Only code is read as instructions,
+    # data that happens to look like a JAL would split functions at any word after a return.
+    outside = 0
+    for path in a.also or []:
+        blob = open(path, "rb").read()
+        for name, addr, off, size, flags, t in sections_of(blob):
+            if t != 1 or not flags & SHF_ALLOC:
+                continue
+            for i in range(0, size - 3, 4):
+                w, = struct.unpack_from("<I", blob, off + i)
+                call = bool(flags & SHF_EXEC) and (w >> 26) in (2, 3)
+                v = (w & 0x03FFFFFF) << 2 if call else w
+                if v & 3 or v in starts:
+                    continue
+                first = word(v)
+                if first is None or first == 0:
+                    continue
+                prologue = (first >> 16) == 0x27BD and bool(first & 0x8000)
+                if prologue or (call and after_return(v)):
+                    starts.add(v)
+                    outside += 1
+    if a.also:
+        print("%d more reached from the other ELFs" % outside)
     ordered = sorted(starts)
     with open(a.map, "w") as f:
         f.write("name,start,end,size\n")
@@ -576,7 +613,7 @@ def main():
     s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
     s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.set_defaults(fn=cmd_ovlelf)
     s = sub.add_parser("stubfix"); s.add_argument("config"); s.set_defaults(fn=cmd_stubfix)
-    s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.set_defaults(fn=cmd_fnmap)
+    s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.add_argument("--also", nargs="*"); s.set_defaults(fn=cmd_fnmap)
     a = ap.parse_args()
     sys.exit(a.fn(a) or 0)
 
