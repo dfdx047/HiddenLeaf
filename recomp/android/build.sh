@@ -27,7 +27,9 @@ cmake --build "$out" --target un5 -j"${JOBS:-$(nproc)}"
 mkdir -p "$jni"
 "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-debug -o "$jni/libun5.so" "$out/libun5.so"
 cp -u "$SDL3/lib/libSDL3.so" "$jni/"
-for f in libbt4gsx.so libfile_redirect_hook.so libgsl_alloc_hook.so libhook_impl.so libmain_hook.so; do
+# (libbt4gsx.so: Hidden Leaf's own, recomp/android/build_gsx.sh, once it was built)
+[ -e "$B/gsx/libbt4gsx.so" ] || cp -u "$DR/android/app/src/main/jniLibs/arm64-v8a/libbt4gsx.so" "$jni/"
+for f in libfile_redirect_hook.so libgsl_alloc_hook.so libhook_impl.so libmain_hook.so; do
     cp -u "$DR/android/app/src/main/jniLibs/arm64-v8a/$f" "$jni/"
 done
 if [ ! -e "$assets/version.txt" ] || ! cmp -s "$assets/version.txt" "$DR/android/app/src/main/assets/bt4gsx/version.txt"; then

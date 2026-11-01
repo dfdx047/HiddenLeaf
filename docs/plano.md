@@ -450,6 +450,11 @@ tempo da thread do jogo. GS é o tempo de CPU das threads `GS` e `CPU Thread` do
 | 2026-11-01 | LTO + armv8.2 no `libbt4gsx` (build à parte, não adotado) | Retroid Pocket 5 | sd480p | 49,7 | 17,7 | 11,4 | 0,5 | 14,6 | 16,9 | 3,0 | - | - | 3,19 | hipótese (GS -5 a -10%) refutada: -2%, pares > 44 ms 10,8%, dentro do ruído. Voltou ao `libbt4gsx` do Dragon Rage |
 | 2026-11-01 | +vértices nas formas com laço próprio do GS (`compactVertices`) | Retroid Pocket 5 | sd480p | 49,7 | 17,3 | 11,3 | 0,5 | 14,4 | 15,8 | 3,0 | - | - | 3,15 | idle 5,1, waitVU 0,7; pares > 44 ms 8,1%, pior 1% 61,6 ms; imagem igual |
 | 2026-11-01 | idem | RG Cube | sem limite | 50,0 | 28,3 | 8,9 | 0,3 | 13,5 | 10,3 | 2,2 | - | - | 3,20 | idle 9,3; pares > 44 ms 0,4%, pior 1% 41,6 ms |
+| 2026-11-01 | renderizador nativo (`HL_NATIVE=1`), silhuetas vértice a vértice | Retroid Pocket 5 | sd480p | 50,0 | 20,7 | 10,8 | 0,4 | 13,8 | 14,3 | 2,8 | - | - | 3,12 | idle 5,7; pares > 44 ms 3,0%, pior 1% 52,4 ms; imagem certa |
+| 2026-11-01 | nativo, tags sem troca de alvo inteiros, só os uploads que o desenho lê, thread de replay nos núcleos pequenos | Retroid Pocket 5 | sd480p | 50,0 | 20,0 | 11,0 | 0,4 | 13,7 | 14,1 | 2,8 | - | - | 3,11 | idle 5,4; pares > 44 ms 4,2%, pior 1% 52,0 ms; imagem certa. As rodadas intermediárias saíram pretas (tag inteiro levava a limpeza do FB 0 ao GS) e não valem, mesmo com GS 12,6 ms |
+| 2026-11-01 | idem, Turnip v26.3.0-R6 | Retroid Pocket 5 | sd480p | 50,0 | 20,9 | 11,5 | 0,4 | 14,2 | 15,4 | 2,9 | - | - | 3,19 | idle 5,5; pares > 44 ms 3,3%, pior 1% 51,5 ms; imagem certa, GPU não caiu. Sem ganho claro sobre o driver do sistema |
+| 2026-11-01 | sem o nativo, Turnip v26.3.0-R6 | Retroid Pocket 5 | sd480p | 49,8 | 18,5 | 11,5 | 0,5 | 14,5 | 15,5 | 3,0 | - | - | 3,19 | idle 5,0, waitVU 0,7; pares > 44 ms 9,3%, pior 1% 55,4 ms. Igual ao driver do sistema sem o nativo (15,8 ms; 8,1%) |
+| 2026-11-01 | nativo, Turnip Rutabaga v3 | Retroid Pocket 5 | sd480p | 50,0 | 20,3 | 11,5 | 0,4 | 14,0 | 15,8 | 2,8 | - | - | 3,18 | idle 5,4; pares > 44 ms 4,1%, pior 1% 53,4 ms. Sem ganho. O driver do sistema continua o padrão |
 
 **Como ler a tabela desde 2026-11-01.** O jogo desenha um quadro a cada 2 vsyncs, com um vsync pesado e um leve, então o
 `1% low` por vsync fica perto de 20 fps mesmo com a imagem sem falhas: um vsync de 45 ms seguido de um curto ainda fecha o
@@ -478,6 +483,26 @@ estado reais; tudo no framebuffer 0. Quase tudo vem do VU1 em tiras: `FOG/STQ/RG
 `STQ/NOP/NOP/XYZ2` (7 mil), `NOP/NOP/NOP/XYZ2` (6,8 mil). O GS do ARMSX2 tem laços NEON só para as formas sem NOP, então cada
 registro era uma chamada por ponteiro. `compactVertices` (`hl_gs_live.cpp`) reescreve os tags no anel: fog vai em `XYZF2` e os NOPs saem.
 `HL_GSCOMPACT=0` desliga. Um tag com Z acima de 24 bits fica como veio.
+
+### Renderizador nativo da luta (2026-11-01, `recomp/android/gsx/`, em construção)
+
+Mesma ideia do pedido ("personagens e cenário direto em Vulkan"), com um desvio: em vez de ler os modelos CCS e a saída da
+VU1, ele lê o fluxo do GS na thread de replay do `libbt4gsx` (o nosso, `recomp/android/build_gsx.sh`, sem tocar a árvore do
+Dragon Rage) e decide **por desenho**: o que entende vai direto (`hl_native.cpp`), o resto segue para o GS do ARMSX2, na ordem.
+Assim o HUD também sai por aqui quando o desenho é simples; a contrapartida é que menus e casos raros continuam corretos
+sem lista de cenas. Desenha nas mesmas imagens Vulkan dos alvos do GS (FB 0 e Z em `0x1E00`), então o GS continua de onde
+parou, e marca os alvos como válidos (RGB e alfa) para a cópia final FB 0 → página `0x70` não ler a memória do GS.
+
+- Liga com `HL_NATIVE=1` e `HL_NATIVE_FROM=<vsync>` (só teste; falta detectar a luta). `HL_NATIVE_WHOLE=0`,
+  `HL_NATIVE_LITTLE=0` e `HL_NATIVE_CAP=<arquivo>:<vsync>:<n>` (o que foi ao GS, `HL_GSCAP` com um registro `0xFE` por quadro nativo).
+- O que ainda vai ao GS em cada quadro da luta, na ordem: **sombras** (cópia do Z `0x1E00` para `0x3C00` em Z24, limpeza de
+  `0x3800` para `00808080`, volumes de sombra na cor: `R` soma ou subtrai 1 conforme a face, com `ZTST GREATER`), os sprites
+  que leem `0x3800` em CT24/CT32 sobre o FB 0, e a cópia final para `0x70`.
+- Um tag inteiro pode conter vários desenhos: só vai inteiro ao GS se não troca alvo nem textura no caminho. Foi isso que deixou
+  a tela preta com números ótimos: confira sempre o print, não só a tabela.
+- Turnip: R6 e Rutabaga funcionam no RP5 (imagem certa, sem queda da GPU), com e sem o nativo, sem ganho medido. O `v863.1`
+  é da Adreno 863 e não se aplica. Para testar: a pasta do driver em `files/drivers/<id>/` e o id em `files/drivers/selected`.
+- Limites conhecidos: o alfa do FB não é escrito pelo nativo; `As > 128` é limitado; sem despejo do cache de texturas.
 
 ### Áudio (2026-11-01)
 
