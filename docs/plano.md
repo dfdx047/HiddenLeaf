@@ -383,7 +383,7 @@ Depois disso:
   o `PMODE` com MMOD/AMOD (`0x7f67` contra `0x7f07`). Ainda não investigado (suspeita: o parâmetro de modo de saída
   que a libgraph guarda no `sceGsResetGraph`).
 - ~~O vsync é de 60 Hz, mas o jogo é PAL~~: feito no 0027 (50 Hz quando o jogo pede PAL).
-- Os `(null)` dos menus.
+- ~~Os `(null)` dos menus.~~ Resolvido em 2026-11-02 (`0052`): o `va_list` do EE tem slots de 8 bytes, o stub andava de 4 em 4.
 - Áudio: SPU2 do ARMSX2 (ver Decisões).
 - Desempenho do IOP (a IRQ do libsd dispara centenas de milhares de vezes por causa do autoDMA do ADX).
 
