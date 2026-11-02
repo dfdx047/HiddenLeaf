@@ -1,0 +1,28 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index ac56d2d..f5a2733 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -877,16 +877,18 @@ namespace
+         {
+             uint32_t value = 0;
+             (void)tryReadWordFromGuest(m_rdram, m_runtime, m_curr, value);
+-            m_curr += 4;
++            m_curr += 8; // (EE's EABI: every slot is 8 bytes, the game saves its registers with sd. A step of 4 read the upper half of a pointer as an argument, the "(null)" of the dialogs)
+             return value;
+         }
+ 
+         uint64_t nextU64()
+         {
+-            m_curr = (m_curr + 7u) & ~7u;
+-            const uint64_t low = nextU32();
+-            const uint64_t high = nextU32();
+-            return low | (high << 32);
++            uint32_t low = 0;
++            uint32_t high = 0;
++            (void)tryReadWordFromGuest(m_rdram, m_runtime, m_curr, low);
++            (void)tryReadWordFromGuest(m_rdram, m_runtime, m_curr + 4u, high);
++            m_curr += 8;
++            return static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32);
+         }
+ 
+     private:
