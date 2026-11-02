@@ -78,7 +78,7 @@
     <string name="progress_extracting">Extracting… %1$s</string>
     <string name="progress_applying">Applying mods %1$d/%2$d: %3$s</string>
     <string name="textures_title">Textures</string>
-    <string name="textures_sub">HD packs made for PCSX2 work as they are</string>
+    <string name="textures_sub">You can install them, but the game does not use packs yet</string>
     <string name="textures_use">Use texture packs</string>
     <string name="textures_use_text">Turns every pack on or off in the game without deleting anything.</string>
     <string name="textures_empty">No pack installed</string>

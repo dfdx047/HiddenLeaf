@@ -2,12 +2,14 @@ package com.dfdx047.hiddenleaf.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -81,5 +83,8 @@ fun HiddenLeafTheme(
         dark -> LeafDark
         else -> LeafLight
     }
-    MaterialTheme(colorScheme = scheme, typography = LeafTypography, shapes = LeafShapes, content = content)
+    MaterialTheme(colorScheme = scheme, typography = LeafTypography, shapes = LeafShapes) {
+        // Text outside a Surface would be black otherwise, unreadable on the dark background.
+        CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
+    }
 }
