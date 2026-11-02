@@ -294,8 +294,11 @@ class GameActivity : SDLActivity() {
         source and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
             source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
 
+    /** A real push, not the noise of a resting stick, which would hide the on-screen controller by itself on handhelds. */
+    private fun axisPushed(ev: MotionEvent): Boolean = PAD_AXES.any { kotlin.math.abs(ev.getAxisValue(it)) > 0.5f }
+
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
-        if (fromController(ev.source)) padUsed()
+        if (fromController(ev.source) && axisPushed(ev)) padUsed()
         return super.dispatchGenericMotionEvent(ev)
     }
 
@@ -481,3 +484,8 @@ class GameActivity : SDLActivity() {
         return arrayOf(paths.root.path, applicationInfo.nativeLibraryDir, driver?.dir?.path ?: "", driver?.library ?: "", isoArg)
     }
 }
+
+private val PAD_AXES = intArrayOf(
+    MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
+    MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y, MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER,
+)
