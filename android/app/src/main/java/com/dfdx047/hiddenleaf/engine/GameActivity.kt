@@ -9,6 +9,7 @@ import android.os.Process
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -196,6 +197,7 @@ class GameActivity : SDLActivity() {
 
             override fun onEditDone() {
                 view.editing = false
+                panel?.visibility = View.VISIBLE
             }
         }
         layout.addView(view.view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -263,7 +265,10 @@ class GameActivity : SDLActivity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.touch_controls)
             .setView(box)
-            .setPositiveButton(R.string.touch_edit_layout) { _, _ -> view.editing = true }
+            .setPositiveButton(R.string.touch_edit_layout) { _, _ ->
+                view.editing = true
+                panel?.visibility = View.GONE // the editor is under the panel otherwise; it comes back with Done or the back key
+            }
             .setNeutralButton(if (c.mode == TouchMode.OFF) R.string.touch_show_controls else R.string.touch_hide_controls) { _, _ ->
                 c = c.copy(mode = if (c.mode == TouchMode.OFF) TouchMode.AUTO else TouchMode.OFF)
                 view.config = c
@@ -404,7 +409,10 @@ class GameActivity : SDLActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (pad?.editing == true) {
-                if (event.action == KeyEvent.ACTION_UP) pad?.editing = false
+                if (event.action == KeyEvent.ACTION_UP) {
+                    pad?.editing = false
+                    panel?.visibility = View.VISIBLE
+                }
                 return true
             }
             if (event.action == KeyEvent.ACTION_UP) {
