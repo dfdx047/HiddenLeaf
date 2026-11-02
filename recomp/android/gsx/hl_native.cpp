@@ -730,8 +730,8 @@ namespace
 			TO_GS("FBMSK");
 		if ((s_regs[R_PABE] & 1u) || (s_regs[R_FBA + c] & 1u) || (s_regs[R_DTHE] & 1u) || (s_seen[R_COLCLAMP] && !(s_regs[R_COLCLAMP] & 1u)))
 			TO_GS("PABE/FBA/DTHE/COLCLAMP");
-		// (SCANMSK: the Ultimate Jutsu's scenes draw every other line. Their picture is the whole frame here, nothing to mask:
-		// with the mask, the lines left out keep the white flash from before the scene, for the whole scene.)
+		// (SCANMSK: some camera scenes of the fight draw every other line, with the white flash from before them under it.
+		// The native path draws them whole: sent to the GS, the fight turned white with only the HUD on top, 0 native draws.)
 
 		DrawKey k{};
 		k.target = static_cast<uint8_t>(target);

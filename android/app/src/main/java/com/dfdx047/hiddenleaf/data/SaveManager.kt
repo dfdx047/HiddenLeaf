@@ -75,7 +75,7 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
             context.contentResolver.query(
                 children,
-                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE),
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE),
                 null, null, null,
             )?.use { c ->
                 while (c.moveToNext()) {
@@ -84,7 +84,7 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
                     if (c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) {
                         entries += Ps2Card.Entry(prefix + name, null)
                         walk(childId, "$prefix$name/")
-                    } else {
+                    } else if (c.getLong(3) <= MAX_SAVE_FILE) { // (an ISO left in the folder would not fit in memory)
                         val u = DocumentsContract.buildDocumentUriUsingTree(tree, childId)
                         entries += Ps2Card.Entry(prefix + name, context.contentResolver.openInputStream(u)!!.use { it.readBytes() })
                     }
@@ -160,5 +160,6 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
 
     companion object {
         private const val KEEP = 10
+        private const val MAX_SAVE_FILE = 8L * 1024 * 1024 // the size of a whole PS2 card
     }
 }
