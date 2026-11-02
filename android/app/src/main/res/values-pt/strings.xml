@@ -121,7 +121,7 @@
     <string name="screen_filter">Filtro de tela</string>
     <string name="filter_bilinear">Bilinear</string>
     <string name="filter_sharp">Bilinear nítido</string>
-    <string name="screen_filter_hint">FXAA suaviza o serrilhado. FSR e Snapdragon GSR ampliam a imagem com bordas mais nítidas: rendem melhor com resolução interna abaixo da tela (1x a 2x), então também ajudam GPUs mais fracas.</string>
+    <string name="screen_filter_hint">FXAA suaviza o serrilhado. Bilinear nítido deixa textos pequenos mais definidos. CAS dá nitidez à imagem.</string>
     <string name="aspect">Proporção da tela</string>
     <string name="show_fps">Mostrar FPS</string>
     <string name="show_fps_text">Contador de quadros por segundo durante o jogo</string>
@@ -152,7 +152,7 @@
     <string name="fps60_text">O jogo calcula a luta 30 vezes por segundo, como no PS2; com isto são desenhadas imagens intermediárias (interpolação de quadros), para 60 ou 120 por segundo. A luta em si e o online não mudam. Custa cerca do dobro de GPU: para GPUs fortes. Experimental: em cortes de câmera não há imagem intermediária.</string>
     <string name="off">Desligado</string>
     <string name="aspect_screen">Tela</string>
-    <string name="aspect_hint">Tela: a proporção do próprio celular, para a luta ocupar a tela toda. Proporções largas mostram mais do cenário nas laterais (nada é esticado); os menus são feitos para 4:3 e ficam alargados.</string>
+    <string name="aspect_hint">4:3: a imagem do jogo. As proporções largas e Tela mostram mais do cenário nas laterais na luta e na campanha, com o HUD sem esticar; menus e filmes ficam em 4:3. Em tela até 4:3 nada muda.</string>
     <string name="present_mode">Present mode</string>
     <string name="present_auto">Automático</string>
     <string name="present_mode_text">Como as imagens prontas chegam à tela. Automático: Mailbox onde o aparelho tiver. FIFO (VSync) espera a atualização da tela: sem tearing, um pouco mais de latência, ritmo mais estável em alguns aparelhos. Mailbox: sem tearing, sem espera. Immediate: menor latência, pode ter tearing. Vale na próxima vez que o jogo abrir.</string>
@@ -439,4 +439,27 @@
     <string name="touch_edit_all">Todos · %1$d%% | arraste: mover · toque: selecionar</string>
     <string name="touch_edit_one">%1$s · %2$d%% | arraste: mover</string>
     <string name="touch_style_ink">Tinta</string>
+    <string name="panel_title">Jogo pausado</string>
+    <string name="panel_resume">Continuar</string>
+    <string name="panel_quit">Sair do jogo</string>
+    <string name="panel_widescreen">Widescreen</string>
+    <string name="panel_full_screen">Tela cheia</string>
+    <string name="panel_fps_limit">Limite de fps</string>
+    <string name="panel_fps_50">50 (nativo)</string>
+    <string name="panel_fps_60">60 (interpolado)</string>
+    <string name="panel_fps_120">120 (interpolado)</string>
+    <string name="panel_fps_hint">O jogo calcula 25 imagens por segundo (PAL). 60 e 120 são desenhados no meio delas, na luta e na campanha; os menus ficam na taxa do jogo. Rodar a lógica mais rápido muda a velocidade do jogo, por isso não existe 60 real.</string>
+    <string name="panel_counter">Contador</string>
+    <string name="panel_counter_ms">FPS + ms</string>
+    <string name="panel_counter_full">Detalhado</string>
+    <string name="panel_save_hint">As opções são salvas ao escolher. O jogo salva no memory card pelos menus dele.</string>
+    <string name="saves_title">Memory card</string>
+    <string name="saves_empty">Ainda não há saves no cartão.</string>
+    <string name="saves_done">Pronto: %d.</string>
+    <string name="saves_failed">Não deu certo: %s</string>
+    <string name="saves_import_file">Importar cartão ou zip</string>
+    <string name="saves_import_folder">Importar pasta</string>
+    <string name="saves_export_file">Exportar .ps2</string>
+    <string name="saves_export_folder">Exportar pasta</string>
+    <string name="saves_backup_hint">Antes de cada importação o cartão vai para saves_backups, em zip (os 10 últimos). Backups agora: %1$d. O save que entra substitui o de mesmo nome; os outros ficam.</string>
 </resources>

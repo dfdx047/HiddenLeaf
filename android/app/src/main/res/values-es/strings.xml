@@ -121,7 +121,7 @@
     <string name="screen_filter">Filtro de pantalla</string>
     <string name="filter_bilinear">Bilineal</string>
     <string name="filter_sharp">Bilineal nítido</string>
-    <string name="screen_filter_hint">FXAA suaviza los bordes dentados. FSR y Snapdragon GSR escalan la imagen con bordes más nítidos: rinden mejor con una resolución interna menor que la de la pantalla (1x a 2x), así que también ayudan a las GPUs más débiles.</string>
+    <string name="screen_filter_hint">FXAA suaviza los bordes dentados. Bilinear nítido deja los textos pequeños más definidos. CAS da nitidez a la imagen.</string>
     <string name="aspect">Relación de aspecto</string>
     <string name="show_fps">Mostrar FPS</string>
     <string name="show_fps_text">Contador de cuadros por segundo mientras juegas</string>
@@ -152,7 +152,7 @@
     <string name="fps60_text">El juego calcula la pelea 30 veces por segundo, como en PS2; con esto se dibujan imágenes intermedias (interpolación de cuadros), para 60 o 120 por segundo. La pelea en sí y el juego en línea no cambian. Cuesta cerca del doble de trabajo de GPU: para GPUs potentes. Experimental: en los cortes de cámara no hay imagen intermedia.</string>
     <string name="off">Desactivado</string>
     <string name="aspect_screen">Pantalla</string>
-    <string name="aspect_hint">Pantalla: la forma del propio celular, para que la pelea la llene. Las proporciones anchas muestran más del escenario a los lados (nada se estira); los menús están hechos para 4:3 y se ensanchan.</string>
+    <string name="aspect_hint">4:3: la imagen del juego. Las proporciones anchas y Pantalla muestran más del escenario a los lados en combate y en la campaña, con el HUD sin estirar; los menús y películas siguen en 4:3. En una pantalla de hasta 4:3 nada cambia.</string>
     <string name="present_mode">Modo de presentación</string>
     <string name="present_auto">Automático</string>
     <string name="present_mode_text">Cómo llegan las imágenes terminadas a la pantalla. Automático: Mailbox donde el dispositivo lo tenga. FIFO (VSync) espera la actualización de la pantalla: sin tearing, un poco más de latencia, ritmo más estable en algunos dispositivos. Mailbox: sin tearing, sin espera. Immediate: la menor latencia, puede haber tearing. Se aplica la próxima vez que se inicie el juego.</string>
@@ -439,4 +439,27 @@
     <string name="touch_edit_all">Todos · %1$d%% | arrastra: mover · toca: elegir</string>
     <string name="touch_edit_one">%1$s · %2$d%% | arrastra: mover</string>
     <string name="touch_style_ink">Tinta</string>
+    <string name="panel_title">Juego en pausa</string>
+    <string name="panel_resume">Continuar</string>
+    <string name="panel_quit">Salir del juego</string>
+    <string name="panel_widescreen">Pantalla ancha</string>
+    <string name="panel_full_screen">Pantalla completa</string>
+    <string name="panel_fps_limit">Límite de fps</string>
+    <string name="panel_fps_50">50 (nativo)</string>
+    <string name="panel_fps_60">60 (interpolado)</string>
+    <string name="panel_fps_120">120 (interpolado)</string>
+    <string name="panel_fps_hint">El juego calcula 25 imágenes por segundo (PAL). 60 y 120 se dibujan entre ellas, en combate y en la campaña; los menús siguen a la tasa del juego. Ejecutar la lógica más rápido cambia la velocidad del juego, por eso no hay 60 real.</string>
+    <string name="panel_counter">Contador</string>
+    <string name="panel_counter_ms">FPS + ms</string>
+    <string name="panel_counter_full">Detallado</string>
+    <string name="panel_save_hint">Las opciones se guardan al elegirlas. El juego guarda en la memory card desde sus menús.</string>
+    <string name="saves_title">Memory card</string>
+    <string name="saves_empty">Aún no hay partidas en la tarjeta.</string>
+    <string name="saves_done">Listo: %d.</string>
+    <string name="saves_failed">No funcionó: %s</string>
+    <string name="saves_import_file">Importar tarjeta o zip</string>
+    <string name="saves_import_folder">Importar carpeta</string>
+    <string name="saves_export_file">Exportar .ps2</string>
+    <string name="saves_export_folder">Exportar carpeta</string>
+    <string name="saves_backup_hint">Antes de cada importación la tarjeta va a saves_backups, en zip (las 10 últimas). Copias ahora: %1$d. La partida que entra sustituye a la del mismo nombre; las demás se quedan.</string>
 </resources>

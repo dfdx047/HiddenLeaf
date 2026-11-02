@@ -88,7 +88,7 @@ fun SettingsScreen(vm: AppViewModel) {
             ChipRow(
                 options = listOf(
                     stringResource(R.string.filter_bilinear) to 0, stringResource(R.string.filter_sharp) to 1, "FXAA" to 2,
-                    "AMD FSR 1" to 3, "Snapdragon GSR" to 4,
+                    "CAS" to 3,
                 ),
                 selected = get(EngineSettings.FILTER, 0),
                 onSelect = { vm.setting(EngineSettings.FILTER, it) },
@@ -100,8 +100,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text(stringResource(R.string.aspect), style = MaterialTheme.typography.titleSmall)
             ChipRow(
                 options = listOf(
-                    stringResource(R.string.aspect_screen) to 0, "4:3" to 1333, "16:10" to 1600, "16:9" to 1778, "20:9" to 2222,
-                    "21:9" to 2389, "32:9" to 3556,
+                    "4:3" to 1333, "16:10" to 1600, "16:9" to 1778, "20:9" to 2222, stringResource(R.string.aspect_screen) to 0,
                 ),
                 selected = get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT),
                 onSelect = { vm.setting(EngineSettings.ASPECT, it) },
@@ -235,6 +234,8 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
         }
+
+        SavesCard(vm)
 
         SectionCard(stringResource(R.string.about), Icons.Rounded.Info, accent = MaterialTheme.colorScheme.outline) {
             Text("Hidden Leaf ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleSmall)
