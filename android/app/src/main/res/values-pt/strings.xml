@@ -105,7 +105,7 @@
     <string name="cheats_title">Cheats</string>
     <string name="cheats_sub">Os desejos do Shenlong</string>
     <string name="unlock_all">Desbloquear tudo</string>
-    <string name="unlock_all_text">Todos os personagens, estágios, músicas e itens, e o máximo de Zeni. É a função de debug que os desenvolvedores deixaram no jogo, a mesma do port de PC.</string>
+    <string name="unlock_all_text">Todos os personagens e ligações abertos na luta livre. Salvar no jogo grava isso no memory card, e fica mesmo depois de desligar esta opção.</string>
     <string name="unlock_pending">Será aplicado na próxima vez que o jogo abrir</string>
     <string name="unlock_apply">Aplicar ao abrir o jogo</string>
     <string name="how_it_works">Como funciona</string>

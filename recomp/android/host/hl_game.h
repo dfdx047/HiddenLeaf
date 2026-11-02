@@ -12,5 +12,6 @@ namespace hl_game
     int divider();                             // vsyncs a game frame takes (the game's own: 2)
 
     int scene();                               // what the game shows: 0 unknown, 1 menu, 2 fight, 3 campaign
+    extern std::atomic<bool> g_unlockAll;      // the launcher's "unlock everything"
     int overlay();                             // the mode's code in memory: 0 none yet, 1 BTL (fight), 2 ADV (campaign), 3 other
 }

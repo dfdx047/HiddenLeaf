@@ -106,7 +106,7 @@
     <string name="cheats_title">Cheats</string>
     <string name="cheats_sub">Shenron\'s wishes</string>
     <string name="unlock_all">Unlock everything</string>
-    <string name="unlock_all_text">Every character, stage, song and item, and maximum Zeni. It is the debug function the developers left in the game, the same one as in the PC port.</string>
+    <string name="unlock_all_text">All characters and links open in Free Battle. Saving in the game writes this to the memory card, and it stays even after switching this off.</string>
     <string name="unlock_pending">Will be applied the next time the game starts</string>
     <string name="unlock_apply">Apply when the game starts</string>
     <string name="how_it_works">How it works</string>

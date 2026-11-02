@@ -17,12 +17,15 @@ namespace hl_game
 {
     std::atomic<int> g_paused{0};
     std::atomic<float> g_cameraXScale{1.0f};
+    std::atomic<bool> g_unlockAll{false};
     bool (*g_nativeOn)() = nullptr;
 }
 
 namespace
 {
     constexpr uint32_t kOverlayBase = 0x6C6D00u;   // where BTL.BIN, ADV.BIN and ETC.BIN are loaded
+    constexpr uint32_t kSavePointer = 0x617CF8u;
+    constexpr uint32_t kSaveMatrix = 0x38u, kSaveMatrixBytes = 0x900u, kSaveRoster = 0x940u, kSaveRosterEnd = 0x966u;
     constexpr uint32_t kGfxPointer = 0x617AFCu;    // gp-0x3F4: the graphics state; byte 0 counts vsyncs, byte 1 is how many a frame waits for (0x108510)
     constexpr uint32_t kCameraMatrices = 0x10DD00u; // builds a camera's matrices from its fields; +0x274 is the horizontal scale
     constexpr uint32_t kCameraXScale = 0x274u;     // (the same field the community's widescreen patch writes)
@@ -49,6 +52,22 @@ namespace
         g_cameraOriginal(rdram, ctx, runtime);
     }
 
+    // The launcher's "unlock everything": the game's save state in memory (what it writes to data01..04, the pointer is at
+    // 0x617CF8). +0x38: 96 rows of 96 pairs of bits, 3 = the character / the link is open (the first pair, a character
+    // with itself, is 3 once the structure is filled in); +0x940: 38 bytes, 3 = open. Rewritten every second, since loading
+    // a save brings the old values back; the game itself writes them to the card the next time the player saves.
+    void unlockEverything()
+    {
+        const uint32_t save = read32(kSavePointer);
+        if (save < 0x100000u || save > 0x1F00000u)
+            return;
+        uint8_t *const state = g_rdram + save;
+        if ((state[kSaveMatrix] & 3u) != 3u)
+            return;
+        std::memset(state + kSaveMatrix, 0xFF, kSaveMatrixBytes);
+        std::memset(state + kSaveRoster, 3, kSaveRosterEnd - kSaveRoster);
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_rdram == nullptr)
@@ -62,6 +81,8 @@ namespace
             if (const char *w = std::getenv("HL_CAM_X"))
                 hl_game::g_cameraXScale = static_cast<float>(std::atof(w));
         }
+        if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
+            unlockEverything();
         const uint32_t gfx = read32(kGfxPointer);
         if (gfx != 0u)
         {

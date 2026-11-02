@@ -1,0 +1,46 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 40ed7e2..67f4de3 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -863,6 +863,8 @@ namespace ps2_stubs
+         const uint32_t typePtr = getRegU32(ctx, 6);
+         const uint32_t freePtr = getRegU32(ctx, 7);
+         const uint32_t formatPtr = getRegU32(ctx, 8);
++        if (std::getenv("HL_MC_LOG"))
++            std::fprintf(stderr, "[mc] getinfo %d/%d\n", port, slot);
+ 
+         int32_t cardType = 0;
+         int32_t freeBlocks = 0;
+@@ -986,6 +988,8 @@ namespace ps2_stubs
+         const int32_t slot = static_cast<int32_t>(getRegU32(ctx, 5));
+         const std::string path = readPs2CStringBounded(rdram, getRegU32(ctx, 6), kMcMaxPathLen);
+         const uint32_t flags = getRegU32(ctx, 7);
++        if (std::getenv("HL_MC_LOG"))
++            std::fprintf(stderr, "[mc] open %d/%d '%s' flags 0x%x\n", port, slot, path.c_str(), flags);
+ 
+         int32_t result = kMcResultNoEntry;
+         {
+@@ -1214,6 +1218,8 @@ namespace ps2_stubs
+         }
+ 
+         RUNTIME_LOG("[MC] Sync cmd=" << cmd << " result=" << result);
++        if (std::getenv("HL_MC_LOG"))
++            std::fprintf(stderr, "[mc] sync cmd %d result %d\n", cmd, result);
+ 
+         if (cmdPtr != 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index a2bee88..b402cc4 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -45,7 +45,9 @@ namespace
+     void snapshot(const GSRegisters &r)
+     {
+         put(0x0000u, r.pmode);
+-        put(0x0010u, r.smode1 ? r.smode1 : 0x0000000740834504ull); // the PAL value, when the CRTC was never programmed
++        // The BIOS programs this one (SetGsCrt), so it stays 0 here. It has to say PAL (CMOD 3): the game's picture is 512 lines
++        // (it stretches its 448 into the display buffer), and in NTSC's window of 448 the GS cuts the bottom 64 off.
++        put(0x0010u, r.smode1 ? r.smode1 : 0x0000000740836504ull);
+         put(0x0020u, r.smode2);
+         put(0x0030u, r.srfsh);
+         put(0x0040u, r.synch1);

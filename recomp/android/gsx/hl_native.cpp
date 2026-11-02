@@ -730,8 +730,8 @@ namespace
 			TO_GS("FBMSK");
 		if ((s_regs[R_PABE] & 1u) || (s_regs[R_FBA + c] & 1u) || (s_regs[R_DTHE] & 1u) || (s_seen[R_COLCLAMP] && !(s_regs[R_COLCLAMP] & 1u)))
 			TO_GS("PABE/FBA/DTHE/COLCLAMP");
-		if ((s_regs[R_SCANMSK] & 3u) >= 2u)
-			TO_GS("SCANMSK");
+		// (SCANMSK: the Ultimate Jutsu's scenes draw every other line. Their picture is the whole frame here, nothing to mask:
+		// with the mask, the lines left out keep the white flash from before the scene, for the whole scene.)
 
 		DrawKey k{};
 		k.target = static_cast<uint8_t>(target);

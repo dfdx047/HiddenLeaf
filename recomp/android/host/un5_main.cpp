@@ -142,6 +142,8 @@ namespace
                 g_settings.aspectMilli = v;
             else if (!std::strcmp(line, "fps_mode"))
                 g_settings.fpsMode = v;
+            else if (!std::strcmp(line, "dr_unlock_all"))
+                hl_game::g_unlockAll = v != 0;
         }
         std::fclose(fp);
     }

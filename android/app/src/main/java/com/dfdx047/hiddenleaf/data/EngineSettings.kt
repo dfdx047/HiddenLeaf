@@ -67,7 +67,7 @@ class EngineSettings(private val file: File) {
         const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60 or 120 (those two interpolated)
 
         // the launcher's own, read by the Android glue of the engine at start
-        const val UNLOCK_ALL = "dr_unlock_all"    // 1: run Save_UnlockAll once on the next start, then 0
+        const val UNLOCK_ALL = "dr_unlock_all"    // 1: all characters and links open (written to the card when the player saves)
         const val FPS60 = "dr_fps60"              // reserved for the 60 fps mode
         const val INTERP = "interp"               // smooth motion: 0 off, 1 60, 2 120, 3 240 pictures a second (the engine's)
         const val PRESENT = "present"             // present mode: 0 automatic, 1 vsync (FIFO), 2 mailbox, 3 immediate

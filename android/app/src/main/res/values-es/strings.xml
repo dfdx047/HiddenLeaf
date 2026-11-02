@@ -105,7 +105,7 @@
     <string name="cheats_title">Trucos</string>
     <string name="cheats_sub">Los deseos de Shenlong</string>
     <string name="unlock_all">Desbloquear todo</string>
-    <string name="unlock_all_text">Todos los personajes, escenarios, canciones y objetos, y el máximo de Zeni. Es la función de depuración que los desarrolladores dejaron en el juego, la misma que en el port de PC.</string>
+    <string name="unlock_all_text">Todos los personajes y enlaces abiertos en combate libre. Guardar en el juego lo escribe en la memory card y permanece aunque se apague esta opción.</string>
     <string name="unlock_pending">Se aplicará la próxima vez que se inicie el juego</string>
     <string name="unlock_apply">Aplicar al iniciar el juego</string>
     <string name="how_it_works">Cómo funciona</string>

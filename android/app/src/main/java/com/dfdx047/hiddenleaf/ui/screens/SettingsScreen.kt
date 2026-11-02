@@ -122,6 +122,9 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.orientation_text),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.unlock_all_text), get(EngineSettings.UNLOCK_ALL, 0) != 0) {
+                vm.setting(EngineSettings.UNLOCK_ALL, if (it) 1 else 0)
+            }
             ToggleRow(stringResource(R.string.prompt_buttons), stringResource(R.string.prompt_buttons_text), get(EngineSettings.PROMPT, 1) != 0) {
                 vm.setting(EngineSettings.PROMPT, if (it) 1 else 0)
             }
@@ -189,14 +192,17 @@ fun SettingsScreen(vm: AppViewModel) {
             ToggleRow(stringResource(R.string.frame_skip), stringResource(R.string.frame_skip_text), get(EngineSettings.FRAME_SKIP, 1) != 0) {
                 vm.setting(EngineSettings.FRAME_SKIP, if (it) 1 else 0)
             }
-            Text(stringResource(R.string.fps60), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.panel_fps_limit), style = MaterialTheme.typography.titleSmall)
             ChipRow(
-                options = listOf(stringResource(R.string.off) to 0, "60" to 1, "120" to 2),
-                selected = get(EngineSettings.INTERP, 0).coerceIn(0, 2),
-                onSelect = { vm.setting(EngineSettings.INTERP, it) },
+                options = listOf(
+                    "30" to 30, stringResource(R.string.panel_fps_50) to 50,
+                    stringResource(R.string.panel_fps_60) to 60, stringResource(R.string.panel_fps_120) to 120,
+                ),
+                selected = get(EngineSettings.FPS_MODE, 50),
+                onSelect = { vm.setting(EngineSettings.FPS_MODE, it) },
             )
             Text(
-                stringResource(R.string.fps60_text),
+                stringResource(R.string.panel_fps_hint),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(stringResource(R.string.present_mode), style = MaterialTheme.typography.titleSmall)
