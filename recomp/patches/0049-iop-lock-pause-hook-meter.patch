@@ -1,0 +1,307 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index 22d898c..a846cec 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -683,18 +683,28 @@ namespace ps2x::iop::detail
+                 thread.state = IopThreadState::Ready;
+         }
+ 
++        // Hidden Leaf: the IOP's kernel has no time slice: a thread keeps the CPU against ready threads of the same priority,
++        // and with interrupts suspended (CpuSuspendIntr, the drivers' only lock) nothing takes it away. Switching at every slice
++        // let a thread of CRI's ADX driver run in the middle of another of the same priority and clear the object it was
++        // using: a call through a null pointer, and that thread spun in the zeros at the bottom of memory from then on.
+         IopThread *next = nullptr;
+         for (auto &[id, thread] : m_threads)
+         {
+             if (thread.state != IopThreadState::Ready)
+                 continue;
++            if (id == m_lastThreadId && m_memory.interruptControl() == 0u)
++            {
++                next = &thread;
++                break;
++            }
+             if (next == nullptr || thread.priority < next->priority ||
+-                (thread.priority == next->priority && thread.id < next->id))
++                (thread.priority == next->priority && id == m_lastThreadId))
+                 next = &thread;
+         }
+         if (next == nullptr)
+             return nullptr;
+ 
++        m_lastThreadId = next->id;
+         m_currentThread = next;
+         next->state = IopThreadState::Running;
+         next->cpu.stopped = false;
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index dd050f2..831126d 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -103,5 +103,6 @@ namespace ps2x::iop::detail
+         uint32_t m_nextSemaphoreId = 1;
+         uint32_t m_nextEventFlagId = 1;
+         IopThread *m_currentThread = nullptr;
++        int m_lastThreadId = -1;
+     };
+ }
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 46ba785..f51377f 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -652,11 +652,14 @@ namespace ps2x::iop::detail
+                 const uint64_t target = totalCycles + cycles;
+                 while (totalCycles < target)
+                 {
+-                    if (g_spu2)
+-                        serviceSpu2();
+-                    servicePendingDmaInterrupts();
+-                    servicePendingGuestCallbacks();
+-                    timrman.serviceDue(totalCycles, *this);
++                    if (memory.interruptControl() != 0u) // (CpuSuspendIntr: no interrupt until it ends)
++                    {
++                        if (g_spu2)
++                            serviceSpu2();
++                        servicePendingDmaInterrupts();
++                        servicePendingGuestCallbacks();
++                        timrman.serviceDue(totalCycles, *this);
++                    }
+                     IopThread *next = kernel.beginNextReady(totalCycles);
+                     if (!next)
+                     {
+@@ -953,7 +956,7 @@ namespace ps2x::iop::detail
+             std::ostringstream row;
+             const auto state = static_cast<size_t>(t.state);
+             row << "[IOP] thread " << id << " " << (state < 9 ? kStates[state] : "?") << std::hex << " entry=0x" << t.entry
+-                << " pc=0x" << t.cpu.pc << " ra=0x" << t.cpu.gpr[31] << std::dec << " wait=" << t.waitId << " prio=" << t.priority;
++                << " pc=0x" << t.cpu.pc << " ra=0x" << t.cpu.gpr[31] << " sp=0x" << t.cpu.gpr[29] << " s0=0x" << t.cpu.gpr[16] << " s1=0x" << t.cpu.gpr[17] << " a0=0x" << t.cpu.gpr[4] << " v0=0x" << t.cpu.gpr[2] << std::dec << " wait=" << t.waitId << " prio=" << t.priority;
+             rows.push_back(row.str());
+         }
+         return rows;
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index e9b254c..2f4b095 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -558,5 +558,7 @@ extern PS2Runtime::RecompiledFunction g_ps2RecompiledFunctionTable[];
+ // outside the generated table, from what is in guest memory now. Returns nullptr when there is none.
+ using PS2OverlayResolver = PS2Runtime::RecompiledFunction (*)(PS2Runtime *runtime, uint32_t address);
+ extern PS2OverlayResolver g_ps2OverlayResolver;
++// Hidden Leaf: called at each vblank, on the EE's thread (the host's per-game code; may block to pause the game)
++extern void (*g_hlVsyncHook)(PS2Runtime *runtime, uint64_t tick);
+ 
+ #endif // PS2_RUNTIME_H
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 3731abe..839750f 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1478,6 +1478,8 @@ void EeScheduler::setVideoMode(uint32_t mode)
+     const bool pal = mode == 3u;
+     m_vblankPeriodCycles = pal ? microsecondsToEeCycles(20000u) : kVBlankPeriodCycles;
+     m_vblankPeriod = pal ? std::chrono::microseconds(20000) : kVBlankPeriod;
++    if (const char *us = std::getenv("HL_VBLANK_US")) // (the vblank's period, to try the game at another rate)
++        m_vblankPeriod = std::chrono::microseconds(std::atoi(us));
+     if (s_palVideo.exchange(pal) != pal)
+     {
+         std::cerr << "[gs-crt] video mode " << mode << ": vblank at " << (pal ? "50" : "60") << " Hz" << std::endl;
+@@ -2064,6 +2066,8 @@ void EeScheduler::processEvent(const EeEvent &event)
+     case EeEventType::VBlankStart:
+         ++m_vsyncTick;
+         hl_perf::onVsync(m_vsyncTick);
++        if (g_hlVsyncHook)
++            g_hlVsyncHook(&m_runtime, m_vsyncTick);
+         if (m_vsyncTick % 300u == 0u)
+         {
+             hl_float_report(m_vsyncTick);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 677978e..83e481a 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -5,6 +5,7 @@
+ #include <chrono>
+ #include <cstdio>
+ #include <deque>
++#include <filesystem>
+ #include <fstream>
+ #include <string>
+ 
+@@ -238,11 +239,36 @@ namespace ps2_stubs
+             return presses;
+         }
+ 
++        void hl_dumpMemory(PS2Runtime *runtime, uint64_t tick)
++        {
++            std::filesystem::create_directories("hl_frames");
++            const std::string stamp = std::to_string(tick);
++            std::ofstream("hl_frames/ram_" + stamp + ".bin", std::ios::binary).write(reinterpret_cast<const char *>(runtime->memory().getRDRAM()), PS2_RAM_SIZE);
++            std::ofstream("hl_frames/vu1_" + stamp + ".bin", std::ios::binary).write(reinterpret_cast<const char *>(runtime->memory().getVU1Data()), 16384);
++            std::vector<char> iop(2u * 1024u * 1024u);
++            if (runtime->readIopMemory(0u, iop.data(), iop.size()))
++                std::ofstream("hl_frames/iop_" + stamp + ".bin", std::ios::binary).write(iop.data(), static_cast<std::streamsize>(iop.size()));
++            std::cerr << "[hl_ram] hl_frames/ram_" << stamp << ".bin" << std::endl;
++        }
++
++        void hl_dumpIop(PS2Runtime *runtime)
++        {
++            for (const std::string &row : runtime->iopDebugSnapshot().diagnostics)
++                std::cerr << row << std::endl;
++        }
++
+         // Hidden Leaf: a file named hl_pad in the working directory ("UP UP CROSS") is read and removed; each button is
+         // then held for 6 vsyncs and released for 6, so menus can be driven while the game runs
+         void applyPadFile(PadInputState &state, PS2Runtime *runtime)
+         {
+-            static std::deque<uint16_t> queue;
++            // (a word can be held longer, "UP*100", and the left stick has words too: LUP LDOWN LLEFT LRIGHT)
++            struct PadStep
++            {
++                uint16_t mask;
++                uint8_t stick; // 0 none, 1 up, 2 down, 3 left, 4 right
++                uint32_t hold;
++            };
++            static std::deque<PadStep> queue;
+             static uint64_t phaseStart = 0u;
+             static bool holding = false;
+             if (runtime == nullptr)
+@@ -288,10 +314,32 @@ namespace ps2_stubs
+                             {"R2", kPadBtnR2}, {"L1", kPadBtnL1}, {"R1", kPadBtnR1}, {"TRIANGLE", kPadBtnTriangle},
+                             {"CIRCLE", kPadBtnCircle}, {"CROSS", kPadBtnCross}, {"SQUARE", kPadBtnSquare},
+                             {"WAIT", 0u}};
++                        if (word == "RAM")
++                        {   // (the game's memory now, hl_frames/ram_<tick>.bin; the VU1's and the GS's next to it)
++                            hl_dumpMemory(runtime, tick);
++                            continue;
++                        }
++                        if (word == "IOP")
++                        {
++                            hl_dumpIop(runtime);
++                            continue;
++                        }
++                        uint32_t hold = 6u;
++                        const size_t star = word.find('*');
++                        if (star != std::string::npos)
++                        {
++                            hold = static_cast<uint32_t>(std::strtoul(word.c_str() + star + 1, nullptr, 10));
++                            word.resize(star);
++                        }
++                        const uint8_t stick = word == "LUP" ? 1u : word == "LDOWN" ? 2u : word == "LLEFT" ? 3u : word == "LRIGHT" ? 4u : 0u;
+                         const auto it = names.find(word);
+-                        if (it != names.end())
++                        if (stick != 0u)
+                         {
+-                            queue.push_back(it->second);
++                            queue.push_back({0u, stick, hold});
++                        }
++                        else if (it != names.end())
++                        {
++                            queue.push_back({it->second, 0u, hold});
+                         }
+                     }
+                     file.close();
+@@ -308,7 +356,7 @@ namespace ps2_stubs
+                 phaseStart = tick;
+                 holding = true;
+             }
+-            if (holding && tick - phaseStart >= 6u)
++            if (holding && tick - phaseStart >= queue.front().hold)
+             {
+                 holding = false;
+                 phaseStart = tick;
+@@ -323,9 +371,15 @@ namespace ps2_stubs
+                     return;
+                 }
+             }
+-            if (holding && queue.front() != 0u)
++            if (holding && queue.front().mask != 0u)
++            {
++                setButton(state, queue.front().mask, true);
++            }
++            if (holding && queue.front().stick != 0u)
+             {
+-                setButton(state, queue.front(), true);
++                const uint8_t st = queue.front().stick;
++                state.lx = st == 3u ? 0u : st == 4u ? 255u : 128u;
++                state.ly = st == 1u ? 0u : st == 2u ? 255u : 128u;
+             }
+         }
+ 
+diff --git a/ps2xRuntime/src/lib/hl_perf.cpp b/ps2xRuntime/src/lib/hl_perf.cpp
+index 3b4f8e5..1e3a363 100644
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -192,6 +192,8 @@ namespace hl_perf
+ 
+         std::mutex s_lineMutex;
+         std::string s_line;
++        bool s_quiet = false;
++        float s_worstFrameMs = 0.0f;
+ 
+         Window s_second, s_measure;
+         uint64_t s_gsLast = 0;
+@@ -245,8 +247,10 @@ namespace hl_perf
+ 
+     void startOnGameThread()
+     {
+-        if (!std::getenv("HL_PERF"))
++        // (HL_METER: the in-game counter, without the log's lines)
++        if (!std::getenv("HL_PERF") && !std::getenv("HL_METER"))
+             return;
++        s_quiet = !std::getenv("HL_PERF");
+         t_game = true;
+         s_last = s_secondStart = s_lastVsync = now();
+         if (const char *from = std::getenv("HL_PERF_FROM"))
+@@ -276,6 +280,7 @@ namespace hl_perf
+         const float frameMs = static_cast<float>(static_cast<double>(t - s_lastVsync) / tpm);
+         s_lastVsync = t;
+         ++s_second.frames;
++        s_worstFrameMs = std::max(s_worstFrameMs, frameMs);
+ 
+         if (s_phase == Phase::Waiting && tick >= s_from)
+         {
+@@ -346,9 +351,13 @@ namespace hl_perf
+         const std::string text = describe(s_second, fps, tpm);
+         {
+             std::lock_guard<std::mutex> lock(s_lineMutex);
+-            s_line = text;
++            char worst[32];
++            std::snprintf(worst, sizeof(worst), " | worst %.1f ms", static_cast<double>(s_worstFrameMs));
++            s_line = text + worst;
+         }
+-        std::fprintf(stderr, "[perf] v%u %s\n", tick, text.c_str());
++        s_worstFrameMs = 0.0f;
++        if (!s_quiet)
++            std::fprintf(stderr, "[perf] v%u %s\n", tick, text.c_str());
+         s_second = {};
+         s_secondStart = t;
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index b8e74eb..642a08f 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1251,6 +1251,7 @@ bool PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
+ 
+ // Code the game loads at run time (overlays): asked when the generated table has no function for a PC.
+ PS2OverlayResolver g_ps2OverlayResolver = nullptr;
++void (*g_hlVsyncHook)(PS2Runtime *, uint64_t) = nullptr;
+ 
+ bool PS2Runtime::hasFunction(uint32_t address) const
+ {
+@@ -1477,6 +1478,13 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
+             std::lock_guard<std::mutex> lock(s_missingFunctionLogMutex);
+             std::cerr << oss.str() << std::endl;
+         }
++        // Hidden Leaf: the guest's memory at the moment it lost its way (HL_MISS_DUMP=1), hl_frames/ram_miss.bin
++        if (std::getenv("HL_MISS_DUMP") && rdram)
++        {
++            std::filesystem::create_directories("hl_frames");
++            std::ofstream("hl_frames/ram_miss.bin", std::ios::binary).write(reinterpret_cast<const char *>(rdram), PS2_RAM_SIZE);
++            std::cerr << "[hl_ram] hl_frames/ram_miss.bin" << std::endl;
++        }
+     }
+ 
+     if (firstReport && policy == MissingFunctionPolicy::BreakOnce)
+@@ -1508,6 +1516,7 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+     ctx->pc = targetPc;
+     const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
+ 
++
+     // Every inter-function transfer is also a deterministic EE safe point.
+     // Backward edges inside generated functions use eeCheckpointDue(), while
+     // this charge bounds straight-line call chains that have no local loop.

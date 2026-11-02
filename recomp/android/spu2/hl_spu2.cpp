@@ -338,3 +338,14 @@ void hl_spu2_install()
     if (!s_stream)
         std::fprintf(stderr, "[spu2] no audio stream: %s\n", SDL_GetError());
 }
+
+// The panel's pause: the queued sound stays where it is.
+void hl_spu2_pause(bool paused)
+{
+    if (!s_stream || !s_playing)
+        return;
+    if (paused)
+        SDL_PauseAudioStreamDevice(s_stream);
+    else
+        SDL_ResumeAudioStreamDevice(s_stream);
+}

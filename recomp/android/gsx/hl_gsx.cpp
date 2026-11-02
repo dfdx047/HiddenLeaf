@@ -14,6 +14,8 @@
 // bt4_main.cpp loads this library with dlopen and calls Bt4Gsx_Run on a thread of its own; the pad, the menu and
 // the window's events stay with bt4_main.cpp.
 #include "common/WindowInfo.h"
+#include "pcsx2/Config.h"
+#include "pcsx2/GS/GS.h"
 #include "pcsx2/GSDumpReplayer.h"
 #include "pcsx2/Host.h"
 #include "pcsx2/MTGS.h"
@@ -147,6 +149,60 @@ namespace
 		return true;
 	}
 
+	// ---- what the panel changes while the game runs
+	struct Video
+	{
+		float upscale;
+		int filter;     // 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
+		float aspect;
+		float hudScale;
+		int fpsMode;
+	};
+	std::mutex s_videoLock;
+	Video s_videoNext{};
+	bool s_videoPending = false, s_videoFirst = true;
+	int s_fpsMode = 50;
+
+	void applyVideoIfAsked()
+	{
+		Video v;
+		{
+			std::lock_guard<std::mutex> lock(s_videoLock);
+			if (!s_videoPending)
+				return;
+			s_videoPending = false;
+			v = s_videoNext;
+		}
+		s_fpsMode = v.fpsMode;
+		hl_native::setShape(v.aspect, v.hudScale);
+		if (s_videoFirst)
+		{ // (the first one is what the .ini already says)
+			s_videoFirst = false;
+			return;
+		}
+		MTGS::RunOnGSThread([v]() {
+			Pcsx2Config::GSOptions c(GSConfig);
+			c.UpscaleMultiplier = v.upscale;
+			c.FXAA = v.filter == 2;
+			c.CASMode = v.filter == 3 ? GSCASMode::SharpenOnly : GSCASMode::Disabled;
+			c.LinearPresent = v.filter == 1 ? GSPostBilinearMode::BilinearSharp : GSPostBilinearMode::BilinearSmooth;
+			GSUpdateConfig(c);
+		});
+	}
+
+	// A vsync that the limit leaves out: nothing is presented for it. (fps_mode 30: the game's 25 pictures a second, each once.)
+	bool skipPresent()
+	{
+		if (s_fpsMode != 30)
+			return false;
+		static auto s_last = std::chrono::steady_clock::now();
+		const auto now = std::chrono::steady_clock::now();
+		if (now - s_last < std::chrono::microseconds(33000))
+			return true;
+		s_last = now;
+		return false;
+	}
+
 	struct LivePacketHeld
 	{
 		bool valid = false;
@@ -162,6 +218,7 @@ namespace
 		{
 			if (s_stop || s_ring->consumerQuit)
 				return false;
+			applyVideoIfAsked();
 			// what the native renderer sends on, then the packet that had to wait for it
 			{
 				uint8_t path;
@@ -215,7 +272,8 @@ namespace
 					peek(1, s_packet.data(), 1);
 					consume(2);
 					hl_native::vsync();
-					s_held = {true, type, 1};
+					if (!skipPresent())
+						s_held = {true, type, 1};
 					continue;
 				}
 				case kTypeReadFifo2:
@@ -309,6 +367,15 @@ struct Bt4GsxArgs
 	const char* driverLib;
 	const char* hookDir;    // the app's native libraries (adrenotools' hooks)
 };
+
+__attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
+
+__attribute__((visibility("default"))) void Bt4Gsx_SetVideo(const void* video)
+{
+	std::lock_guard<std::mutex> lock(s_videoLock);
+	s_videoNext = *static_cast<const Video*>(video);
+	s_videoPending = true;
+}
 
 __attribute__((visibility("default"))) void Bt4Gsx_SurfaceChanged(void* window, int width, int height)
 {

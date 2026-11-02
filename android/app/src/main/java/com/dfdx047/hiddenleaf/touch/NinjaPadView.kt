@@ -232,15 +232,28 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         }
     }
 
-    // The game's scene, asked three times a second. A change of the game's scene wins over a choice by hand.
+    // The game's scene, asked ten times a second. A new scene counts after it has held for half a second, so a loading
+    // screen's flicker or a moment of the renderer changing hands does not swap the controls. A change of the game's scene
+    // wins over a choice by hand.
     private var lastEngineScene = 0
+    private var candidateScene = 0
+    private var candidateSince = 0L
     private val scenePoll = object : Runnable {
         override fun run() {
             if (!isAttachedToWindow) return
             if (!editing && previewScene == null && config.autoMode) {
                 val s = TouchBridge.scene()
-                if (s != 0 && s != lastEngineScene) {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (s != candidateScene) {
+                    candidateScene = s
+                    candidateSince = now
+                }
+                // (an area's loading screen is a moment of "menu": leaving play takes longer than coming back to it)
+                val hold = if (s == 1 && lastEngineScene > 1) SCENE_LEAVE_MS else SCENE_HOLD_MS
+                if (s != 0 && s != lastEngineScene && now - candidateSince >= hold) {
                     lastEngineScene = s
+                    android.util.Log.i("un5", "touch: scene $s")
+                    releaseAll()
                     scene = when (s) {
                         1 -> PadScene.MENU
                         3 -> PadScene.CAMPAIGN
@@ -248,7 +261,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                     }
                 }
             }
-            handler.postDelayed(this, 330L)
+            handler.postDelayed(this, 100L)
         }
     }
 
@@ -1035,6 +1048,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     companion object {
+        private const val SCENE_HOLD_MS = 500L
+        private const val SCENE_LEAVE_MS = 2500L
         private val ORANGE = Color.rgb(255, 122, 26)
         private val AMBER = Color.rgb(255, 177, 59)
         private val SASUKE_LIGHT = Color.rgb(169, 182, 255)

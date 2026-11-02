@@ -60,9 +60,10 @@ class EngineSettings(private val file: File) {
         const val GLOW = "glow"                   // 0..200 %, default 60
         const val MUSIC = "music"                 // 0..200 %
         const val EFFECTS = "effects"             // 0..200 %, sound effects and voices
-        const val METER = "meter"                 // frame-rate meter
+        const val METER = "meter"                 // the counter: 0 off, 1 fps, 2 and the frame's time, 3 and EE, VU1 and GS
         const val TEXTURE_PACK = "texture_pack"   // texture packs on / off, default on
-        const val FILTER = "filter"               // screen filter: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 FSR 1, 4 Snapdragon GSR
+        const val FILTER = "filter"               // screen filter: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
+        const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60 or 120 (those two interpolated)
 
         // the launcher's own, read by the Android glue of the engine at start
         const val UNLOCK_ALL = "dr_unlock_all"    // 1: run Save_UnlockAll once on the next start, then 0
@@ -82,9 +83,9 @@ class EngineSettings(private val file: File) {
         const val TOUCH_OPACITY = "dr_touch_alpha" // 10..100 %
 
         const val GLOW_DEFAULT = 60
-        const val SCALE_DEFAULT = 2
+        const val SCALE_DEFAULT = 1
         /** The internal resolutions offered, in quarters (the engine's settings window has the same list). */
         val SCALE_STEPS = listOf(4, 5, 6, 7, 8, 10, 12, 16, 20, 24, 32)
-        const val ASPECT_DEFAULT = 0              // 0 = the screen's own shape (the engine measures it)
+        const val ASPECT_DEFAULT = 1333           // the game's 4:3; 0 = the screen's own shape (the engine measures it)
     }
 }

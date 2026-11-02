@@ -19,7 +19,26 @@ object TouchBridge {
     /** The engine's numbers of the last second (HL_PERF in hl_env.txt), for the overlay. Empty when off. */
     @JvmStatic external fun nativePerfLine(): String
 
+    /** Vsyncs each of the game's frames takes (2: 25 pictures a second at PAL's 50 vsyncs). */
+    @JvmStatic external fun nativeDivider(): Int
+
+    /** The game frozen (the EE, the IOP and the sound together) or going on. */
+    @JvmStatic external fun nativeSetPaused(paused: Boolean)
+
+    /** Resolution (quarters: 4 = 1x), screen filter, the picture's shape and the frame rate, in effect from the next frame. */
+    @JvmStatic external fun nativeSetVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int)
+
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
+
+    fun divider(): Int = runCatching { nativeDivider() }.getOrDefault(2)
+
+    fun setPaused(paused: Boolean) {
+        runCatching { nativeSetPaused(paused) }
+    }
+
+    fun setVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int) {
+        runCatching { nativeSetVideo(scale4, filter, aspectMilli, fpsMode) }
+    }
 
     private var nativeMissing = false
     private var logged = false

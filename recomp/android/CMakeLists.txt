@@ -72,9 +72,9 @@ target_link_libraries(ps2_runtime PUBLIC ffmpeg ps2_iop)
 # The generated game code: one translation unit per 32 functions, or the build takes hours.
 file(GLOB RUNNER_SRC CONFIGURE_DEPENDS "${RT}/src/runner/*.cpp")
 list(REMOVE_ITEM RUNNER_SRC "${RT}/src/runner/main.cpp")
-add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp")
+add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp")
 set_target_properties(un5 PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
-set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 set_source_files_properties("${RT}/src/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=ps2x_runtime_main")
 # the function tables are long and plain: optimizing them only costs time
 file(GLOB UN5_TABLES CONFIGURE_DEPENDS "${RT}/src/runner/register_functions.cpp" "${RT}/src/runner/*overlays*.cpp" "${RT}/src/runner/*_register.cpp")

@@ -22,7 +22,10 @@
 #include "GS/Renderers/Vulkan/VKBuilders.h"
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
+#include "Config.h"
 #include "MTGS.h"
+
+#include <cmath>
 
 #include <sched.h>
 
@@ -147,6 +150,11 @@ namespace
 	};
 
 	bool s_on = false, s_sceneOn = false, s_wholeTags = true;
+	std::atomic<bool> s_sceneOnShared{false};
+	// widescreen: the picture's shape while drawing here (0 stretched to the screen), and the HUD's own squeeze: the 3D is wider
+	// because the game's camera sees more, but the HUD is flat and would be stretched with the rest.
+	float s_shape = 4.0f / 3.0f, s_hudScale = 1.0f;
+	bool s_hudDraw = false;
 	// HL_NATIVE_CAP=<file>:<vsync>:<count>: what goes to the GS from then on, as HL_GSCAP (and a record 0xFE for each frame drawn here)
 	FILE* s_cap = nullptr;
 	uint64_t s_capFrom = 0, s_capUntil = 0;
@@ -762,6 +770,8 @@ namespace
 		s_ofx = static_cast<float>(xy & 0xFFFFu);
 		s_ofy = static_cast<float>((xy >> 32) & 0xFFFFu);
 		s_key = k;
+		// (flat and on top of everything: drawn by UV, with no Z test and no Z written)
+		s_hudDraw = k.target == kTScene && k.zmode == kZAlways && !k.zwrite && ((s_tme && s_fst && k.textured == kTexModulate) || (!s_tme && s_type == 6u));
 		return kNative;
 	}
 
@@ -810,6 +820,7 @@ namespace
 		}
 		v.rgba = s_rgba;
 		v.fog = s_fge ? fog : 255u;
+		const bool squeeze = s_hudDraw && s_hudScale != 1.0f;
 
 		if (s_type == 6u)
 		{
@@ -820,6 +831,11 @@ namespace
 			}
 			if (adc)
 				return;
+			if (squeeze && std::fabs(v.x - s_spriteFirst.x) < 500.0f) // (a sprite over the whole screen is not HUD)
+			{
+				v.x = kSceneW * 0.5f + (v.x - kSceneW * 0.5f) * s_hudScale;
+				s_spriteFirst.x = kSceneW * 0.5f + (s_spriteFirst.x - kSceneW * 0.5f) * s_hudScale;
+			}
 			const Vertex& a = s_spriteFirst;
 			const uint32_t n = static_cast<uint32_t>(f.vertices.size());
 			// (one Q for the sprite, the last one: S and T of the first as they would be with it)
@@ -834,6 +850,8 @@ namespace
 		}
 
 		const uint32_t n = static_cast<uint32_t>(f.vertices.size());
+		if (squeeze)
+			v.x = kSceneW * 0.5f + (v.x - kSceneW * 0.5f) * s_hudScale;
 		f.vertices.push_back(v);
 		const uint32_t count = s_kicks++;
 		switch (s_type)
@@ -1896,6 +1914,31 @@ void main()
 	}
 } // namespace
 
+bool sceneOn()
+{
+	return s_sceneOnShared.load(std::memory_order_relaxed);
+}
+
+// (on the GS thread, in the stream's order)
+static void applyAspect()
+{
+	const float shape = s_sceneOn ? s_shape : 4.0f / 3.0f;
+	const AspectRatioType type = shape <= 1.34f ? AspectRatioType::R4_3
+		: (shape > 1.77f && shape < 1.79f) ? AspectRatioType::R16_9
+		: (shape > 2.21f && shape < 2.23f) ? AspectRatioType::R20_9
+		: (shape > 2.32f && shape < 2.35f) ? AspectRatioType::R21_9
+		: AspectRatioType::Stretch;
+	MTGS::RunOnGSThread([type]() { EmuConfig.CurrentAspectRatio = type; });
+}
+
+void setShape(float aspect, float hudScale)
+{
+	s_shape = aspect;
+	s_hudScale = hudScale;
+	s_dirty = true;
+	applyAspect();
+}
+
 bool transfer(uint8_t path, const uint8_t* data, uint32_t size)
 {
 	static const bool once = [] {
@@ -1957,6 +2000,8 @@ void vsync()
 	if (!s_sceneOn && s_fightFrames >= kFightFramesToStart && s_vsyncsSinceFight <= 4u && s_vsync >= s_from)
 	{
 		s_sceneOn = true;
+		s_sceneOnShared.store(true, std::memory_order_relaxed);
+		applyAspect();
 		s_dirty = true;
 		s_gsInSync = true;
 		toSmallCores();
@@ -1967,6 +2012,8 @@ void vsync()
 		// (the GS takes over from what the targets hold: it needs the registers and whatever was held back of the uploads)
 		flushAll();
 		s_sceneOn = false;
+		s_sceneOnShared.store(false, std::memory_order_relaxed);
+		applyAspect();
 		s_fightFrames = 0u;
 		toAllCores();
 		std::fprintf(stderr, "hl_native: scene off at vsync %llu\n", static_cast<unsigned long long>(s_vsync));

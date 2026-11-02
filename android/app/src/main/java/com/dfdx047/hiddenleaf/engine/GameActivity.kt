@@ -48,7 +48,7 @@ class GameActivity : SDLActivity() {
 
     private val watchMenu = object : Runnable {
         override fun run() {
-            pad?.suppressed = TouchBridge.menuOpen()
+            pad?.suppressed = panel != null
             handler.postDelayed(this, 100)
         }
     }
@@ -86,7 +86,9 @@ class GameActivity : SDLActivity() {
         requestedOrientation = orientationFlag()
     }
 
-    /** HL_PERF's line, at the bottom of the screen: nothing on it unless the engine has numbers. */
+    /** The counter (the panel's choice, settings' "meter"): nothing on screen when off. */
+    private var meterLevel = 0
+
     private fun addPerfOverlay(layout: ViewGroup) {
         val text = TextView(this).apply {
             setTextColor(android.graphics.Color.YELLOW)
@@ -94,18 +96,66 @@ class GameActivity : SDLActivity() {
             textSize = 11f
             typeface = android.graphics.Typeface.MONOSPACE
             visibility = android.view.View.GONE
+            setPadding(8, 2, 8, 2)
         }
-        layout.addView(text, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL))
+        layout.addView(text, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.TOP or android.view.Gravity.END))
         text.post(object : Runnable {
             override fun run() {
-                val line = TouchBridge.perfLine()
-                if (line.isNotEmpty()) {
-                    text.text = line
-                    text.visibility = android.view.View.VISIBLE
-                }
+                val line = meterText(TouchBridge.perfLine(), meterLevel)
+                text.text = line
+                text.visibility = if (line.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
                 text.postDelayed(this, 500)
             }
         })
+    }
+
+    /** The engine's line ("50.0 fps | EE .. | worst 21 ms") as much of it as the level shows. */
+    private fun meterText(raw: String, level: Int): String {
+        if (level == 0 || raw.isEmpty()) return ""
+        val vsyncs = raw.substringBefore(' ').toFloatOrNull() ?: return ""
+        val picture = vsyncs / TouchBridge.divider().coerceAtLeast(1)
+        val fps = "%.0f fps (%.0f Hz)".format(picture, vsyncs)
+        if (level == 1) return fps
+        val worst = Regex("worst ([0-9.]+)").find(raw)?.groupValues?.get(1) ?: "?"
+        val frame = "$fps  %.1f ms  max %s".format(1000f / vsyncs.coerceAtLeast(1f), worst)
+        if (level == 2) return frame
+        fun cat(n: String) = Regex("\\b$n ([0-9.]+)").find(raw)?.groupValues?.get(1) ?: "?"
+        return "$frame\nEE ${cat("EE")}  VU1 ${cat("VU1")}  GS ${cat("GS")}  IOP ${cat("IOP")}  idle ${cat("idle")}"
+    }
+
+    // ---- the panel over the game: it freezes the game while open
+    private var panel: GamePanel? = null
+
+    private fun openPanel() {
+        if (panel != null) return
+        val layout = SDLActivity.getContentView() as? ViewGroup ?: return
+        TouchBridge.setPad(0, 128, 128, 128, 128)
+        TouchBridge.setPaused(true)
+        val es = EngineSettings(paths.settings)
+        val p = GamePanel(
+            this, es,
+            onApply = { applyVideo(es) },
+            onMeter = { meterLevel = it },
+            onControls = { showOptions() },
+            onResume = { closePanel() },
+            onQuit = { quitToApp() },
+        )
+        layout.addView(p, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        panel = p
+    }
+
+    private fun closePanel() {
+        val p = panel ?: return
+        (p.parent as? ViewGroup)?.removeView(p)
+        panel = null
+        TouchBridge.setPaused(false)
+    }
+
+    private fun applyVideo(es: EngineSettings) {
+        TouchBridge.setVideo(
+            es.get(EngineSettings.SCALE4, 4), es.get(EngineSettings.FILTER, 0),
+            es.get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT), es.get(EngineSettings.FPS_MODE, 50),
+        )
     }
 
     private fun addTouchPad() {
@@ -114,10 +164,7 @@ class GameActivity : SDLActivity() {
         view.listener = object : TouchListener {
             override fun onPad(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) = TouchBridge.setPad(buttons, lx, ly, rx, ry)
 
-            override fun onMenu() {
-                SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_BACK)
-                SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_BACK)
-            }
+            override fun onMenu() = openPanel()
 
             override fun onOptions() = showOptions()
 
@@ -129,6 +176,7 @@ class GameActivity : SDLActivity() {
         }
         layout.addView(view.view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pad = view
+        meterLevel = runCatching { EngineSettings(paths.settings).get(EngineSettings.METER, 0) }.getOrDefault(0)
         addPerfOverlay(layout)
     }
 
@@ -321,9 +369,9 @@ class GameActivity : SDLActivity() {
     }
 
     /**
-     * The back key opens and closes the in-game menu, wherever it comes from. On handhelds such as the AYN Odin the
+     * The back key opens and closes the panel over the game, wherever it comes from. On handhelds such as the AYN Odin the
      * back button belongs to the built-in controller, and SDL would hand it to the game as that controller's
-     * Back/Select button; here it always reaches the engine as the back key (gs_gpu.c: SDLK_AC_BACK).
+     * Back/Select button.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
@@ -331,9 +379,8 @@ class GameActivity : SDLActivity() {
                 if (event.action == KeyEvent.ACTION_UP) pad?.editing = false
                 return true
             }
-            when (event.action) {
-                KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_BACK)
-                KeyEvent.ACTION_UP -> SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_BACK)
+            if (event.action == KeyEvent.ACTION_UP) {
+                if (panel != null) closePanel() else openPanel()
             }
             return true
         }

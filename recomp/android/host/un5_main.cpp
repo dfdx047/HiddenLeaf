@@ -3,6 +3,7 @@
 //
 // Three threads: the game (the runtime's main(), with no window: its GS stream goes into a ring, hl_gs_live.cpp), PCSX2's GS
 // (libbt4gsx.so, reading the ring) and this one, which keeps the window, its events and the pad.
+#include "hl_game.h"
 #include "hl_host_pad.h"
 #include "ps2_live_ring.h"
 #include "runtime/gs/hl_gs_live.h"
@@ -29,6 +30,7 @@
 
 int ps2x_runtime_main(int argc, char *argv[]); // the runtime's main() (src/main.cpp, renamed by the build)
 void hl_spu2_install();                        // the sound (recomp/android/spu2/hl_spu2.cpp)
+void hl_spu2_pause(bool paused);
 
 namespace
 {
@@ -109,6 +111,71 @@ namespace
         const char *hookDir;
     };
 
+    // The launcher's settings (un5_settings.txt: name=number lines). See android/.../data/EngineSettings.kt.
+    struct Settings
+    {
+        int scale4 = 4;      // internal resolution in quarters: 4 = 1x
+        int filter = 0;      // on the way to the screen: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
+        int aspectMilli = 1333; // the shape of the picture: 1333 the game's, 0 the screen's, or width/height*1000
+        int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
+    };
+    Settings g_settings;
+
+    void loadSettings(const std::string &path)
+    {
+        FILE *fp = std::fopen(path.c_str(), "r");
+        if (!fp)
+            return;
+        char line[128];
+        while (std::fgets(line, sizeof(line), fp))
+        {
+            char *eq = std::strchr(line, '=');
+            if (!eq)
+                continue;
+            *eq = '\0';
+            const int v = std::atoi(eq + 1);
+            if (!std::strcmp(line, "scale4"))
+                g_settings.scale4 = v;
+            else if (!std::strcmp(line, "filter"))
+                g_settings.filter = v;
+            else if (!std::strcmp(line, "aspect_milli"))
+                g_settings.aspectMilli = v;
+            else if (!std::strcmp(line, "fps_mode"))
+                g_settings.fpsMode = v;
+        }
+        std::fclose(fp);
+    }
+
+    // What libbt4gsx changes while the game runs (Bt4Gsx_SetVideo).
+    struct GsxVideo
+    {
+        float upscale;
+        int filter;
+        float aspect;   // the fight's and the campaign's picture, width/height; 0 stretched to the screen
+        float hudScale; // what undoes the stretch on the HUD
+        int fpsMode;
+    };
+    void (*g_gsxSetVideo)(const GsxVideo *) = nullptr;
+    int g_windowW = 0, g_windowH = 0;
+
+    // The shape asked for against the screen: a wider picture is the 3D's horizontal scale, 0.75 at 16:9, as the
+    // community's patch for this game does it. On a screen no wider than 4:3 (the RG Cube) nothing changes.
+    void applyVideo()
+    {
+        const float screen = g_windowH > 0 ? static_cast<float>(g_windowW) / static_cast<float>(g_windowH) : 4.0f / 3.0f;
+        float shape = g_settings.aspectMilli > 0 ? static_cast<float>(g_settings.aspectMilli) / 1000.0f : screen;
+        if (shape > screen) // (the screen's width is all there is)
+            shape = screen;
+        const float game = 4.0f / 3.0f;
+        const float x = shape > game + 0.01f ? game / shape : 1.0f;
+        hl_game::g_cameraXScale.store(x, std::memory_order_relaxed);
+        if (g_gsxSetVideo)
+        {
+            const GsxVideo v{static_cast<float>(g_settings.scale4) / 4.0f, g_settings.filter, x < 1.0f ? shape : game, x, g_settings.fpsMode};
+            g_gsxSetVideo(&v);
+        }
+    }
+
     // The GS settings: nothing of the game's own, only what suits a phone. HL_GS_SCALE: the internal resolution.
     void writeIni(const std::string &path, float upscale)
     {
@@ -121,8 +188,9 @@ namespace
                      "upscale_multiplier = %g\n"
                      "MaxAnisotropy = 0\n"
                      "filter = 2\n"
-                     "fxaa = false\n"
-                     "CASMode = 0\n"
+                     "fxaa = %s\n"
+                     "CASMode = %d\n"
+                     "linear_present_mode = %d\n"
                      "AspectRatio = 4:3\n"
                      "OsdShowFPS = %s\n"
                      "VsyncEnable = 0\n"
@@ -133,7 +201,8 @@ namespace
                      // Adreno ignores it.
                      "ForceMaliFramebufferFetch = true\n"
                      "DumpReplaceableTextures = false\n",
-                     static_cast<double>(upscale), std::getenv("HL_PERF") ? "true" : "false");
+                     static_cast<double>(upscale), g_settings.filter == 2 ? "true" : "false", g_settings.filter == 3 ? 1 : 0, g_settings.filter == 1 ? 2 : 1,
+                     std::getenv("HL_PERF") ? "true" : "false");
         // HL_GS_EXTRA="key=value;key=value": GS settings to try (bench only)
         if (const char *extra = std::getenv("HL_GS_EXTRA"))
         {
@@ -264,7 +333,20 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
                       std::memory_order_relaxed);
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuOpen(JNIEnv *, jclass) { return JNI_FALSE; }
-extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeScene(JNIEnv *, jclass) { return 0; }
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeScene(JNIEnv *, jclass) { return hl_game::scene(); }
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeDivider(JNIEnv *, jclass) { return hl_game::divider(); }
+// The panel: the game frozen (EE, IOP and sound together) while it is open
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPaused(JNIEnv *, jclass, jboolean paused)
+{
+    hl_game::g_paused.store(paused ? 1 : 0, std::memory_order_release);
+    hl_spu2_pause(paused);
+}
+// The panel: resolution, filter, shape and frame rate, in effect from the next frame
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetVideo(JNIEnv *, jclass, jint scale4, jint filter, jint aspectMilli, jint fpsMode)
+{
+    g_settings = {scale4, filter, aspectMilli, fpsMode};
+    applyVideo();
+}
 // HL_PERF's line of the last second: "" when it is off
 extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePerfLine(JNIEnv *env, jclass) { return env->NewStringUTF(hl_perf::line()); }
 
@@ -279,6 +361,8 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     redirectOutput(root);
     std::fprintf(stderr, "un5: Hidden Leaf, Ultimate Ninja 5 engine\n");
     loadEnvFile(root + "/hl_env.txt");
+    loadSettings(root + "/un5_settings.txt");
+    setenv("HL_METER", "1", 0);
     if (iso.empty())
     {
         fail("The game's disc image cannot be read. Import it again in the launcher.");
@@ -326,6 +410,11 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     const auto gsxSurfaceChanged = reinterpret_cast<void (*)(void *, int, int)>(dlsym(gsx, "Bt4Gsx_SurfaceChanged"));
     const auto gsxSurfaceDestroyed = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_SurfaceDestroyed"));
     const auto gsxStop = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_Stop"));
+    g_gsxSetVideo = reinterpret_cast<void (*)(const GsxVideo *)>(dlsym(gsx, "Bt4Gsx_SetVideo"));
+    hl_game::g_nativeOn = reinterpret_cast<bool (*)()>(dlsym(gsx, "Bt4Gsx_NativeOn"));
+    g_windowW = width;
+    g_windowH = height;
+    applyVideo();
     if (!gsxRun || !gsxSurfaceChanged || !gsxSurfaceDestroyed || !gsxStop)
     {
         fail("The renderer (libbt4gsx.so) is not the expected one.");
@@ -354,7 +443,13 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         return 0;
 
     const char *scale = std::getenv("HL_GS_SCALE");
-    const float upscale = scale ? static_cast<float>(std::atof(scale)) : 1.0f;
+    if (scale)
+        g_settings.scale4 = static_cast<int>(std::atof(scale) * 4.0 + 0.5);
+    if (const char *wide = std::getenv("HL_ASPECT"))
+        g_settings.aspectMilli = std::atoi(wide);
+    if (const char *f = std::getenv("HL_FPS_MODE"))
+        g_settings.fpsMode = std::atoi(f);
+    const float upscale = static_cast<float>(g_settings.scale4) / 4.0f;
     static const std::string gsxRoot = root + "/gsx", ini = gsxRoot + "/un5.ini";
     writeIni(ini, upscale);
     const char *api = std::getenv("HL_GS_API");
@@ -388,7 +483,12 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
             {
                 int nw = 0, nh = 0;
                 if (void *n = windowHandle(window, &nw, &nh))
+                {
                     gsxSurfaceChanged(n, nw, nh);
+                    g_windowW = nw;
+                    g_windowH = nh;
+                    applyVideo();
+                }
             }
         }
         updatePad();
