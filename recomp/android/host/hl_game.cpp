@@ -1,6 +1,8 @@
 // Hidden Leaf: what the Android host knows and changes of Ultimate Ninja 5 itself. All addresses are of the European ELF (SLES-55605).
 #include "hl_game.h"
 
+#include <SDL3/SDL.h>
+
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 
@@ -97,13 +99,22 @@ int hl_game::divider()
 }
 
 // A fight and the campaign are what the native renderer recognizes in the GS stream (the copy of the scene's Z); which of the
-// two by the mode's code in memory. Anything else (title, menus, films, loading screens) is a menu.
+// two by the mode's code in memory. Anything else (title, menus, films, loading screens) is a menu. An Ougi's film and the
+// loading of an area go through the GS for a few seconds in the middle of play: those seconds stay in the scene they are in.
 int hl_game::scene()
 {
     if (g_rdram == nullptr)
         return 0;
-    if (g_nativeOn == nullptr || !g_nativeOn())
-        return 1;
+    static int s_scene = 1;
+    static uint64_t s_lastOn = 0;
+    const uint64_t now = SDL_GetTicks();
     const int mode = overlay();
-    return mode == 1 ? 2 : mode == 2 ? 3 : 1;
+    if (g_nativeOn != nullptr && g_nativeOn() && (mode == 1 || mode == 2))
+    {
+        s_scene = mode == 1 ? 2 : 3;
+        s_lastOn = now;
+    }
+    else if (s_scene != 1 && (now - s_lastOn > 8000u || (s_scene == 2 ? mode != 1 : mode != 2)))
+        s_scene = 1;
+    return s_scene;
 }

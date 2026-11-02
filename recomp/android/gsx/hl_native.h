@@ -18,6 +18,12 @@ namespace hl_native
 	bool sceneOn();
 	// The picture while it draws (width/height, 0 stretched to the screen) and what undoes the stretch on the HUD.
 	void setShape(float aspect, float hudScale);
+	// 50 the game's own; 60 and 120 pictures a second drawn in between (see execute). Then the frames present themselves, and
+	// the stream's vsyncs must not.
+	void setRate(int rate);
+	bool presentsHere();
+	uint32_t prompt(); // (the button prompt on screen: see updatePrompt)
+	int presentRate();
 	// A packet to send to the GS ahead of whatever is read next. Runs what is queued for the GS thread on the way.
 	bool next(uint8_t* path, const uint8_t** data, uint32_t* size);
 } // namespace hl_native

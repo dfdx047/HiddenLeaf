@@ -122,6 +122,9 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.orientation_text),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            ToggleRow(stringResource(R.string.prompt_buttons), stringResource(R.string.prompt_buttons_text), get(EngineSettings.PROMPT, 1) != 0) {
+                vm.setting(EngineSettings.PROMPT, if (it) 1 else 0)
+            }
             ToggleRow(stringResource(R.string.show_fps), stringResource(R.string.show_fps_text), get(EngineSettings.METER, 0) != 0) {
                 vm.setting(EngineSettings.METER, if (it) 1 else 0)
             }

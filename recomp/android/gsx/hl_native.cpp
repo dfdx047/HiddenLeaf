@@ -13,6 +13,7 @@
 // What the screen shows still goes through PCSX2's output (Merge, the display), and so does every scene where this is off.
 #include "hl_native.h"
 
+#include "GS/GS.h"
 #include "GS/GSState.h"
 #include "GS/Renderers/Common/GSRenderer.h"
 #include "GS/Renderers/HW/GSRendererHW.h"
@@ -150,6 +151,14 @@ namespace
 	};
 
 	bool s_on = false, s_sceneOn = false, s_wholeTags = true;
+	struct DrawMatch
+	{
+		uint32_t bFirst, aFirst, count;
+	};
+	std::vector<DrawMatch> s_matches;
+	std::atomic<int> s_rate{50};
+	std::atomic<bool> s_presentsHere{false};
+	std::atomic<int> s_presentRate{0};
 	std::atomic<bool> s_sceneOnShared{false};
 	// widescreen: the picture's shape while drawing here (0 stretched to the screen), and the HUD's own squeeze: the 3D is wider
 	// because the game's camera sees more, but the HUD is flat and would be stretched with the rest.
@@ -295,10 +304,114 @@ namespace
 		return f;
 	}
 
+	// ---- the game's button prompts ("Mash", "Unleash Ultimate Jutsu", the sequences of a jutsu): what the player sees is what
+	// the player must press, so they are read from what is drawn: which icon of the game's own sheets, left to right.
+	// Codes: 1 circle 2 triangle 3 square 4 cross 5 up 6 right 7 down 8 left. In nibbles from bit 4, the count in the lowest.
+	constexpr uint64_t kPromptSheet = 0xb4632ed2e6242b9full, kPromptClut = 0x4c8bd97dcf4bac6cull;
+	constexpr uint64_t kSequenceSheet = 0xc69da492afd2ac87ull, kSequenceClut = 0xdf797daaa20abe4cull;
+	int32_t s_promptTex = -1, s_sequenceTex = -1;
+	std::atomic<uint32_t> s_prompt{0};
+
+	void updatePrompt(const Frame& f)
+	{
+		if (s_promptTex < 0 && s_sequenceTex < 0)
+			return;
+		struct Icon
+		{
+			float x;
+			uint32_t code;
+		};
+		Icon icons[7];
+		uint32_t count = 0u;
+		for (const Draw& d : f.draws)
+		{
+			if (d.key.tex < 0 || (d.key.tex != s_promptTex && d.key.tex != s_sequenceTex))
+				continue;
+			for (uint32_t q = 0; q + 6u <= d.count && count < 7u; q += 6u)
+			{
+				float s0 = 1e9f, t0 = 1e9f, x0 = 1e9f, x1 = -1e9f;
+				for (uint32_t k = d.first + q; k < d.first + q + 6u; ++k)
+				{
+					const Vertex& v = f.vertices[f.indices[k]];
+					s0 = std::min(s0, v.s);
+					t0 = std::min(t0, v.t);
+					x0 = std::min(x0, v.x);
+					x1 = std::max(x1, v.x);
+				}
+				uint32_t code = 0u;
+				if (d.key.tex == s_promptTex)
+				{
+					// (rows of 24 of 128: cross, square, triangle, circle; the row above is an ornament)
+					const int row = static_cast<int>((t0 + 0.01f) / 0.1875f);
+					code = row == 4 ? 1u : row == 3 ? 2u : row == 2 ? 3u : row == 1 ? 4u : 0u;
+				}
+				else
+				{
+					if ((x0 + x1) * 0.5f >= kSceneW * 0.5f)
+						continue; // (that side's is the other player's: the game shows the first player's on the left)
+					if (t0 >= 0.49f)
+					{
+						const int col = static_cast<int>((s0 + 0.01f) / 0.25f);
+						code = col == 0 ? 7u : col == 1 ? 5u : col == 2 ? 6u : 8u;
+					}
+					else
+					{
+						const int col = static_cast<int>((s0 + 0.01f) / 0.2f);
+						code = col < 4 ? static_cast<uint32_t>(col) + 1u : 0u;
+					}
+				}
+				if (code == 0u)
+					continue;
+				icons[count++] = Icon{x0, code};
+			}
+		}
+		std::sort(icons, icons + count, [](const Icon& a, const Icon& b) { return a.x < b.x; });
+		uint32_t packed = count;
+		for (uint32_t i = 0; i < count; ++i)
+			packed |= icons[i].code << (4u + i * 4u);
+		static const bool s_log = std::getenv("HL_HUD_LOG") != nullptr;
+		if (s_log && packed != s_prompt.load(std::memory_order_relaxed))
+			std::fprintf(stderr, "[prompt] v%llu %x (first x %.0f)\n", static_cast<unsigned long long>(s_vsync), packed, count ? static_cast<double>(icons[0].x) : 0.0);
+		s_prompt.store(packed, std::memory_order_relaxed);
+	}
+
+	// HL_HUD_LOG=1: flat textured draws on top of everything that were not there in the last 100 pictures (how the game's button
+	// prompts were found). HL_TEX_DUMP=1: the textures as they arrive, hl_frames/tex_<id>_<w>x<h>.rgba.
+	void hudLog(const Frame& f)
+	{
+		static const bool s_hudLog = std::getenv("HL_HUD_LOG") != nullptr;
+		if (!s_hudLog)
+			return;
+		static std::unordered_map<uint64_t, uint64_t> s_lastSeen;
+		static uint64_t s_pictures = 0;
+		++s_pictures;
+		for (const Draw& d : f.draws)
+		{
+			if (d.key.target != kTScene || d.key.zmode != kZAlways || d.key.zwrite || d.key.textured != kTexModulate || d.count == 0u)
+				continue;
+			float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f, s0 = 1e9f, t0 = 1e9f, s1 = -1e9f, t1 = -1e9f;
+			for (uint32_t k = d.first; k < d.first + d.count; ++k)
+			{
+				const Vertex& v = f.vertices[f.indices[k]];
+				x0 = std::min(x0, v.x); x1 = std::max(x1, v.x); y0 = std::min(y0, v.y); y1 = std::max(y1, v.y);
+				s0 = std::min(s0, v.s); s1 = std::max(s1, v.s); t0 = std::min(t0, v.t); t1 = std::max(t1, v.t);
+			}
+			const uint64_t id = (static_cast<uint64_t>(static_cast<uint32_t>(d.key.tex)) << 32) ^ (static_cast<uint64_t>(s0 * 512.0f) << 24) ^ (static_cast<uint64_t>(t0 * 512.0f) << 12) ^ static_cast<uint64_t>(d.count);
+			uint64_t& last = s_lastSeen[id];
+			if (last + 100u < s_pictures || last == 0u)
+				std::fprintf(stderr, "[hud] v%llu tex %d idx %u xy %.0f,%.0f-%.0f,%.0f uv %.3f,%.3f-%.3f,%.3f rgba %08x\n", static_cast<unsigned long long>(s_vsync), d.key.tex, d.count,
+					static_cast<double>(x0), static_cast<double>(y0), static_cast<double>(x1), static_cast<double>(y1), static_cast<double>(s0), static_cast<double>(t0), static_cast<double>(s1), static_cast<double>(t1),
+					f.vertices[f.indices[d.first]].rgba);
+			last = s_pictures;
+		}
+	}
+
 	void flushFrame()
 	{
 		if (!s_frame || (s_frame->draws.empty() && s_frame->textures.empty()))
 			return;
+		hudLog(*s_frame);
+		updatePrompt(*s_frame);
 		s_stats.frames++;
 		s_stats.draws += s_frame->draws.size();
 		s_stats.verts += s_frame->vertices.size();
@@ -548,6 +661,13 @@ namespace
 			return found->second;
 		const int32_t id = s_nextTexture++;
 		s_textureIds.emplace(key, id);
+		if (key.texHash == kPromptSheet && key.clutHash == kPromptClut)
+			s_promptTex = id;
+		else if (key.texHash == kSequenceSheet && key.clutHash == kSequenceClut)
+			s_sequenceTex = id;
+		static const bool s_texLog = std::getenv("HL_HUD_LOG") != nullptr;
+		if (s_texLog)
+			std::fprintf(stderr, "[tex] id %d %016llx %016llx psm %x %dx%d\n", id, static_cast<unsigned long long>(key.texHash), static_cast<unsigned long long>(key.clutHash), psm, w, h);
 		s_stats.miss++;
 		if (!s_frame)
 			s_frame = takeFrame();
@@ -1608,7 +1728,8 @@ void main()
 	};
 	template struct ExposePrivate<InitialState, &GSDeviceVK::SetInitialState>;
 
-	void execute(Frame* f)
+	// One go through a frame's draws, with its own vertices or others in their place (fresh: the first time, its textures come in).
+	void drawFrame(Frame* f, const Vertex* vertices, bool fresh)
 	{
 		GSDeviceVK* dev = GSDeviceVK::GetInstance();
 		if (dev && g_gs_renderer && g_texture_cache && !s_gpuFailed)
@@ -1617,19 +1738,31 @@ void main()
 			dev->EndRenderPass();
 
 			// the textures this frame brought (the replay thread counts on them from now on, whatever happens to this frame)
+			if (fresh)
 			for (const NewTexture& n : f->textures)
 			{
 				if (s_gpuTextures.size() <= static_cast<size_t>(n.id))
 					s_gpuTextures.resize(n.id + 1u);
 				GSTextureVK* t = static_cast<GSTextureVK*>(g_gs_device->CreateTexture(n.w, n.h, 1, GSTexture::Format::Color));
+				static std::vector<uint8_t> s_read;
 				if (t && n.fromMemory)
 				{
-					static std::vector<uint8_t> s_read;
 					readFromMemory(n, s_read);
 					t->Update(GSVector4i(0, 0, n.w, n.h), s_read.data(), static_cast<u32>(n.w) * 4u);
 				}
 				else if (t)
 					t->Update(GSVector4i(0, 0, n.w, n.h), n.rgba.data(), static_cast<u32>(n.w) * 4u);
+				static const bool s_texDump = std::getenv("HL_TEX_DUMP") != nullptr;
+				if (s_texDump)
+				{
+					char name[96];
+					std::snprintf(name, sizeof(name), "hl_frames/tex_%d_%dx%d.rgba", n.id, n.w, n.h);
+					if (FILE* out = std::fopen(name, "wb"))
+					{
+						std::fwrite(n.fromMemory ? s_read.data() : n.rgba.data(), 4u, static_cast<size_t>(n.w) * static_cast<size_t>(n.h), out);
+						std::fclose(out);
+					}
+				}
 				s_gpuTextures[n.id].texture = t;
 			}
 
@@ -1713,7 +1846,7 @@ void main()
 						const uint32_t ibytes = static_cast<uint32_t>(f->indices.size() * sizeof(uint32_t));
 						if (vbytes <= s_vb.GetCurrentSize() && ibytes <= s_ib.GetCurrentSize() && s_vb.ReserveMemory(vbytes, sizeof(Vertex)) && s_ib.ReserveMemory(ibytes, 4u))
 						{
-							std::memcpy(s_vb.GetCurrentHostPointer(), f->vertices.data(), vbytes);
+							std::memcpy(s_vb.GetCurrentHostPointer(), vertices ? vertices : f->vertices.data(), vbytes);
 							std::memcpy(s_ib.GetCurrentHostPointer(), f->indices.data(), ibytes);
 							const VkDeviceSize voffset = s_vb.GetCurrentOffset();
 							const uint32_t ifirst = s_ib.GetCurrentOffset() / 4u;
@@ -1891,10 +2024,201 @@ void main()
 				}
 			}
 		}
+	}
+
+	void toPool(Frame* f)
+	{
+		std::lock_guard<std::mutex> lock(s_poolLock);
+		s_framePool.push_back(f);
+	}
+
+	// ---- more pictures than the game makes (60 and 120). The game's logic works in fixed steps per frame, so running it faster
+	// changes its speed: these are pictures drawn in between. A frame B that arrives is held back and shown as it comes out of
+	// the frame before it, A: draws of the same kind and size, in the same order, are the same things, and their vertices move
+	// from where they were in A to where they are in B. That is one picture late, 40 ms. What has no match shows as in B.
+	struct VRange
+	{
+		uint32_t first, count;
+	};
+	Frame* s_prev = nullptr;
+	std::vector<Vertex> s_lerp;
+	std::vector<VRange> s_rangesA, s_rangesB;
+	std::chrono::steady_clock::time_point s_intervalEnd{}, s_nextPresent{};
+	uint32_t s_presents = 0;
+	std::chrono::steady_clock::time_point s_presentsFrom{};
+	uint32_t s_field = 0;
+
+	void vertexRanges(const Frame& f, std::vector<VRange>& out)
+	{
+		out.resize(f.draws.size());
+		for (size_t i = 0; i < f.draws.size(); ++i)
 		{
-			std::lock_guard<std::mutex> lock(s_poolLock);
-			s_framePool.push_back(f);
+			const Draw& d = f.draws[i];
+			uint32_t lo = UINT32_MAX, hi = 0u;
+			for (uint32_t k = d.first; k < d.first + d.count; ++k)
+			{
+				const uint32_t v = f.indices[k];
+				lo = std::min(lo, v);
+				hi = std::max(hi, v);
+			}
+			out[i] = d.count ? VRange{lo, hi - lo + 1u} : VRange{0u, 0u};
 		}
+	}
+
+	// What of B comes from what of A. false: too little in common, a cut of the camera or a new screen.
+	bool matchFrames(const Frame& a, const Frame& b)
+	{
+		vertexRanges(a, s_rangesA);
+		vertexRanges(b, s_rangesB);
+		s_matches.clear();
+		size_t j = 0;
+		uint64_t matched = 0, total = 0;
+		constexpr size_t kWindow = 24;
+		constexpr float kMaxMove = 96.0f; // (pixels of 512x448 in 40 ms: further than this is a jump, not a movement)
+		for (size_t i = 0; i < b.draws.size(); ++i)
+		{
+			const Draw& db = b.draws[i];
+			const VRange rb = s_rangesB[i];
+			if (db.key.target == kTScene || db.key.target == kTShadow)
+				total += rb.count;
+			for (size_t k = j; k < a.draws.size() && k < j + kWindow; ++k)
+			{
+				const Draw& da = a.draws[k];
+				if (da.count != db.count || s_rangesA[k].count != rb.count || !(da.key == db.key))
+					continue;
+				j = k + 1u;
+				const Vertex* va = a.vertices.data() + s_rangesA[k].first;
+				const Vertex* vb = b.vertices.data() + rb.first;
+				bool same = true, near = true;
+				for (uint32_t v = 0; v < rb.count; ++v)
+				{
+					const float dx = vb[v].x - va[v].x, dy = vb[v].y - va[v].y;
+					if (dx != 0.0f || dy != 0.0f || vb[v].z != va[v].z)
+						same = false;
+					if (std::fabs(dx) > kMaxMove || std::fabs(dy) > kMaxMove)
+					{
+						near = false;
+						break;
+					}
+				}
+				if (near)
+				{
+					if (db.key.target == kTScene || db.key.target == kTShadow)
+						matched += rb.count;
+					if (!same)
+						s_matches.push_back(DrawMatch{rb.first, s_rangesA[k].first, rb.count});
+				}
+				break;
+			}
+		}
+		return total > 0u && matched * 10u >= total * 6u;
+	}
+
+	void buildBetween(const Frame& a, const Frame& b, float alpha)
+	{
+		s_lerp.resize(b.vertices.size());
+		std::memcpy(s_lerp.data(), b.vertices.data(), b.vertices.size() * sizeof(Vertex));
+		const float inv = 1.0f - alpha;
+		for (const DrawMatch& m : s_matches)
+		{
+			const Vertex* va = a.vertices.data() + m.aFirst;
+			const Vertex* vb = b.vertices.data() + m.bFirst;
+			Vertex* out = s_lerp.data() + m.bFirst;
+			for (uint32_t v = 0; v < m.count; ++v)
+			{
+				out[v].x = va[v].x * inv + vb[v].x * alpha;
+				out[v].y = va[v].y * inv + vb[v].y * alpha;
+				out[v].z = va[v].z * inv + vb[v].z * alpha;
+				out[v].s = va[v].s * inv + vb[v].s * alpha;
+				out[v].t = va[v].t * inv + vb[v].t * alpha;
+				out[v].q = va[v].q * inv + vb[v].q * alpha;
+			}
+		}
+	}
+
+	void presentNow()
+	{
+		// (the stream's own vsyncs are not presented meanwhile: hl_gsx.cpp asks presentsHere)
+		s_field ^= 1u;
+		GSvsync(s_field, false);
+		++s_presents;
+		const auto now = std::chrono::steady_clock::now();
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_presentsFrom).count();
+		if (ms >= 1000)
+		{
+			s_presentRate.store(static_cast<int>(s_presents * 1000 / ms), std::memory_order_relaxed);
+			s_presents = 0u;
+			s_presentsFrom = now;
+		}
+	}
+
+	void execute(Frame* f)
+	{
+		const int rate = s_rate.load(std::memory_order_relaxed);
+		bool picture = false;
+		for (const Draw& d : f->draws)
+			picture = picture || d.key.target == kTDisplay;
+		if (rate <= 50 || !s_sceneOnShared.load(std::memory_order_relaxed))
+		{
+			s_presentsHere.store(false, std::memory_order_relaxed);
+			s_presentRate.store(0, std::memory_order_relaxed);
+			if (s_prev)
+			{
+				toPool(s_prev);
+				s_prev = nullptr;
+			}
+			drawFrame(f, nullptr, true);
+			toPool(f);
+			s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
+			return;
+		}
+		s_presentsHere.store(true, std::memory_order_relaxed);
+		if (!picture)
+		{
+			// (part of a picture: it goes as it is, and the picture comes with the rest)
+			drawFrame(f, nullptr, true);
+			toPool(f);
+			s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
+			return;
+		}
+		using Clock = std::chrono::steady_clock;
+		// the time of a picture of the game, a little less if pictures are piling up behind this one
+		const auto period = std::chrono::microseconds(s_inFlight.load(std::memory_order_relaxed) >= 3 ? 30000 : 40000);
+		const auto step = std::chrono::microseconds(1000000 / rate);
+		const auto now = Clock::now();
+		const Clock::time_point start = (now >= s_intervalEnd && now - s_intervalEnd < std::chrono::milliseconds(12)) ? s_intervalEnd : now;
+		const Clock::time_point end = start + period;
+		s_intervalEnd = end;
+		if (s_nextPresent < now || s_nextPresent > now + step * 2)
+			s_nextPresent = now;
+		const bool between = s_prev && matchFrames(*s_prev, *f);
+		bool fresh = true;
+		while (s_nextPresent < end)
+		{
+			const auto wait = s_nextPresent - Clock::now();
+			if (wait > std::chrono::microseconds(200))
+				std::this_thread::sleep_for(wait);
+			if (between)
+			{
+				const float alpha = std::chrono::duration<float>(s_nextPresent - start).count() / std::chrono::duration<float>(period).count();
+				buildBetween(*s_prev, *f, std::min(alpha, 1.0f));
+				drawFrame(f, s_lerp.data(), fresh);
+			}
+			else
+				drawFrame(f, nullptr, fresh);
+			fresh = false;
+			presentNow();
+			s_nextPresent += step;
+			// (behind the clock: the pictures that cannot be made are not made)
+			const auto after = Clock::now();
+			if (s_nextPresent < after)
+				s_nextPresent = after;
+		}
+		if (fresh)
+			drawFrame(f, nullptr, true); // (no present fell in this time: its textures still come in)
+		if (s_prev)
+			toPool(s_prev);
+		s_prev = f;
 		s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
 	}
 
@@ -1906,6 +2230,9 @@ void main()
 		for (const auto& [name, count] : s_stats.why)
 			why += std::string(" ") + (name[0] ? name : "?") + "=" + std::to_string(count);
 		const uint64_t frames = std::max<uint64_t>(s_stats.frames, 1u);
+		if (s_rate.load(std::memory_order_relaxed) > 50)
+			std::fprintf(stderr, "[interp] v%llu: asked %d, presents %d a second, %zu draws moved\n", static_cast<unsigned long long>(s_vsync), s_rate.load(std::memory_order_relaxed),
+				s_presentRate.load(std::memory_order_relaxed), s_matches.size());
 		std::fprintf(stderr, "[native] v%llu: %llu flushes, %.0f draws/f, %.0f verts/f, %.0f tris/f, %llu tags dropped, %llu to the GS%s; %llu uploads, %llu new textures (%d)\n",
 			static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(s_stats.frames), static_cast<double>(s_stats.draws) / frames,
 			static_cast<double>(s_stats.verts) / frames, static_cast<double>(s_stats.tris) / frames, static_cast<unsigned long long>(s_stats.dropped),
@@ -1913,6 +2240,26 @@ void main()
 		s_stats = Stats{};
 	}
 } // namespace
+
+void setRate(int rate)
+{
+	s_rate.store(rate, std::memory_order_relaxed);
+}
+
+bool presentsHere()
+{
+	return s_presentsHere.load(std::memory_order_relaxed);
+}
+
+int presentRate()
+{
+	return s_presentRate.load(std::memory_order_relaxed);
+}
+
+uint32_t prompt()
+{
+	return s_prompt.load(std::memory_order_relaxed);
+}
 
 bool sceneOn()
 {
@@ -2013,6 +2360,7 @@ void vsync()
 		flushAll();
 		s_sceneOn = false;
 		s_sceneOnShared.store(false, std::memory_order_relaxed);
+		s_prompt.store(0u, std::memory_order_relaxed);
 		applyAspect();
 		s_fightFrames = 0u;
 		toAllCores();

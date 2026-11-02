@@ -174,6 +174,7 @@ namespace
 			v = s_videoNext;
 		}
 		s_fpsMode = v.fpsMode;
+		hl_native::setRate(v.fpsMode);
 		hl_native::setShape(v.aspect, v.hudScale);
 		if (s_videoFirst)
 		{ // (the first one is what the .ini already says)
@@ -182,7 +183,7 @@ namespace
 		}
 		MTGS::RunOnGSThread([v]() {
 			Pcsx2Config::GSOptions c(GSConfig);
-			c.UpscaleMultiplier = v.upscale;
+			// (not the resolution: changing it live brings down the GS's merge on the next vsync, seen on Mali. It counts from the next start)
 			c.FXAA = v.filter == 2;
 			c.CASMode = v.filter == 3 ? GSCASMode::SharpenOnly : GSCASMode::Disabled;
 			c.LinearPresent = v.filter == 1 ? GSPostBilinearMode::BilinearSharp : GSPostBilinearMode::BilinearSmooth;
@@ -193,6 +194,8 @@ namespace
 	// A vsync that the limit leaves out: nothing is presented for it. (fps_mode 30: the game's 25 pictures a second, each once.)
 	bool skipPresent()
 	{
+		if (hl_native::presentsHere())
+			return true;
 		if (s_fpsMode != 30)
 			return false;
 		static auto s_last = std::chrono::steady_clock::now();
@@ -369,6 +372,8 @@ struct Bt4GsxArgs
 };
 
 __attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
+__attribute__((visibility("default"))) int Bt4Gsx_PresentRate() { return hl_native::presentRate(); }
+__attribute__((visibility("default"))) uint32_t Bt4Gsx_Prompt() { return hl_native::prompt(); }
 
 __attribute__((visibility("default"))) void Bt4Gsx_SetVideo(const void* video)
 {

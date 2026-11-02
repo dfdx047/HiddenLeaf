@@ -462,4 +462,8 @@
     <string name="saves_export_file">Exportar .ps2</string>
     <string name="saves_export_folder">Exportar pasta</string>
     <string name="saves_backup_hint">Antes de cada importação o cartão vai para saves_backups, em zip (os 10 últimos). Backups agora: %1$d. O save que entra substitui o de mesmo nome; os outros ficam.</string>
+    <string name="meter_interpolated">%1$d fps interpolado (jogo: %2$d)</string>
+    <string name="prompt_buttons">Botões grandes nos comandos</string>
+    <string name="prompt_buttons_text">Quando o jogo pede um botão (Mash, Unleash Ultimate Jutsu, a sequência de um jutsu), ele aparece grande perto do polegar, no lugar do controle.</string>
+    <string name="panel_resolution_hint">Vale na próxima vez que o jogo abrir.</string>
 </resources>

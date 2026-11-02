@@ -22,6 +22,12 @@ object TouchBridge {
     /** Vsyncs each of the game's frames takes (2: 25 pictures a second at PAL's 50 vsyncs). */
     @JvmStatic external fun nativeDivider(): Int
 
+    /** Pictures a second drawn in between (60, 120), or 0 when each of the game's goes to the screen. */
+    @JvmStatic external fun nativePresentRate(): Int
+
+    /** The button prompt on screen: the count in the lowest 4 bits, then a code per nibble (PromptView), left to right. */
+    @JvmStatic external fun nativePrompt(): Int
+
     /** The game frozen (the EE, the IOP and the sound together) or going on. */
     @JvmStatic external fun nativeSetPaused(paused: Boolean)
 
@@ -31,6 +37,10 @@ object TouchBridge {
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
 
     fun divider(): Int = runCatching { nativeDivider() }.getOrDefault(2)
+
+    fun presentRate(): Int = runCatching { nativePresentRate() }.getOrDefault(0)
+
+    fun prompt(): Int = runCatching { nativePrompt() }.getOrDefault(0)
 
     fun setPaused(paused: Boolean) {
         runCatching { nativeSetPaused(paused) }

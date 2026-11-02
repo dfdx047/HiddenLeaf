@@ -64,6 +64,7 @@ class GamePanel(
             settings.set(EngineSettings.SCALE, it / 4)
             onApply()
         }
+        hint(context.getString(R.string.panel_resolution_hint))
         choices(
             context.getString(R.string.screen_filter),
             listOf(context.getString(R.string.filter_bilinear) to 0, context.getString(R.string.filter_sharp) to 1, "FXAA" to 2, "CAS" to 3),

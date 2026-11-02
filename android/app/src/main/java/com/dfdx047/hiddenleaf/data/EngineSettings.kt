@@ -63,6 +63,7 @@ class EngineSettings(private val file: File) {
         const val METER = "meter"                 // the counter: 0 off, 1 fps, 2 and the frame's time, 3 and EE, VU1 and GS
         const val TEXTURE_PACK = "texture_pack"   // texture packs on / off, default on
         const val FILTER = "filter"               // screen filter: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
+        const val PROMPT = "prompt_buttons"       // 1: a big button near the thumb when the game asks for one
         const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60 or 120 (those two interpolated)
 
         // the launcher's own, read by the Android glue of the engine at start

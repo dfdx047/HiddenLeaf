@@ -1,0 +1,46 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 564d873..40ed7e2 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -1270,6 +1270,7 @@ namespace ps2_stubs
+         const uint32_t srcAddr = getRegU32(ctx, 5);
+         const int32_t size = static_cast<int32_t>(getRegU32(ctx, 6));
+         const uint8_t *src = (size > 0) ? getConstMemPtr(rdram, srcAddr) : nullptr;
++        std::fprintf(stderr, "[mc] write fd %d from 0x%x size %d (ra 0x%x)\n", fd, srcAddr, size, getRegU32(ctx, 31));
+ 
+         int32_t result = kMcResultNoEntry;
+         {
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 83e481a..850a7c3 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -319,6 +319,29 @@ namespace ps2_stubs
+                             hl_dumpMemory(runtime, tick);
+                             continue;
+                         }
++                        if (word == "STATEBENCH")
++                        {   // what saving and loading the game's memory costs, for docs/online.md
++                            static std::vector<uint8_t> s_copy(PS2_RAM_SIZE);
++                            uint8_t *ram = runtime->memory().getRDRAM();
++                            const auto t0 = std::chrono::steady_clock::now();
++                            for (int i = 0; i < 20; ++i)
++                                std::memcpy(s_copy.data(), ram, PS2_RAM_SIZE);
++                            const auto t1 = std::chrono::steady_clock::now();
++                            uint64_t hash = 14695981039346656037ull;
++                            for (uint32_t i = 0u; i < PS2_RAM_SIZE; i += 8u)
++                                hash = (hash ^ *reinterpret_cast<const uint64_t *>(ram + i)) * 1099511628211ull;
++                            const auto t2 = std::chrono::steady_clock::now();
++                            std::fprintf(stderr, "[state] v%llu copy of %u MB: %.2f ms; hash of it: %.2f ms = %016llx\n", static_cast<unsigned long long>(tick), PS2_RAM_SIZE >> 20,
++                                         std::chrono::duration<double, std::milli>(t1 - t0).count() / 20.0, std::chrono::duration<double, std::milli>(t2 - t1).count(), static_cast<unsigned long long>(hash));
++                            continue;
++                        }
++                        if (word.rfind("POKE:", 0) == 0)
++                        {   // POKE:addr:byte[:count] (hex): for finding what a value does
++                            unsigned addr = 0u, value = 0u, count = 1u;
++                            if (std::sscanf(word.c_str(), "POKE:%x:%x:%x", &addr, &value, &count) >= 2 && runtime)
++                                std::memset(runtime->memory().getRDRAM() + (addr & 0x1FFFFFFu), static_cast<int>(value), count);
++                            continue;
++                        }
+                         if (word == "IOP")
+                         {
+                             hl_dumpIop(runtime);
