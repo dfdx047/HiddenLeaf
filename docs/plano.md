@@ -55,7 +55,8 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 ### 4. Pacote de código do UN6 A35
 - [x] O pacote é o jogo do mod inteiro recompilado (`recomp/build.sh --mod`, `recomp/android/build.sh --mod`), não só
       as funções alteradas: `libun5_<id>.so`, carregada pelo launcher com o mod ligado (2026-11-03).
-- [ ] A35 até a luta (para na checagem do cartão); Alpha 1.1X.
+- [x] A35 até a luta no Cube (com o save copiado à mão, 2026-11-03).
+- [ ] Save do A35 pelo launcher; Alpha 1.1X.
 - [ ] Depois: interpretador para as funções de um mod desconhecido.
 
 ### 5. Ajustes do jogo
@@ -593,10 +594,21 @@ como entrada todo `J` de outro ELF para o meio de uma função (o MOD.BIN volta 
 0x941838 → 0x10bd74), além das chamadas para código depois de preenchimento (0x9476c0). No jogo base isso só acrescenta
 a entrada 0x1d3950. `build/lab/reovl.sh <id> <overlay>...` refaz só esses overlays.
 
-No Cube, o A35 roda com o código próprio: logos, abertura, título "Ultimate Ninja 6 3.0" com "Novo jogo" e "Carregar
-jogo", menus em português, sem travar. **Para na checagem do cartão:** tanto "Novo jogo" quanto "Carregar jogo" dizem
-que não há dado do UN6 no slot 1, e "Não" em "Voltar à Tela Inicial?" volta à mesma mensagem. Hipótese não testada: o
-mod espera um save do UN6 (pasta `BASLUS-55606...`) ou a criação de save não passa pelo HLE do cartão nesse caminho.
+No Cube, o A35 roda com o código próprio: logos, abertura, título "Ultimate Ninja 6 3.0", menus em português. **O cartão
+precisa de um save na pasta do mod, `BASLUS-55606NARUTO6`:** sem ela, "Novo jogo" e "Carregar jogo" dizem que não há dado
+do UN6 no slot 1, e "Não" em "Voltar à Tela Inicial?" volta à mesma mensagem. Com o save do UN5 copiado para essa pasta (e o
+arquivo de cabeçalho renomeado), o A35 carrega ("Carregado com sucesso"), abre o Combate Livre e a seleção com a grade do UN6
+e chega ao "Lutem!". Cada travada seguinte foi um endereço que faltava, achado e corrigido nos mapas (`ovlelf --from`: código
+onde outros ELFs pulam ou chamam dentro dos dados do MOD.BIN; os overlays passam a ver as chamadas dos outros que não ocupam o
+mesmo endereço). **Às 05:30 o A35 lutou no Cube:** "Carregando", "Lutem!", luta Naruto x Naruto com o HUD
+do UN6 e o "Rasengan Gigante", renderizador nativo ligado (v5873 a v9850, 66 s), e depois a volta à seleção de personagem.
+A rota para de apertar em v6500, então a CPU deve ter vencido; a tela de resultado não foi conferida. Sem medida de fps.
+Os passos novos do `recomp/build.sh` (`ovlelf --from`, os outros overlays no `fnmap`) só rodaram pelo
+`build/lab/reovl.sh`, que faz o mesmo; um `--mod` do zero não foi repetido. No jogo base, os mapas dos overlays ganham
+entradas (BTL +4, ADV +63, ETC +3, o principal +1) na próxima geração, sem perder nenhuma; isso não foi testado.
+
+Para o jogador: falta o launcher criar o save do mod (copiar o do UN5 para `BASLUS-55606NARUTO6`, como fiz à mão) ou
+descobrir por que o A35 não cria um save novo.
 
 **Opções do launcher (itens 9 e 13):** saíram efeitos do PS2, volumes, renderizador, profundidade precisa, ASTC, pular
 quadros, present mode e a orientação retrato (o jogo é só paisagem). Testados: tema claro, escuro e do sistema, atalho na tela
