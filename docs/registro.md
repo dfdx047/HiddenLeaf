@@ -37,6 +37,27 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 08:06, `21c8a48`: o jogo não trava mais depois do KO (APK 0.2.0 de 08:06)
+
+- **Sintoma (Odin 3, rota completa, build `0259d54`):** no fim da luta (CPU vence, v10046 KO) o jogo parou em v10257:
+  log parado, som desligado (`playing 0`), tela branca com os controles por cima, processo vivo. A `GameThread` em R,
+  100% de CPU: `simpleperf` mostra o alocador do heap do jogo (`0x1D7430` → … → `0x117C70` → `0x118640` →
+  `0x118E60`) lendo um endereço inválido em laço; cada `read32` lança exceção (`PS2Memory::read32`, desalinhado), o
+  `Load32` devolve 0 e o laço da lista livre nunca acaba (60% do tempo em `libunwind`).
+- **Causa:** `hl_game.cpp` `cameraScale`, vindo de `2fee126` (11-03 03:17): ao sair do modo largo, punha 1,0 no `+0x274`
+  de todas as câmeras que a luta tinha alargado, inclusive as que o jogo já tinha liberado. A escrita caía num bloco
+  livre e quebrava a lista livre do heap. **Regressão de `2fee126`.**
+- **Correção:** só volta a 1,0 a câmera cujo campo ainda tem a escala larga que nós escrevemos. Log: `[cam] v10272 2 of 3
+  cameras back to 1` (a terceira já era outro dado).
+- **Teste:** Odin 3 (16:9), mesma rota: KO → quadro branco → seleção de personagem → segunda luta (Naruto x Sakura) →
+  KO → seleção, sem travar (até v17531). Falta a rota completa nos outros aparelhos e em 20:9.
+- **Ainda não visto no Android:** a tela WINNER com o personagem (o vídeo de referência do PCSX2 tem). Os ✕ a cada 150
+  vsyncs depois de v10400 podem ter pulado a tela; a rota nova espera até v11000.
+- **Correção da entrada de 07:50:** a `libun5.so` das 03:31 já tinha o `264b764` (o `recomp/android/build.sh` das 07:50
+  não recompilou nada); o APK das 05:27 lia `un5_mods.txt`.
+- O vídeo de referência (`~/Vídeos/Capturas de vídeo/Gravação_de_tela_20261031_234651.webm`) **não tem trilha de
+  áudio**: não serve para comparar o som.
+
 ### 2026-11-03 07:50, sem build novo: o registro começa
 
 - Criado este arquivo a partir do `git log` e do `docs/plano.md` (as entradas abaixo são reconstruídas; números
