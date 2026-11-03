@@ -152,7 +152,7 @@
     <string name="fps60_text">O jogo calcula a luta 30 vezes por segundo, como no PS2; com isto são desenhadas imagens intermediárias (interpolação de quadros), para 60 ou 120 por segundo. A luta em si e o online não mudam. Custa cerca do dobro de GPU: para GPUs fortes. Experimental: em cortes de câmera não há imagem intermediária.</string>
     <string name="off">Desligado</string>
     <string name="aspect_screen">Tela</string>
-    <string name="aspect_hint">4:3: a imagem do jogo. As proporções largas e Tela mostram mais do cenário nas laterais na luta e na campanha, com o HUD sem esticar; menus e filmes ficam em 4:3. Em tela até 4:3 nada muda.</string>
+    <string name="aspect_hint">4:3: a imagem do jogo. As proporções largas e Tela mostram mais do cenário nas laterais na luta e na campanha, com o HUD sem esticar; menus e filmes são esticados para a mesma forma. Em tela até 4:3 nada muda.</string>
     <string name="present_mode">Present mode</string>
     <string name="present_auto">Automático</string>
     <string name="present_mode_text">Como as imagens prontas chegam à tela. Automático: Mailbox onde o aparelho tiver. FIFO (VSync) espera a atualização da tela: sem tearing, um pouco mais de latência, ritmo mais estável em alguns aparelhos. Mailbox: sem tearing, sem espera. Immediate: menor latência, pode ter tearing. Vale na próxima vez que o jogo abrir.</string>

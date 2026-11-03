@@ -152,7 +152,7 @@
     <string name="fps60_text">El juego calcula la pelea 30 veces por segundo, como en PS2; con esto se dibujan imágenes intermedias (interpolación de cuadros), para 60 o 120 por segundo. La pelea en sí y el juego en línea no cambian. Cuesta cerca del doble de trabajo de GPU: para GPUs potentes. Experimental: en los cortes de cámara no hay imagen intermedia.</string>
     <string name="off">Desactivado</string>
     <string name="aspect_screen">Pantalla</string>
-    <string name="aspect_hint">4:3: la imagen del juego. Las proporciones anchas y Pantalla muestran más del escenario a los lados en combate y en la campaña, con el HUD sin estirar; los menús y películas siguen en 4:3. En una pantalla de hasta 4:3 nada cambia.</string>
+    <string name="aspect_hint">4:3: la imagen del juego. Las proporciones anchas y Pantalla muestran más del escenario a los lados en combate y en la campaña, con el HUD sin estirar; los menús y películas se estiran a la misma forma. En una pantalla de hasta 4:3 nada cambia.</string>
     <string name="present_mode">Modo de presentación</string>
     <string name="present_auto">Automático</string>
     <string name="present_mode_text">Cómo llegan las imágenes terminadas a la pantalla. Automático: Mailbox donde el dispositivo lo tenga. FIFO (VSync) espera la actualización de la pantalla: sin tearing, un poco más de latencia, ritmo más estable en algunos dispositivos. Mailbox: sin tearing, sin espera. Immediate: la menor latencia, puede haber tearing. Se aplica la próxima vez que se inicie el juego.</string>

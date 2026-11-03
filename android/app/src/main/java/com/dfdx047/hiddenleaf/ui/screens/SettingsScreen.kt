@@ -109,19 +109,6 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.aspect_hint),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(stringResource(R.string.orientation), style = MaterialTheme.typography.titleSmall)
-            ChipRow(
-                options = listOf(
-                    stringResource(R.string.orientation_landscape) to 0, stringResource(R.string.orientation_portrait) to 1,
-                    stringResource(R.string.orientation_sensor) to 2,
-                ),
-                selected = get(EngineSettings.ORIENTATION, 0),
-                onSelect = { vm.setting(EngineSettings.ORIENTATION, it) },
-            )
-            Text(
-                stringResource(R.string.orientation_text),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.unlock_all_text), get(EngineSettings.UNLOCK_ALL, 0) != 0) {
                 vm.setting(EngineSettings.UNLOCK_ALL, if (it) 1 else 0)
             }
@@ -130,65 +117,7 @@ fun SettingsScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.ps2_effects), NinjaIcons.Leaf, accent = Konoha.ChakraAmber) {
-            val fxOff = get(EngineSettings.FX_OFF, 0)
-            listOf(
-                Triple(1, R.string.fx_outline, R.string.fx_outline_text),
-                Triple(2, R.string.fx_see, R.string.fx_see_text),
-                Triple(4, R.string.fx_depth, R.string.fx_depth_text),
-                Triple(8, R.string.fx_glow, R.string.fx_glow_text),
-                Triple(16, R.string.fx_blur, R.string.fx_blur_text),
-            ).forEach { (bit, title, sub) ->
-                ToggleRow(stringResource(title), stringResource(sub), fxOff and bit == 0) { on ->
-                    vm.setting(EngineSettings.FX_OFF, if (on) fxOff and bit.inv() else fxOff or bit)
-                }
-            }
-            val glow = get(EngineSettings.GLOW, EngineSettings.GLOW_DEFAULT)
-            StepSlider(stringResource(R.string.glow_strength), { "${it * 10}%" }, glow / 10, 0..20) { vm.setting(EngineSettings.GLOW, it * 10) }
-        }
-
-        SectionCard(stringResource(R.string.audio), Icons.AutoMirrored.Rounded.VolumeUp, accent = Konoha.LeeGreen) {
-            val music = get(EngineSettings.MUSIC, 100)
-            StepSlider(stringResource(R.string.music), { "${it * 10}%" }, music / 10, 0..20) { vm.setting(EngineSettings.MUSIC, it * 10) }
-            val fx = get(EngineSettings.EFFECTS, 100)
-            StepSlider(stringResource(R.string.sfx), { "${it * 10}%" }, fx / 10, 0..20) { vm.setting(EngineSettings.EFFECTS, it * 10) }
-        }
-
         SectionCard(stringResource(R.string.performance), Icons.Rounded.Speed, accent = MaterialTheme.colorScheme.secondary) {
-            val gpu by vm.gpuName.collectAsStateWithLifecycle()
-            val choice = get(EngineSettings.RENDERER, Renderer.AUTO).coerceIn(0, 2)
-            Text(stringResource(R.string.renderer), style = MaterialTheme.typography.titleSmall)
-            ChipRow(
-                options = listOf(
-                    stringResource(R.string.renderer_auto) to Renderer.AUTO, "Vulkan" to Renderer.VULKAN, "OpenGL ES" to Renderer.OPENGL,
-                ),
-                selected = choice,
-                onSelect = { vm.setRenderer(it) },
-            )
-            val picks = if (Renderer.gpuApi(choice, gpu) == 1) "OpenGL ES" else "Vulkan"
-            Text(
-                stringResource(R.string.renderer_now, gpu.ifEmpty { "?" }, picks),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (choice == Renderer.OPENGL && Renderer.isMali(gpu)) {
-                Text(
-                    stringResource(R.string.renderer_mali_gl),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
-                )
-            }
-            Text(
-                stringResource(R.string.renderer_text),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ToggleRow(stringResource(R.string.frag_depth), stringResource(R.string.frag_depth_text), get(EngineSettings.FRAG_DEPTH, 1) != 0) {
-                vm.setting(EngineSettings.FRAG_DEPTH, if (it) 1 else 0)
-            }
-            ToggleRow(stringResource(R.string.astc), stringResource(R.string.astc_text), get(EngineSettings.ASTC, 0) != 0) {
-                vm.setting(EngineSettings.ASTC, if (it) 1 else 0)
-            }
-            ToggleRow(stringResource(R.string.frame_skip), stringResource(R.string.frame_skip_text), get(EngineSettings.FRAME_SKIP, 1) != 0) {
-                vm.setting(EngineSettings.FRAME_SKIP, if (it) 1 else 0)
-            }
             Text(stringResource(R.string.panel_fps_limit), style = MaterialTheme.typography.titleSmall)
             ChipRow(
                 options = listOf(
@@ -200,18 +129,6 @@ fun SettingsScreen(vm: AppViewModel) {
             )
             Text(
                 stringResource(R.string.panel_fps_hint),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(stringResource(R.string.present_mode), style = MaterialTheme.typography.titleSmall)
-            ChipRow(
-                options = listOf(
-                    stringResource(R.string.present_auto) to 0, "FIFO (VSync)" to 1, "Mailbox" to 2, "Immediate" to 3,
-                ),
-                selected = get(EngineSettings.PRESENT, 0).coerceIn(0, 3),
-                onSelect = { vm.setting(EngineSettings.PRESENT, it) },
-            )
-            Text(
-                stringResource(R.string.present_mode_text),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

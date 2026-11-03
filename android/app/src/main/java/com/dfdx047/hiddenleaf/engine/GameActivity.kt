@@ -76,11 +76,9 @@ class GameActivity : SDLActivity() {
     /** The player's choice (launcher, Settings): 0 landscape, 1 portrait, 2 as the device is held. */
     private var orientation = 0
 
-    private fun orientationFlag(): Int = when (orientation) {
-        1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-        2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
-        else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-    }
+    // Landscape only: portrait was asked for (SENSOR_PORTRAIT) and the Retroid stayed in landscape, so the choice is
+    // no longer offered and an old saved value is ignored.
+    private fun orientationFlag(): Int = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
     /** SDL picks an orientation from the window's size when it is made; the player's choice wins over it. */
     override fun setOrientationBis(w: Int, h: Int, resizable: Boolean, hint: String?) {
