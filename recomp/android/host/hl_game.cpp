@@ -62,14 +62,53 @@ namespace
         return v;
     }
 
-    void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    uint64_t g_tick = 0u;          // vsyncs
+    uint64_t g_fighterTick = 0u;   // the last vsync a fighter read its input (0x21E660): a fight is going on
+
+    // The wide projection is for the 3D of a fight (while the fighters read their input, and an Ougi's film) and of the
+    // campaign. Everything else drawn through a camera (the result screen's picture, menus) is 2D made for 4:3: squeezed, it
+    // leaves the sides of the screen with nothing drawn on them. The result screen builds its matrices once, in the vsyncs
+    // right after the fight: hence the short wait (6 vsyncs, the fighters read their input every 2).
+    bool ougiOnScreen();
+    bool wideCamera()
     {
-        const float scale = hl_game::g_cameraXScale.load(std::memory_order_relaxed);
+        const int mode = hl_game::overlay();
+        return mode == 2 || (mode == 1 && ((g_fighterTick != 0u && g_tick - g_fighterTick < 6u) || ougiOnScreen()));
+    }
+
+    void cameraScale(uint8_t *rdram, uint32_t camera)
+    {
+        const float scale = wideCamera() ? hl_game::g_cameraXScale.load(std::memory_order_relaxed) : 1.0f;
+        static float s_last = 1.0f;
+        if (scale != s_last)
+        {
+            s_last = scale;
+            std::fprintf(stderr, "[cam] v%llu x %.3f\n", static_cast<unsigned long long>(g_tick), scale);
+        }
+        std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
+        // (the cameras the fight made wide: a picture may be built later from one of them without coming back here)
+        static uint32_t s_cameras[16];
+        static uint32_t s_count = 0u;
         if (scale != 1.0f)
         {
-            const uint32_t camera = GPR_U32(ctx, 4);
-            std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
+            bool known = false;
+            for (uint32_t i = 0; i < s_count; ++i)
+                known = known || s_cameras[i] == camera;
+            if (!known && s_count < 16u)
+                s_cameras[s_count++] = camera;
         }
+        else if (s_count != 0u)
+        {
+            for (uint32_t i = 0; i < s_count; ++i)
+                std::memcpy(rdram + ((s_cameras[i] + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
+            std::fprintf(stderr, "[cam] v%llu %u cameras back to 1\n", static_cast<unsigned long long>(g_tick), s_count);
+            s_count = 0u;
+        }
+    }
+
+    void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        cameraScale(rdram, GPR_U32(ctx, 4));
         g_cameraOriginal(rdram, ctx, runtime);
     }
 
@@ -103,7 +142,6 @@ namespace
 
     // HL_FTRACE=1: every change of a fighter's action and input, for finding how the game's moves work
     PS2Runtime::RecompiledFunction g_inputOriginal = nullptr;
-    uint64_t g_tick = 0u;
 
     // ---- "Special with one button" (the launcher's Controls tab). Ultimate Ninja 5's Jutsu and Ougi are a tap of chakra (each
     // spends 5 of the fighter's 15) and then the attack. Two places, for a human fighter only:
@@ -373,6 +411,7 @@ namespace
     {
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
+        g_fighterTick = g_tick;
         special(f);
         static const bool s_trace = std::getenv("HL_FTRACE") != nullptr;
         if (!s_trace)

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -74,6 +75,27 @@ namespace
             }
             std::fwrite(s_chunk.data(), sizeof(float), s_chunk.size(), s_dump);
             s_dumped += kChunkFrames;
+        }
+        // HL_PERF: how loud it was, a line a second
+        static const bool s_levels = std::getenv("HL_PERF") != nullptr;
+        if (s_levels)
+        {
+            static float s_peak = 0.0f;
+            static double s_sum = 0.0;
+            static uint32_t s_chunks = 0u;
+            for (const float v : s_chunk)
+            {
+                s_peak = std::max(s_peak, std::fabs(v));
+                s_sum += static_cast<double>(v) * v;
+            }
+            if (++s_chunks == 48000u / kChunkFrames)
+            {
+                std::fprintf(stderr, "[snd] rms %.4f peak %.3f queued %d playing %d\n", std::sqrt(s_sum / (s_chunks * s_chunk.size())), s_peak,
+                             s_stream ? SDL_GetAudioStreamQueued(s_stream) : -1, s_playing ? 1 : 0);
+                s_peak = 0.0f;
+                s_sum = 0.0;
+                s_chunks = 0u;
+            }
         }
         if (!s_stream)
             return;
