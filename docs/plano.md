@@ -324,6 +324,7 @@ Notas da investigação (para referência):
 | `HL_CD_LOG=1` | cada `sceCdRead` (lbn, setores, buffer, ra) (0004) |
 | `HL_EE_DUMP=1` | a cada 5 s de EE ocioso, o que cada thread espera (0005) |
 | `HL_FLOAT_LOG=1` | a cada 300 vsyncs, quantas diferenças de float PS2 × IEEE houve (expoente 255, divisão por zero, comparação, arredondamento do CVT.W.S, DIV/SQRT do VU0) e em que ponto do executável (deslocamento a partir de `__executable_start`, `addr2line`) (0024) |
+| `HL_GS_DUMP=cena,...` (Android) | dump do GS do PCSX2 (`.gs.zst`) de `HL_GS_DUMP_FRAMES` vsyncs (300) em cada cena da rota, em `<pasta do jogo>/gsdumps/<HL_GS_DUMP_DEVICE>_<cena>.gs.zst`; `cena@vsync` muda o vsync; cenas e gatilhos em `hl_game.cpp` (`kDumpScenes`) e no `docs/registro.md` (11-03 22:05); `tools/gsdump.py info/shot` confere no PC |
 | arquivos `hl_shot`, `hl_ram`, `hl_pad` | criados no diretório de execução enquanto o jogo roda (o runtime lê e apaga): `hl_shot` grava um quadro como o `HL_FRAME_DUMP`; `hl_ram` grava os 32 MB da RAM do EE em `hl_frames/ram_<tick>.bin` e os 4 MB da VRAM do GS, no layout do GS, em `vram_<tick>.bin` (0031; o `GS.bin` do savestate do PCSX2 tem a VRAM no mesmo layout a partir do byte 425, mas no renderizador de hardware os framebuffers não estão nela); `hl_pad` com botões (`UP UP CROSS`, `WAIT` = pausa) aperta cada um por 6 vsyncs e solta por 6 (0026) |
 
 Depurar com gdb: `rdram = $rdi`, `ctx = $rsi`, `r[n]` em `$rsi+n*16`, `pc` em `$rsi+512`; rodar sob gdb (ptrace_scope

@@ -34,8 +34,51 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | UN6 Alpha 1.1X | quebrado | | | | sem entrada em `KNOWN_MODS`/`CODE_RANGES`, sem pacote |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
+| Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-03 22:05, `HL_GS_DUMP`: dumps do GS por cena para o Nominum Render (prontos em `~/Downloads/gsdumps/`)
+
+- **Os dumps estão prontos:** 52 arquivos `<aparelho>_<cena>.gs.zst` (4,0 GB) em `~/Downloads/gsdumps/` no PC, fora do
+  git. Aparelhos: `rp5`, `cube`, `odin3` (16:9) e `odin3-20x9` (`wm size 2400x1080`, janela 2400x1080 no log). Cenas, 13
+  por aparelho: logos, filme, titulo, menu, selecao, luta_inicio, ougi_jogador, ougi_cpu, ko, winner, resultado,
+  campanha_vila, campanha_cortina. Todos com 304 vsyncs, `state version 9`, serial SLES-55605, CRC C071D4C1, captura
+  640x480 e o registro de proveniência (`TargetsReadBack`). Conferidos pelo `tools/gsdump.py info` (lê o fluxo inteiro,
+  0 erros) e pelas capturas do cabeçalho (`gsdump.py shot`): cada cena é a mesma nos quatro. **Não abri nenhum no PCSX2**
+  (falta confirmar que o estado do ARMSX2, versão 9 como a do PCSX2, carrega igual).
+- **Como (sem mexer no renderizador nem no Nominum):** `hl_gsx.cpp` (a `libbt4gsx`, leitor do fluxo) abre o dump com o
+  código do PCSX2 que vem no ARMSX2, como o `GSRenderer::VSync`: na thread do GS, `ReadbackTextureCache`, `GSfreeze`,
+  `SaveSnapshotToMemory` e `GSDumpBase::CreateZstDump` com os registradores privilegiados. Depois grava o fluxo
+  **cru** do jogo (transfers, ReadFIFO2, registradores + vsync), antes do nativo. O caminho próprio do `GSRenderer` só
+  veria o que chega ao `GSState::Transfer`, e na luta isso é só o que o nativo deixa passar. Antes do `Freeze`, o nativo
+  entrega ao GS o que segura (`hl_native::flushAll`, a mesma chamada do ReadFIFO2). Vários dumps podem gravar juntos (KO
+  e WINNER se cruzam). Exportado `Bt4Gsx_GsDump(base, frames)`.
+- **Gatilhos (`hl_game.cpp`, `dumpTick`):** `HL_GS_DUMP=cena,...`, `HL_GS_DUMP_FRAMES=N` (300), `HL_GS_DUMP_DEVICE` (padrão
+  `ro.product.model`), `cena@vsync` muda o vsync de qualquer uma. Uma vez por cena; `ko` só com o BTL e as duas da
+  campanha só com o ADV carregados (senão `skipped`). Saída em `<pasta do jogo>/gsdumps/`.
+  - **Por detector que já existe:** `luta_inicio` (entrada do lutador, `0x21E660`, a mesma da câmera larga: v6007),
+    `ougi_jogador` e `ougi_cpu` (o detector de Ougi do especial, lutador em ação 8 com golpe de Ougi `0xF00000`,
+    separado por `humanFighter`: v6537 e v6619).
+  - **Por vsync fixo da rota** (sem detector): `logos` 1200, `filme` 2000, `titulo` 3000, `menu` 3800, `selecao` 4700,
+    `ko` 7880, `winner` 8540, `resultado` 8950 (rota v3), `campanha_vila` 8150 e `campanha_cortina` 9080 (rota de
+    campanha). A vila tem detector (ADV + nativo ligado), mas ele vê primeiro a cena do portão (v4559), não o passeio.
+  - Primeira rodada com os vsyncs tirados do vídeo `rp5_v3h`: `titulo` 2900 saiu preto, `menu` 3620 era o NOW LOADING,
+    `winner` 8050 ainda a luta depois do KO, `resultado` 8550 a WINNER. Corrigidos para os de cima e refeitos nos quatro
+    (capturas: corredor 3D do título, Mode Select, WINNER "Naruto Uzumaki", Ninja Song 85/96/1161/626). `luta_inicio`
+    abre preto em todos: é o fade de entrada da luta (146 MB de fluxo).
+- **Rotas (em `build/lab`, `gsdrun.sh SERIAL APARELHO ENV ENDV`):** `hl_env_gsd_v3.txt` (rota v3 + as 11 cenas da luta),
+  `hl_env_gsd_cpu2.txt` (a v3 sem o ○ e sem o `POKE` da luta 1, `HL_SP_CPU=600`: só `ougi_cpu`), `hl_env_gsd_camp.txt`
+  (campanha) e `hl_env_gsd_fix.txt` (as 4 corrigidas, no 16:9).
+- **Correção das entradas de 09:40 e 10:05 (o "Ougi Linked da CPU"):** o Ougi da luta 1 da rota v3 é **do jogador**.
+  O botão do especial é o ○, e a rota aperta ○ a cada 12 vsyncs, então o "especial com um botão" dá o Ougi
+  (`[sp] v6524 fighter d69a00 ougi, chakra 15.0`). Com `HL_SP_CPU`, a CPU (`d7b9a0`) faz o próprio em v6619.
+- **Custo:** enquanto um dump grava, o jogo cai para 7–9 fps (KO no RP5) e, com dois juntos, 4–5. A causa é o zstd
+  nível 6 do PCSX2 na thread de replay (3 a 6 MB por vsync na luta). O conteúdo não muda: o jogo espera o anel, e os
+  vsyncs da rota, o KO e o Ougi caem iguais nos três aparelhos.
+- **Build normal (libsdr nos stubs), o item "em andamento" das 13:45:** 18 rodadas, 0 `missing-target`. As v3 foram até
+  v12104 (RP5), v11905 (Cube), v12244 (Odin) e v12194 (Odin 20:9), além do v11747–11750 onde a build da libsdr travava.
+- **Ferramenta nova:** `tools/gsdump.py` (`info`, `shot`) lê `.gs` e `.gs.zst` (precisa do programa `zstd`).
 
 ### 2026-11-03 13:45, travamento da libsdr: o heap do jogo devolve a mesma pilha a quatro threads
 

@@ -6,12 +6,17 @@
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <sys/system_properties.h>
 #include <thread>
+#include <vector>
 
 namespace hl_game
 {
@@ -22,6 +27,8 @@ namespace hl_game
     std::atomic<uint32_t> g_specialMask{0x20u};
     std::atomic<int> g_mashPercent{100};
     bool (*g_nativeOn)() = nullptr;
+    void (*g_gsDump)(const char *, int) = nullptr;
+    std::string g_gsDumpDir;
 }
 
 
@@ -459,10 +466,165 @@ namespace
         }
     }
 
+    // ---- HL_GS_DUMP=scene,scene,... (HL_GS_DUMP_FRAMES=N, 300 by default): a PCSX2 GS dump of N vsyncs at each scene of the
+    // automatic route, once per scene, into <game folder>/gsdumps/<device>_<scene>.gs.zst (libbt4gsx records it). A scene
+    // with a detector starts where the detector first sees it; the others at a fixed vsync of the route (build/lab: hl_env_v3.txt
+    // for the fight route, hl_env_camp.txt for the campaign). "scene@vsync" puts any of them at a vsync of one's own.
+    // HL_GS_DUMP_DEVICE names the device (by default ro.product.model).
+    enum class DumpBy { Vsync, FightStart, OugiHuman, OugiCpu };
+    struct DumpScene
+    {
+        const char *name;
+        DumpBy by;
+        uint64_t at;      // the route's vsync (DumpBy::Vsync)
+        int overlayNeeded; // 0 any, else hl_game::overlay() must be this one at the vsync (a guard for the wrong route)
+    };
+    // Vsyncs of the route v3 (and of the campaign route), from rec/rp5_v3h and rec/rp5_camp3 (the same on the RP5, the Cube and
+    // the Odin 3 in 16:9 and 20:9 up to the first fight's results):
+    //   logos 1200: the BANDAI logo fading out and the CRIWARE / CyberConnect2 film (LOGO_C.PSS from ~1405)
+    //   filme 2000: the opening (OPENING.PSS from ~1876, skipped by START at 2866)
+    //   titulo 3000: the title after the skip (at 2900 it is still black), to the START at 3116
+    //   menu 3800: Mode Select (after New Game at 3436 and its NOW LOADING, still on at 3620), Free Battle at 3965
+    //   selecao 4700: the character selection
+    //   ko 7880: the end of the player's Ougi (from 6524: the route's circle is the special button) and the K.O. at 7936
+    //   winner 8540: WINNER with "Naruto Uzumaki" and his picture (at 8050 the fight is still on screen after the K.O.)
+    //   resultado 8950: "Ninja Song" (Health, Time, Bonus, Ryo; at 8550 it is still the WINNER)
+    //   campanha_vila 8150: walking in the village (the campaign route's LRIGHT from 8100; the ADV detector, the native
+    //     renderer on, first sees the cut scene at the gate, v4559, not the walk)
+    //   campanha_cortina 9080: the first change of area (the native off at 9112 to 9199: the curtain and the loading)
+    const DumpScene kDumpScenes[] = {
+        {"logos", DumpBy::Vsync, 1200u, 0},         {"filme", DumpBy::Vsync, 2000u, 0},
+        {"titulo", DumpBy::Vsync, 3000u, 0},        {"menu", DumpBy::Vsync, 3800u, 0},
+        {"selecao", DumpBy::Vsync, 4700u, 0},       {"luta_inicio", DumpBy::FightStart, 0u, 1},
+        {"ougi_jogador", DumpBy::OugiHuman, 0u, 1}, {"ougi_cpu", DumpBy::OugiCpu, 0u, 1},
+        {"ko", DumpBy::Vsync, 7880u, 1},            {"winner", DumpBy::Vsync, 8540u, 0},
+        {"resultado", DumpBy::Vsync, 8950u, 0},     {"campanha_vila", DumpBy::Vsync, 8150u, 2},
+        {"campanha_cortina", DumpBy::Vsync, 9080u, 2},
+    };
+    constexpr uint32_t kMoveOugi = 0x00F00000u;
+
+    struct DumpWanted
+    {
+        DumpScene scene;
+        bool done;
+    };
+    std::vector<DumpWanted> g_dumpWanted;
+    int g_dumpFrames = 300;
+    std::string g_dumpDevice;
+
+    void dumpSetup()
+    {
+        const char *list = std::getenv("HL_GS_DUMP");
+        if (list == nullptr || list[0] == '\0')
+            return;
+        if (const char *f = std::getenv("HL_GS_DUMP_FRAMES"))
+            g_dumpFrames = std::max(1, std::atoi(f));
+        if (const char *d = std::getenv("HL_GS_DUMP_DEVICE"); d != nullptr && d[0] != '\0')
+            g_dumpDevice = d;
+        else
+        {
+            char model[PROP_VALUE_MAX] = {};
+            __system_property_get("ro.product.model", model);
+            for (const char *c = model; *c; ++c)
+                g_dumpDevice += std::isalnum(static_cast<unsigned char>(*c)) ? static_cast<char>(std::tolower(static_cast<unsigned char>(*c))) : '_';
+            if (g_dumpDevice.empty())
+                g_dumpDevice = "android";
+        }
+        std::string text = list;
+        size_t pos = 0;
+        while (pos <= text.size())
+        {
+            const size_t comma = std::min(text.find(',', pos), text.size());
+            std::string item = text.substr(pos, comma - pos);
+            pos = comma + 1;
+            if (item.empty())
+                continue;
+            uint64_t at = 0u;
+            const size_t atSign = item.find('@');
+            if (atSign != std::string::npos)
+            {
+                at = std::strtoull(item.c_str() + atSign + 1, nullptr, 10);
+                item.resize(atSign);
+            }
+            bool known = false;
+            for (const DumpScene &s : kDumpScenes)
+                if (item == s.name)
+                {
+                    DumpWanted w{s, false};
+                    if (at != 0u)
+                    {
+                        w.scene.by = DumpBy::Vsync;
+                        w.scene.at = at;
+                    }
+                    g_dumpWanted.push_back(w);
+                    known = true;
+                }
+            if (!known)
+                std::fprintf(stderr, "[gsdump] unknown scene '%s'\n", item.c_str());
+        }
+        std::fprintf(stderr, "[gsdump] %zu scenes, %d vsyncs each, device %s, into %s\n", g_dumpWanted.size(), g_dumpFrames, g_dumpDevice.c_str(),
+                     hl_game::g_gsDumpDir.c_str());
+    }
+
+    // The Ougi detector (the one of the special button, ougiOnScreen) by who does it: 1 a human fighter, 2 the CPU.
+    int ougiBy()
+    {
+        int who = 0;
+        for (int i = 0; i < 4; ++i)
+        {
+            const uint32_t f = g_fighters[i];
+            if (!validAddress(f))
+                continue;
+            const uint32_t move = read32(f + kFighterMove);
+            if (read16(f + kFighterAction) == 8u && validAddress(move) && (read32(move + 0x10u) & kMoveOugi) != 0u)
+                who |= humanFighter(f) ? 1 : 2;
+        }
+        return who;
+    }
+
+    void dumpTick(uint64_t tick)
+    {
+        if (g_dumpWanted.empty())
+            return;
+        const int mode = hl_game::overlay();
+        const int ougi = mode == 1 ? ougiBy() : 0;
+        const bool fighting = mode == 1 && g_fighterTick != 0u && tick - g_fighterTick < 2u;
+        for (DumpWanted &w : g_dumpWanted)
+        {
+            if (w.done)
+                continue;
+            bool now = false;
+            switch (w.scene.by)
+            {
+            case DumpBy::Vsync: now = tick >= w.scene.at; break;
+            case DumpBy::FightStart: now = fighting; break;
+            case DumpBy::OugiHuman: now = (ougi & 1) != 0; break;
+            case DumpBy::OugiCpu: now = (ougi & 2) != 0; break;
+            }
+            if (!now)
+                continue;
+            w.done = true;
+            if (w.scene.overlayNeeded != 0 && mode != w.scene.overlayNeeded)
+            {
+                std::fprintf(stderr, "[gsdump] v%llu %s skipped: overlay %d, not %d (another route?)\n", static_cast<unsigned long long>(tick), w.scene.name, mode,
+                             w.scene.overlayNeeded);
+                continue;
+            }
+            const std::string base = hl_game::g_gsDumpDir + "/" + g_dumpDevice + "_" + w.scene.name;
+            std::fprintf(stderr, "[gsdump] v%llu %s (%s) overlay %d scene %d -> %s.gs.zst, %d vsyncs\n", static_cast<unsigned long long>(tick), w.scene.name,
+                         w.scene.by == DumpBy::Vsync ? "route vsync" : "detector", mode, hl_game::scene(), base.c_str(), g_dumpFrames);
+            if (hl_game::g_gsDump != nullptr)
+                hl_game::g_gsDump(base.c_str(), g_dumpFrames);
+            else
+                std::fprintf(stderr, "[gsdump] libbt4gsx has no Bt4Gsx_GsDump: nothing recorded\n");
+        }
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_rdram == nullptr)
         {
+            dumpSetup();
             g_rdram = runtime->memory().getRDRAM();
             g_cameraOriginal = runtime->lookupFunction(kCameraMatrices);
             if (g_cameraOriginal != nullptr)
@@ -487,6 +649,7 @@ namespace
                 hl_game::g_cameraXScale = static_cast<float>(std::atof(w));
         }
         g_tick = tick;
+        dumpTick(tick);
         // HL_PRIV_LOG=1: the GS's display registers, a line each time one changes (for screens the display reads wrong)
         static const bool s_privLog = std::getenv("HL_PRIV_LOG") != nullptr;
         if (s_privLog)

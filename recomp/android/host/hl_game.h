@@ -2,6 +2,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 namespace hl_game
 {
@@ -17,4 +18,8 @@ namespace hl_game
     extern std::atomic<uint32_t> g_specialMask; // its button, in the game's bits of the pad
     extern std::atomic<int> g_mashPercent;     // what a tap is worth in the steps of pressing repeatedly: 100, 125, 150, 165, 200
     int overlay();                             // the mode's code in memory: 0 none yet, 1 BTL (fight), 2 ADV (campaign), 3 other
+
+    // HL_GS_DUMP: libbt4gsx's Bt4Gsx_GsDump (a PCSX2 GS dump of the next vsyncs into <base>.gs.zst) and the folder
+    extern void (*g_gsDump)(const char *base, int frames);
+    extern std::string g_gsDumpDir;
 }

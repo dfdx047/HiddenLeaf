@@ -16,6 +16,7 @@
 #include <jni.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -374,6 +375,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     redirectOutput(root);
     std::fprintf(stderr, "un5: Hidden Leaf, Ultimate Ninja 5 engine\n");
     loadEnvFile(root + "/hl_env.txt");
+    hl_game::g_gsDumpDir = root + "/gsdumps";
+    if (std::getenv("HL_GS_DUMP"))
+        mkdir(hl_game::g_gsDumpDir.c_str(), 0775);
     loadSettings(root + "/un5_settings.txt");
     setenv("HL_METER", "1", 0);
     if (iso.empty())
@@ -474,6 +478,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     g_gsxSetVideo = reinterpret_cast<void (*)(const GsxVideo *)>(dlsym(gsx, "Bt4Gsx_SetVideo"));
     g_gsxPresentRate = reinterpret_cast<int (*)()>(dlsym(gsx, "Bt4Gsx_PresentRate"));
     hl_game::g_nativeOn = reinterpret_cast<bool (*)()>(dlsym(gsx, "Bt4Gsx_NativeOn"));
+    hl_game::g_gsDump = reinterpret_cast<void (*)(const char *, int)>(dlsym(gsx, "Bt4Gsx_GsDump"));
     g_windowW = width;
     g_windowH = height;
     applyVideo();

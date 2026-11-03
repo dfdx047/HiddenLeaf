@@ -16,6 +16,8 @@
 #include "common/WindowInfo.h"
 #include "pcsx2/Config.h"
 #include "pcsx2/GS/GS.h"
+#include "pcsx2/GS/GSDump.h"
+#include "pcsx2/GS/Renderers/Common/GSRenderer.h"
 #include "pcsx2/GSDumpReplayer.h"
 #include "pcsx2/Host.h"
 #include "pcsx2/MTGS.h"
@@ -206,6 +208,142 @@ namespace
 		return false;
 	}
 
+	// ---- HL_GS_DUMP: PCSX2 GS dumps (.gs.zst) of the game's stream, asked by the host (Bt4Gsx_GsDump, by scene)
+	// PCSX2's own dump code (GSDumpBase::CreateZstDump), started the way GSRenderer::VSync starts one: the texture cache
+	// read back, the state frozen (GSfreeze), the privileged registers. What follows it is the stream as the game sent it,
+	// before the native renderer takes its part, so a dump made in a fight has everything the GS would have been given.
+	// (GSRenderer's own path records what reaches GSState::Transfer, which in a fight is only what the native lets
+	// through.) Before the state is frozen, the native gives the GS what it holds back (flushAll, as for a read back).
+	struct DumpAsk
+	{
+		std::string base; // the file without .gs.zst
+		int frames;
+	};
+	struct DumpOpen
+	{
+		std::unique_ptr<GSDumpBase> dump;
+		std::string base;
+		int left; // vsyncs still to take (PCSX2's m_dump_frames)
+	};
+	std::mutex s_dumpLock;
+	std::vector<DumpAsk> s_dumpAsked;          // from the game's thread
+	std::atomic<bool> s_dumpAskedAny{false};
+	std::vector<DumpAsk> s_dumpArmed;          // the replay thread's: open once what the native sends on is out
+	std::vector<DumpOpen> s_dumps;             // the replay thread's
+	std::vector<uint8_t> s_dumpRegs;           // the stream's last registers packet (it comes right before each vsync)
+
+	void dumpOpenArmed()
+	{
+		struct Made
+		{
+			std::vector<DumpAsk> asks;
+			std::vector<DumpOpen> opened;
+			std::vector<uint8_t> regs;
+			std::atomic<bool> done{false};
+		};
+		auto made = std::make_shared<Made>();
+		made->asks.swap(s_dumpArmed);
+		MTGS::RunOnGSThread([made]() {
+			if (g_gs_renderer)
+			{
+				g_gs_renderer->ReadbackTextureCache();
+				freezeData fd = {0, nullptr};
+				GSfreeze(FreezeAction::Size, &fd);
+				std::vector<u8> state(fd.size);
+				fd.data = state.data();
+				GSfreeze(FreezeAction::Save, &fd);
+				u32 w = 0, h = 0;
+				std::vector<u32> pixels;
+				static const bool s_shot = !(std::getenv("HL_GS_DUMP_SHOT") && std::getenv("HL_GS_DUMP_SHOT")[0] == '0');
+				if (!s_shot || !g_gs_renderer->SaveSnapshotToMemory(640, 480, true, false, &w, &h, &pixels))
+				{
+					w = h = 0;
+					pixels.clear();
+				}
+				std::string serial = VMManager::GetDiscSerial();
+				if (serial.empty())
+					serial = "SLES-55605";
+				u32 crc = VMManager::GetDiscCRC();
+				if (crc == 0)
+					crc = 0xC071D4C1u;
+				const u8* regs = reinterpret_cast<const u8*>(g_gs_renderer->m_regs);
+				made->regs.assign(regs, regs + sizeof(GSPrivRegSet));
+				for (const DumpAsk& a : made->asks)
+				{
+					DumpOpen d;
+					d.base = a.base;
+					d.left = a.frames;
+					d.dump = GSDumpBase::CreateZstDump(a.base, serial, crc, w, h, pixels.empty() ? nullptr : pixels.data(), fd, g_gs_renderer->m_regs);
+					std::fprintf(stderr, "bt4gsx: GS dump %s.gs.zst opened (%u bytes of state, screenshot %ux%u, state version %u)\n", a.base.c_str(),
+						static_cast<unsigned>(fd.size), w, h, static_cast<unsigned>(GSState::STATE_VERSION));
+					made->opened.push_back(std::move(d));
+				}
+			}
+			made->done.store(true, std::memory_order_release);
+		});
+		// (the stream waits here: what is read next goes into the dump, after its state)
+		const auto t0 = std::chrono::steady_clock::now();
+		while (!made->done.load(std::memory_order_acquire))
+		{
+			if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(20))
+			{
+				std::fprintf(stderr, "bt4gsx: GS dump not opened (the GS thread did not answer in 20 s)\n");
+				return;
+			}
+			std::this_thread::sleep_for(std::chrono::microseconds(200));
+		}
+		if (s_dumpRegs.empty())
+			s_dumpRegs = made->regs;
+		for (DumpOpen& d : made->opened)
+			s_dumps.push_back(std::move(d));
+	}
+
+	void dumpTransfer(uint8_t path, const uint8_t* data, uint32_t size)
+	{
+		for (DumpOpen& d : s_dumps)
+			d.dump->Transfer(path, data, size);
+	}
+
+	void dumpReadFifo(uint32_t size)
+	{
+		for (DumpOpen& d : s_dumps)
+			d.dump->ReadFIFO(size);
+	}
+
+	void dumpVsync(uint8_t field)
+	{
+		if (s_dumpRegs.size() != sizeof(GSPrivRegSet))
+			return;
+		const GSPrivRegSet* regs = reinterpret_cast<const GSPrivRegSet*>(s_dumpRegs.data());
+		for (size_t i = 0; i < s_dumps.size();)
+		{
+			DumpOpen& d = s_dumps[i];
+			const bool last = d.left <= 0;
+			if (d.dump->VSync(field, last, regs))
+			{
+				std::fprintf(stderr, "bt4gsx: GS dump %s.gs.zst done\n", d.base.c_str());
+				s_dumps.erase(s_dumps.begin() + static_cast<std::ptrdiff_t>(i));
+				continue;
+			}
+			if (!last)
+				--d.left;
+			++i;
+		}
+	}
+
+	// At a vsync of the stream: what the host asked for since the last one starts after it.
+	void dumpTakeAsked()
+	{
+		if (!s_dumpAskedAny.load(std::memory_order_acquire))
+			return;
+		std::lock_guard<std::mutex> lock(s_dumpLock);
+		for (DumpAsk& a : s_dumpAsked)
+			s_dumpArmed.push_back(std::move(a));
+		s_dumpAsked.clear();
+		s_dumpAskedAny.store(false, std::memory_order_release);
+		hl_native::flushAll();
+	}
+
 	struct LivePacketHeld
 	{
 		bool valid = false;
@@ -233,6 +371,8 @@ namespace
 					return true;
 				}
 			}
+			if (!s_dumpArmed.empty())
+				dumpOpenArmed();
 			if (s_held.valid)
 			{
 				s_held.valid = false;
@@ -262,6 +402,8 @@ namespace
 					s_packet.resize(length);
 					peek(6, s_packet.data(), length);
 					consume(6ull + length);
+					if (!s_dumps.empty())
+						dumpTransfer(path, s_packet.data(), length);
 					if (hl_native::transfer(path, s_packet.data(), length))
 						continue;
 					*out = {type, path, s_packet.data(), length};
@@ -274,7 +416,10 @@ namespace
 					s_packet.resize(1);
 					peek(1, s_packet.data(), 1);
 					consume(2);
+					if (!s_dumps.empty())
+						dumpVsync(s_packet[0]);
 					hl_native::vsync();
+					dumpTakeAsked();
 					if (!skipPresent())
 						s_held = {true, type, 1};
 					continue;
@@ -286,6 +431,12 @@ namespace
 					s_packet.resize(4);
 					peek(1, s_packet.data(), 4);
 					consume(5);
+					if (!s_dumps.empty())
+					{
+						uint32_t qwords;
+						std::memcpy(&qwords, s_packet.data(), 4);
+						dumpReadFifo(qwords);
+					}
 					hl_native::flushAll();
 					s_held = {true, type, 4};
 					continue;
@@ -297,6 +448,7 @@ namespace
 					s_packet.resize(kPrivRegsSize);
 					peek(1, s_packet.data(), kPrivRegsSize);
 					consume(1 + kPrivRegsSize);
+					s_dumpRegs.assign(s_packet.begin(), s_packet.begin() + kPrivRegsSize);
 					*out = {type, 0, s_packet.data(), static_cast<uint32_t>(kPrivRegsSize)};
 					return true;
 				}
@@ -420,6 +572,17 @@ __attribute__((visibility("default"))) int Bt4Gsx_PageSize(void)
 	return static_cast<int>(__pagesize);
 }
 
+// HL_GS_DUMP: a PCSX2 GS dump of the next `frames` vsyncs of the stream, into <base>.gs.zst (any thread; it starts at
+// the next vsync the stream reaches).
+__attribute__((visibility("default"))) void Bt4Gsx_GsDump(const char* base, int frames)
+{
+	if (!base || !base[0] || frames <= 0)
+		return;
+	std::lock_guard<std::mutex> lock(s_dumpLock);
+	s_dumpAsked.push_back({base, frames});
+	s_dumpAskedAny.store(true, std::memory_order_release);
+}
+
 __attribute__((visibility("default"))) void Bt4Gsx_Hold(int hold)
 {
 	s_hold = hold != 0;
@@ -484,6 +647,9 @@ __attribute__((visibility("default"))) int Bt4Gsx_Run(const Bt4GsxArgs* a)
 	argv.push_back(nullptr);
 	const int code = bt4gsx_runner_main(static_cast<int>(args.size()), argv.data());
 	std::fprintf(stderr, "bt4gsx: ended (%d)\n", code);
+	for (DumpOpen& d : s_dumps)
+		std::fprintf(stderr, "bt4gsx: GS dump %s.gs.zst cut short (%d vsyncs left)\n", d.base.c_str(), d.left);
+	s_dumps.clear(); // (closes them: what was taken is a whole file)
 	GSDumpReplayer::SetLive(nullptr, nullptr);
 	Bt4Gsx_ReleaseWindow();
 	{
