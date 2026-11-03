@@ -53,10 +53,9 @@ ISO do jogador → ELF + overlays exatos (SHA-256) → mapa de funções (Ghidra
 - [ ] Páginas de 4 KB no build do ARMSX2 (com 16 KB o núcleo recusa iniciar).
 
 ### 4. Pacote de código do UN6 A35
-- [ ] `tools/un5.py diff` dá a lista; o pacote leva as funções alteradas e novas, recompiladas, e os hashes dos arquivos
-      que elas exigem.
-- [ ] O runtime liga o pacote quando o mod ativo tem esses hashes; sem pacote, o jogo abre como a base (o launcher já
-      avisa).
+- [x] O pacote é o jogo do mod inteiro recompilado (`recomp/build.sh --mod`, `recomp/android/build.sh --mod`), não só
+      as funções alteradas: `libun5_<id>.so`, carregada pelo launcher com o mod ligado (2026-11-03).
+- [ ] A35 até a luta (para na checagem do cartão); Alpha 1.1X.
 - [ ] Depois: interpretador para as funções de um mod desconhecido.
 
 ### 5. Ajustes do jogo
@@ -557,6 +556,57 @@ Como o código gerado foi editado só nesses 3 arquivos (`sub_00166F40`, `sub_00
 completo; a próxima geração sai igual pelo gerador corrigido.
 
 Sobra: o `libbt4gsx` ainda abre um stream Oboe próprio, mudo (`[SPU2/Output] Backend = Null` no ini não mudou isso).
+
+Com `HL_PERF`, o SPU2 loga uma linha por segundo: `[snd] rms .. peak .. queued .. playing` (nível da mistura e fila do
+stream). Em 2026-11-03, no Cube: som no título, seleção de modo, Options, Shop, Collection (com o tocador de músicas),
+seleção de personagem e de cenário, VS e luta. Logos (Bandai, CRIware, 10º aniversário) e telas de carregamento ficam em
+silêncio. O pico passa um pouco de 1,0 depois do filtro de DC (um pouco de clipping). Master Mode não conferido.
+
+### Noite de 2026-11-03
+
+**Controles (itens 1 e 2):** o botão grande e a detecção pelo GS saíram. "Especial com um botão" (aba Controles: liga,
+botão, multiplicador 1x a 2x) põe a sequência na entrada do lutador e responde aos avisos do Ougi pelo gancho `0x6C99B0`
+na tabela do BTL (`hl_game.cpp`, log `[sp]`). Visto na rota fixa: um toque dá o Ougi ("Unleash Ultimate Jutsu"), a cena
+do Ougi roda, o "Press!" é respondido e termina em "Critical Damage". Uma etapa mostrou "ERROR". **Não visto:** efeito
+separado de △△ (Ougi pela sequência longa), a disputa de Ougi entre os dois e o multiplicador num trecho de apertar repetido.
+
+**Widescreen (item 3):** a proporção alternava porque o nativo e o GS usavam formas diferentes, e a câmera larga ficava
+ligada nas telas sem lutador. Agora os dois usam a mesma forma (`s_shape`), e a câmera larga (`+0x274`, escala horizontal)
+vale só na campanha (`ADV`) e na luta enquanto houve entrada de lutador nos últimos 6 vsyncs ou há Ougi na tela; fora disso
+volta a 1,0. A tela de resultado montava as matrizes uma vez, na transição, com a câmera ainda larga: daí o resultado
+apertado. Por gravação: 808 quadros com barra lateral antes, 0 depois. Menus e filmes são esticados para a mesma forma.
+**Falta:** as opções "Esticar" e "Desenhar em 16:9" para os menus. As listras da tela de resultado vêm do conteúdo
+(desentrelaçamento 1 e 8 não mudaram).
+
+**Tela de vitória (item 4):** o personagem não chega ao GS por nenhum dos dois caminhos: a tela de WINNER só manda camadas
+2D. O desenho se perde antes, no EE ou na VU1. Não resolvido.
+
+**Mods (item 6):** `HL_MODS` (pastas, uma por linha; o host lê `un5_mods.txt`) sobrepõe os arquivos dos mods à imagem
+(`0053`, `hl_image.cpp`): o arquivo que cabe nos setores do original entra no lugar, o maior vai depois do fim da imagem,
+alinhado a 16 setores, e o diretório aponta para lá. O último mod da lista ganha. Para os mods de código,
+`recomp/build.sh --mod <iso>` extrai o disco para `build/mods/<id>/`, acha o id pelo sha do ELF (`un5.KNOWN_MODS`) e gera o
+código; `recomp/android/build.sh --mod <id>` faz `jniLibs/libun5_<id>.so` (com `HL_PACK_ID`: o host carrega o ELF do mod e
+recusa abrir sem o mod ligado). O launcher carrega essa biblioteca quando o mod está ligado (`EngineBridge.libraryFor`).
+O MOD.BIN e o TEXTBRA.BIN do A35 guardam o código no meio dos dados: `un5.py` acha as ilhas de código pelos prólogos e
+retornos (`data_code_islands`), junta a primeira ao texto (a função de 0x940070 começa no texto e segue nos dados) e conta
+como entrada todo `J` de outro ELF para o meio de uma função (o MOD.BIN volta ao código do jogo depois do seu gancho:
+0x941838 → 0x10bd74), além das chamadas para código depois de preenchimento (0x9476c0). No jogo base isso só acrescenta
+a entrada 0x1d3950. `build/lab/reovl.sh <id> <overlay>...` refaz só esses overlays.
+
+No Cube, o A35 roda com o código próprio: logos, abertura, título "Ultimate Ninja 6 3.0" com "Novo jogo" e "Carregar
+jogo", menus em português, sem travar. **Para na checagem do cartão:** tanto "Novo jogo" quanto "Carregar jogo" dizem
+que não há dado do UN6 no slot 1, e "Não" em "Voltar à Tela Inicial?" volta à mesma mensagem. Hipótese não testada: o
+mod espera um save do UN6 (pasta `BASLUS-55606...`) ou a criação de save não passa pelo HLE do cartão nesse caminho.
+
+**Opções do launcher (itens 9 e 13):** saíram efeitos do PS2, volumes, renderizador, profundidade precisa, ASTC, pular
+quadros, present mode e a orientação retrato (o jogo é só paisagem). Testados: tema claro, escuro e do sistema, atalho na tela
+inicial (abre o pedido do sistema), buscar atualização (responde; hoje 404, sem release publicada). O 120 interpolado só
+aparece em tela de 100 Hz ou mais (`DisplayCaps`); um 120 salvo vira 60 numa tela de 60 Hz.
+
+**Campanha no sd480p (item 11):** rota fixa `HL_PADROUTE=<rota até 2650:CROSS>,3179:CROSS,4000:START,4400:START,4900:CROSS`
+(Master Mode, `FROM=5900`). 43,7 fps, 83% de pares acima de 44 ms, EE 12,4, VU1 20,8, GS 13,5, waitVU 5,6. Hipótese: a
+thread GS do ARMSX2 dividia o núcleo grande com a VuWorker (estava no cpu4). Prendê-la nos núcleos pequenos (como root,
+pelo hlprofile) deu 43,5 fps e 82%: refutada. O limite é a VU1 (interpretador) num A77 a 1,77 GHz. Não otimizado.
 
 ## Teste nos aparelhos
 

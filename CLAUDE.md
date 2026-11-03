@@ -19,7 +19,8 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 | `docs/plano.md` | plano, decisões, controles na tela, contrato do motor |
 | `tools/un5.py` | `verify`, `extract`, `overlays`, `diff`, `unpack`, `prepelf`, `ovlelf` |
 | `tools/ramdiff.py` | compara estruturas do jogo entre a RAM do PCSX2 (savestate) e a do recomp (`hl_ram`), seguindo ponteiros |
-| `recomp/build.sh` | ISO → disco extraído → ELF dividido → PS2Recomp → código gerado → runtime (→ `--run`) |
+| `recomp/build.sh` | ISO → disco extraído → ELF dividido → PS2Recomp → código gerado → runtime (→ `--run`); `--mod <iso>` gera o código de um mod em `build/mods/<id>/` |
+| `recomp/android/build.sh` | `libun5.so` do Android; `--mod <id>` faz `libun5_<id>.so`, carregada pelo launcher quando o mod está ligado |
 | `android/` | launcher (Kotlin/Compose): importador da base, mods por ISO, controles do UN5 por cena |
 
 ## Rodar no PC (CachyOS)
@@ -32,7 +33,7 @@ Dependências (Arch/CachyOS): `base-devel cmake ninja p7zip libx11 libxrandr lib
 (o FFmpeg decodifica os filmes PSS).
 O log da execução vai para `build/run.log`.
 
-## Estado (2026-10-26)
+## Estado (2026-10-26; o de hoje está em `docs/plano.md`)
 
 - ELF europeu: o código está em `0x100000–0x3d5760` e `0x5e3a00–0x5e7208` (construtores estáticos); o resto da seção
   única é dado, e `0x40f848–0x410d68` é código de kernel copiado pelo jogo. `un5.py prepelf` divide as seções para o
@@ -53,19 +54,23 @@ O log da execução vai para `build/run.log`.
 
 ## Próximos passos
 
-Fase Android (estado e tabela de medidas em `docs/plano.md`, "Renderizador nativo da luta"). A luta roda a 50 fps nos dois
+Fase Android (estado, medidas e a noite de 2026-11-03 em `docs/plano.md`, "Fase Android"). A luta roda a 50 fps nos dois
 aparelhos, com o renderizador nativo (`recomp/android/gsx/hl_native.cpp`), que liga sozinho ao detectar a luta; menus e o resto seguem
 pelo GS do ARMSX2 (`libbt4gsx`).
 
-1. Os 2% de pares de vsync acima de 44 ms no Retroid Pocket 5 (perfil `sd480p`).
-2. Conferir o nativo: comparação com o GS, campanha (`ADV`), despejo do cache de texturas.
-3. Controles na tela e som ouvidos numa luta jogada de verdade.
-4. `TouchBridge.nativeScene()` no host Android: 1 menu, 2 luta (`BTL.BIN` residente), 3 campanha (`ADV.BIN`).
+1. Tela de vitória: o personagem não chega ao GS (só camadas 2D); achar onde o EE ou a VU1 perde o desenho.
+2. Campanha no `sd480p` (43,7 fps) e no Cube (17% de pares lentos): o limite é o interpretador da VU1.
+3. Mods de código: A35 até a luta no aparelho; o Alpha 1.1X (sha `20872b06...`) precisa de entrada em `KNOWN_MODS` e
+   `CODE_RANGES`, e a ISO dele só está no Odin 3.
+4. Menus em 16:9 ("Esticar" e "Desenhar em 16:9"), packs de textura, os `?` da grade de personagem ligado.
+5. Odin 3: 60 e 120 interpolados num painel de 120 Hz, resolução 1x a 4x.
 
 ## Aparelhos de teste
 
 - Retroid Pocket 5 (SD865): `192.168.1.89:5555`. Medir com `HL_STOP_PERF=1 tools/device-profile.sh -s 192.168.1.89:5555 limit sd480p`.
 - Anbernic RG Cube (Mali): `192.168.1.183:5555`, sem limite.
+- AYN Odin 3 (tela de 120 Hz): `192.168.1.134:5555`. Tem padrão de bloqueio: sem o desenvolvedor desbloquear, não dá
+  para usar.
 - AYN Odin 2 Mini: `adb -s 9cf62eef`. Instalar o launcher:
   `cd android && ANDROID_SERIAL=9cf62eef ./gradlew installDebug`.
 - Dados do app: `/sdcard/Android/data/com.dfdx047.hiddenleaf/files/`.
