@@ -16,6 +16,7 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 | Caminho | O quê |
 |---|---|
 | `docs/analise-elf.md` | ELF, overlays (`MWo3`), mods (UN6 A35, Versão Brasileira), hashes |
+| `docs/registro.md` | **estado das funções e histórico por build (ler primeiro)** |
 | `docs/plano.md` | plano, decisões, controles na tela, contrato do motor |
 | `tools/un5.py` | `verify`, `extract`, `overlays`, `diff`, `unpack`, `prepelf`, `ovlelf` |
 | `tools/ramdiff.py` | compara estruturas do jogo entre a RAM do PCSX2 (savestate) e a do recomp (`hl_ram`), seguindo ponteiros |
