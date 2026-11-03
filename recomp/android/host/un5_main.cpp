@@ -116,7 +116,7 @@ namespace
     {
         int scale4 = 4;      // internal resolution in quarters: 4 = 1x
         int filter = 0;      // on the way to the screen: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
-        int aspectMilli = 1333; // the shape of the picture: 1333 the game's, 0 the screen's, or width/height*1000
+        int aspectMilli = 0; // the shape of the picture: 0 the screen's, 1333 the game's, or width/height*10000
         int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
     };
     Settings g_settings;

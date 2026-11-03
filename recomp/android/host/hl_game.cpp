@@ -483,6 +483,8 @@ int hl_game::scene()
     static uint64_t s_lastOn = 0;
     const uint64_t now = SDL_GetTicks();
     const int mode = overlay();
+    if (s_scene == 2 && mode == 1 && ougiOnScreen())
+        s_lastOn = now; // (an Ougi's film may take longer than the wait below)
     if (g_nativeOn != nullptr && g_nativeOn() && (mode == 1 || mode == 2))
     {
         s_scene = mode == 1 ? 2 : 3;

@@ -2188,7 +2188,9 @@ bool sceneOn()
 // (on the GS thread, in the stream's order)
 static void applyAspect()
 {
-	const float shape = s_sceneOn ? s_shape : 4.0f / 3.0f;
+	// (the same with the GS and with this renderer: what is drawn by the GS in the middle of a fight, an Ougi's film, keeps the shape
+	// and nothing changes on the screen when one takes over from the other)
+	const float shape = s_shape;
 	const AspectRatioType type = shape <= 1.34f ? AspectRatioType::R4_3
 		: (shape > 1.77f && shape < 1.79f) ? AspectRatioType::R16_9
 		: (shape > 2.21f && shape < 2.23f) ? AspectRatioType::R20_9

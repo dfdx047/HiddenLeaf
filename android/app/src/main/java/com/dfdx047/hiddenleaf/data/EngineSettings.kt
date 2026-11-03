@@ -89,6 +89,6 @@ class EngineSettings(private val file: File) {
         const val SCALE_DEFAULT = 1
         /** The internal resolutions offered, in quarters (the engine's settings window has the same list). */
         val SCALE_STEPS = listOf(4, 5, 6, 7, 8, 10, 12, 16, 20, 24, 32)
-        const val ASPECT_DEFAULT = 1333           // the game's 4:3; 0 = the screen's own shape (the engine measures it)
+        const val ASPECT_DEFAULT = 0              // the screen's own shape (the engine measures it); 1333 is the game's 4:3
     }
 }
