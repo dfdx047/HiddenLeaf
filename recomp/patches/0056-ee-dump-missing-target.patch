@@ -1,0 +1,21 @@
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -379,6 +379,18 @@
+             }
+             else
+             {
++                {
++                    // Hidden Leaf: the thread that jumps into nothing, and its last dispatches (which return got a bad ra)
++                    const auto &ring = hlDispatchRing()[running->id];
++                    std::cerr << "[ee-dump] thread " << running->id << " jumps to 0x" << std::hex << context.pc << "; last dispatches:";
++                    for (uint32_t i = 0; i < 32u; ++i)
++                    {
++                        const auto &e = ring.pcs[(ring.next + i) % 32u];
++                        if (e[0] != 0u)
++                            std::cerr << " 0x" << e[0] << "(ra 0x" << e[1] << " sp 0x" << e[2] << ")";
++                    }
++                    std::cerr << std::dec << std::endl;
++                }
+                 m_runtime.reportMissingFunction(m_rdram,
+                                                 &context,
+                                                 context.pc,

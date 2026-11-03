@@ -666,6 +666,9 @@ STUB_AT = {
 # bind Sony's sdrdrv (sid 0x80000701, run for real on the IOP) and the films have sound, but the EE later jumps into
 # data (missing-target 0xbd9c90, v10300-11700) on the RP5 and the Odin: docs/registro.md, 2026-11-03 11:30.)
 UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin")
+# HL_SDR=1 at build time recompiles the three libsdr calls too (the lab build for the films' sound)
+if os.environ.get("HL_SDR"):
+    UNSTUB = re.compile(UNSTUB.pattern + r"|sceSdRemoteInit|sceSdRemote|sceSdTransToIOP")
 
 
 def cmd_stubfix(a):

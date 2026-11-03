@@ -37,6 +37,29 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 13:45, travamento da libsdr: o heap do jogo devolve a mesma pilha a quatro threads
+
+- **Build de laboratório:** `HL_SDR=1 recomp/build.sh <iso>` (chave nova em `tools/un5.py`: recompila
+  `sceSdRemoteInit`, `sceSdRemote` e `sceSdTransToIOP`; stubfix 40 funções em vez de 37). Logs novos, todos por
+  variável de ambiente: `HL_SIFDMA_LOG` (0055, cada cópia do IOP para a RAM do EE), dump das últimas 32 entradas da
+  thread no `missing-target` do escalonador (0056) e `HL_THREAD_LOG` (0057: criar, iniciar, sair, terminar, apagar,
+  wakeup que falha).
+- **RP5, rota v3 (`rp5_sdr1..3`):** o `missing-target 0xbd9c90` volta sempre em v11747–11750. Desta vez o jogo não
+  fechou: a thread morreu e o som zerou dali em diante (rms 0,0 de v11893 a v14000). No `rp5_sdr1`, o painel de pausa
+  rodou no meio (4:3 → Tela cheia → Continuar, v7256) sem problema.
+- **O que os logs mostram:**
+  - Descartado: o IOP escreve na RAM do EE só em `0x408c00` e `0x40eac0` (0x880 bytes, ra IOP `0x3a470`), longe da pilha.
+  - Descartado: a end function da `sceSdRemote`, porque `sceSdCallBack` nunca é chamada e o ponteiro fica 0.
+  - A thread que salta é a 131 (tarefa do jogo, `func 0x1d4d20`, criada pela 8 em v11747). Ela dormia na espera de
+    quadro (`0x1d5540`, `ra` salvo em `sp+0x30` = `0x821370`); ao acordar, o `ra` era `0xbd9c90`.
+  - As threads 131, 132, 133 e 134 foram **todas criadas com a mesma pilha `0x20820011`**. A pilha da tarefa vem do
+    alocador do jogo (`0x117c70`, em `0x1d50dc`). Todas as outras 129 criações têm ponteiros normais do heap
+    (`0xb61bc0`, `0xdeb800`…). A 134 recebe o argumento `0xbd9c30`, o mesmo `a1` do travamento: ela rodou sobre a
+    pilha da 131.
+  - Portanto, entre v8005 (última criação com pilha válida) e v11747, o heap do jogo passa a devolver um endereço
+    inválido. Algo da libsdr corrompe o heap, ou o esgota.
+- **Em andamento:** a mesma rota com a build normal (libsdr nos stubs) e os mesmos logs, para comparar.
+
 ### 2026-11-03 13:00, relatório da manhã publicado; pistas para o som
 
 - Relatório: https://claude.ai/artifact/TBAXXm6YEQhGsuDxmPHkyU (privado).

@@ -1,0 +1,25 @@
+--- a/ps2xIOP/src/emulator/services/iop_rpc.cpp
++++ b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+@@ -7,6 +7,8 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ #include <limits>
+ #include <vector>
+@@ -101,9 +103,13 @@
+                 }
+             }
+ 
++            // Hidden Leaf: HL_SIFDMA_LOG=1 logs each IOP-to-EE copy (who on the IOP writes where in EE RAM)
++            static const bool s_dmaLog = std::getenv("HL_SIFDMA_LOG") != nullptr;
+             for (uint32_t i = 0u; i < pendingCount; ++i)
+             {
+                 const PendingTransfer &transfer = pending[i];
++                if (s_dmaLog)
++                    std::fprintf(stderr, "[iop-dma] iop %x -> ee %x size %x (ra %x)\n", transfer.source, transfer.destination, transfer.size, cpu.gpr[31]);
+                 if (!m_memory.readRam(transfer.source, scratch.data(), transfer.size) || !m_host.writeGuest(transfer.destination, scratch.data(), transfer.size))
+                 {
+                     setV0(0u);
