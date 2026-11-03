@@ -2083,10 +2083,9 @@ void main()
 	}
 
 	// An Ultimate Jutsu the GS draws itself (a fallback) leaves page 0's target 2047 lines tall, over page 0x70 that the
-	// display reads. The game mixes its two display circuits at half (PMODE 7f67, one line apart), and after the fight one
-	// of them kept reading that tall target: the WINNER, the results and the menus came out over the last Ultimate frame,
-	// on every other line, until the next fight. When the scene is over, the tall one goes (the GS's own copy of the
-	// picture to page 0x70 is what the display shows from then on).
+	// display reads: two targets for the same memory. When the scene is over, the tall one goes. (It was taken for the
+	// cause of the picture left on every other line after the fight; that was SCANMSK, see the scene's end in vsync().
+	// This stays: tested with that fix on the three devices, and the overlap is not wanted.)
 	void dropTallSceneTarget()
 	{
 		if (!g_texture_cache)
