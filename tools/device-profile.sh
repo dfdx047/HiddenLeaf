@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# device-profile.sh: limits a handheld (Retroid Pocket 5 / Snapdragon 865) to behave like a weaker Snapdragon,
+# device-profile.sh: limits a handheld (Retroid Pocket 5 / Snapdragon 865, AYN Odin 2 Mini / Snapdragon 8 Gen 2)
+# to behave like a weaker Snapdragon,
 # to measure and optimize the ports (PS2 recomp, Xbox 360) against it. Method: claude/perfis-de-desempenho.md.
 #
 #   tools/device-profile.sh [-s SERIAL] list
@@ -24,22 +25,46 @@ adb=(adb); [ -n "$serial" ] && adb=(adb -s "$serial")
 root="${HL_ROOT:-}"   # empty: use the hlprofile app (PServerBinder)
 remote=/data/local/tmp/hl-profile.sh
 
-# ---- profiles for the Retroid Pocket 5 (kona / SD865) --------------------------------------------------------
+# The device is picked by ro.board.platform: kona = Retroid Pocket 5, kalama = AYN Odin 2 Mini.
+# Fields (":"-separated): first CPU of the middle policy (4 on the RP5, 3 on the Odin), online CPUs, policy0 max kHz,
+# middle policy max kHz, policy7 max kHz, GPU max Hz
+profile() {
+    case "$device" in
+        rp5) profile_rp5 "$1" ;;
+        odin2mini) profile_odin2mini "$1" ;;
+        *) echo "no profiles for this device (ro.board.platform '$board'): kona (RP5) or kalama (Odin 2 Mini)" >&2; exit 1 ;;
+    esac
+}
+
+# ---- Retroid Pocket 5 (kona / SD865) ---------------------------------------------------------------------------
 # cpu0-3: Cortex-A55 (policy0, max 1804800) | cpu4-6: Cortex-A77 (policy4, max 2419200) | cpu7: Cortex-A77 prime
 # (policy7, max 2841600) | GPU: Adreno 650, 305-670 MHz.
-# Fields (":"-separated): online CPUs, policy0 max kHz, policy4 max kHz, policy7 max kHz, GPU max Hz
-profile() {
+profile_rp5() {
     case "$1" in
         # 4x A73 2.0 + 4x A53 1.8: 4 A77 slowed down (an A77 does more per clock than an A73), 4 A55
         # 2026-10-25, 1st run (1.52/1.17/1.19 GHz): GB7 491/2021 vs 350/1310 for the 665 -> 2nd try below
-        sd665)  echo "0-7:1171200:825600:844800:305000000" ;;
+        sd665)  echo "4:0-7:1171200:825600:844800:305000000" ;;
         # 4x A73 2.4 + 4x A53 1.9
-        sd680)  echo "0-7:1612800:1382400:1401600:305000000" ;;
+        sd680)  echo "4:0-7:1612800:1382400:1401600:305000000" ;;
         # 2x A76 2.2 + 6x A55 1.9: 2 A77 (cpu4-5), cpu6-7 off; the device has 4 small cores, not 6
-        sd480p) echo "0-5:1804800:1766400:0:305000000" ;;
+        sd480p) echo "4:0-5:1804800:1766400:0:305000000" ;;
         # 2x A78 2.2 + 6x A55 1.8
-        sd695)  echo "0-5:1708800:2054400:0:400000000" ;;
+        sd695)  echo "4:0-5:1708800:2054400:0:400000000" ;;
         *) echo "unknown profile '$1' (sd665, sd680, sd480p, sd695)" >&2; exit 1 ;;
+    esac
+}
+
+# ---- AYN Odin 2 Mini (kalama / SD 8 Gen 2, SoC model QCS8550) -------------------------------------------------
+# cpu0-2: Cortex-A510 (policy0, max 2016000) | cpu3-4: Cortex-A715, cpu5-6: Cortex-A710 (policy3, max 2707200) |
+# cpu7: Cortex-X3 (policy7, max 2956800) | GPU: Adreno 740, 124.8-680 MHz. core_ctl on cpu0, cpu3 and cpu7.
+profile_odin2mini() {
+    case "$1" in
+        # 2x A76 2.2 + 6x A55 1.9: the 2 A715 (cpu3-4) as the A76, the A710 (cpu5-6) and the X3 off, the 3 A510 as
+        # the A55; GPU at its lowest level. STARTING POINT 2026-10-27, not calibrated: the A715 does ~25% more per
+        # clock than an A76 (2.2 / 1.25 = 1.79 GHz) and the A510 ~30% more than an A55 (1.9 / 1.3 = 1.46 GHz).
+        # The A710 share policy3 with the A715, so they are switched off rather than slowed down.
+        sd480p) echo "3:0-4:1459200:1785600:0:124800000" ;;
+        *) echo "unknown profile '$1' for the Odin 2 Mini (sd480p)" >&2; exit 1 ;;
     esac
 }
 
@@ -76,14 +101,14 @@ status)
     [ -f $SAVE ] && echo "profile active (originals saved in $SAVE)" || echo "no profile active"
     ;;
 limit)
-    IFS=':' read ON P0 P4 P7 GPU <<PROF
+    IFS=':' read MID ON P0 P4 P7 GPU <<PROF
 $2
 PROF
     if [ ! -f $SAVE ]; then
         { for p in $C/cpufreq/policy*; do echo "$p/scaling_max_freq $(cat $p/scaling_max_freq)"; echo "$p/scaling_min_freq $(cat $p/scaling_min_freq)"; done
           echo "$G/max_gpuclk $(cat $G/max_gpuclk)"
           [ -e $G/devfreq/max_freq ] && echo "$G/devfreq/max_freq $(cat $G/devfreq/max_freq)"
-          for n in 4 7; do [ -e $C/cpu$n/core_ctl/min_cpus ] && echo "$C/cpu$n/core_ctl/min_cpus $(cat $C/cpu$n/core_ctl/min_cpus)"; done
+          for n in $MID 7; do [ -e $C/cpu$n/core_ctl/min_cpus ] && echo "$C/cpu$n/core_ctl/min_cpus $(cat $C/cpu$n/core_ctl/min_cpus)"; done
           [ -e /proc/sys/kernel/sched_boost ] && echo "/proc/sys/kernel/sched_boost $(cat /proc/sys/kernel/sched_boost)"
           for prm in cpu_min_freq cpu_max_freq; do
               [ -e /sys/module/msm_performance/parameters/$prm ] && for pair in $(cat /sys/module/msm_performance/parameters/$prm); do
@@ -101,7 +126,7 @@ PROF
         sleep 1
     fi
     # core_ctl (Qualcomm) turns cores on and off by itself: pin it so it does not undo the profile
-    for n in 4 7; do [ -e $C/cpu$n/core_ctl/min_cpus ] && w $C/cpu$n/core_ctl/min_cpus 0; done
+    for n in $MID 7; do [ -e $C/cpu$n/core_ctl/min_cpus ] && w $C/cpu$n/core_ctl/min_cpus 0; done
     for n in 1 2 3 4 5 6 7; do
         if in_list $n "$ON"; then w $C/cpu$n/online 1; else w $C/cpu$n/online 0; fi
     done
@@ -115,7 +140,7 @@ PROF
     M=/sys/module/msm_performance/parameters
     if [ -e $M/cpu_min_freq ]; then
         for n in 0 1 2 3 4 5 6 7; do
-            case $n in 0|1|2|3) f=$P0 ;; 7) f=$P7 ;; *) f=$P4 ;; esac
+            if [ $n -lt $MID ]; then f=$P0; elif [ $n = 7 ]; then f=$P7; else f=$P4; fi
             [ "$f" = 0 ] && continue
             echo "$n:$(cat $C/cpu$n/cpufreq/cpuinfo_min_freq 2>/dev/null || echo 0)" > $M/cpu_min_freq 2>/dev/null
             echo "$n:$f" > $M/cpu_max_freq 2>/dev/null
@@ -124,7 +149,7 @@ PROF
         echo "msm_performance max: $(cat $M/cpu_max_freq)"
     fi
     capf policy0 "$P0"
-    [ "$P4" != 0 ] && capf policy4 "$P4"
+    [ "$P4" != 0 ] && capf policy$MID "$P4"
     [ "$P7" != 0 ] && [ "$(cat $C/cpu7/online)" = 1 ] && capf policy7 "$P7"
     # GPU: by frequency, and by power level (the level whose frequency is the cap; level 0 is the fastest)
     w $G/max_gpuclk "$GPU"
@@ -135,7 +160,7 @@ PROF
         [ -n "$lvl" ] && w $G/max_pwrlevel "$lvl"
     fi
     sleep 2
-    echo "profile applied: online=$ON policy0=$P0 policy4=$P4 policy7=$P7 gpu=$GPU"
+    echo "profile applied: online=$ON policy0=$P0 policy$MID=$P4 policy7=$P7 gpu=$GPU"
     echo "after 2 s (as root):"
     for p in $C/cpufreq/policy*; do [ -e $p/scaling_max_freq ] && echo "  $(basename $p) max=$(cat $p/scaling_max_freq) min=$(cat $p/scaling_min_freq) cur=$(cat $p/scaling_cur_freq)"; done
     echo "  gpu max=$(cat $G/max_gpuclk) cur=$(cat $G/gpuclk) max_pwrlevel=$(cat $G/max_pwrlevel 2>/dev/null)"
@@ -168,6 +193,9 @@ list)
 esac
 EOF
 }
+
+board=$("${adb[@]}" shell getprop ro.board.platform 2>/dev/null | tr -d '\r')
+case "$board" in kona) device=rp5 ;; kalama) device=odin2mini ;; *) device="" ;; esac
 
 case "$cmd" in
     list|status|restore) arg="" ;;
