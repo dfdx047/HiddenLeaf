@@ -16,7 +16,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
-| Campanha (Master Mode) | parcial | `2fee126` | RP5 | rota de campanha (`plano.md`) | 43,7 fps no `sd480p`, 83% de pares lentos; Cube 17% de pares lentos (VU1) |
+| Campanha (Master Mode) | parcial | `a6c40f5` | RP5 | rota de campanha gravada (`rp5_camp3`) | anda, troca de área e menu START a 50 fps (sem limite de 480p); antes 43,7 fps no `sd480p`; Cube 17% de pares lentos (VU1). Cube, Odin e 20:9 não refeitos |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
@@ -36,6 +36,15 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-03 12:35, sem código novo: a campanha com a build `a6c40f5` (RP5)
+
+- **Rota de campanha (`build/lab/hl_env_camp.txt`, `rec/rp5_camp3`):** Master Mode → START, Yes, ✕ (pula a cena) →
+  ✕ a cada 40 vsyncs no diálogo → "Act 1 Naruto Returns Home" → tutorial de movimento → anda pela vila com o analógico
+  (`LRIGHT`, `LUP`, `LDOWN`, `LLEFT`) → **troca de área** (Hidden Leaf Gate, tela de carga) → anda → START do jogo (menu,
+  tutorial "Start menu items"). **50,0 fps** de v5998 a v12370 (`[perf]`, sem limite de 480p), sem `missing-target`,
+  som presente (rms 0,08–0,16). Sem barras visíveis no 16:9.
+- **Falta na rota:** o painel de pausa do launcher (widescreen liga/desliga) e sair; Cube, Odin e 20:9 na campanha.
 
 ### 2026-11-03 12:10, `hl_native.cpp`: o fantasma depois da luta 2 era SCANMSK 2 preso no GS (corrigido na rota v3)
 
