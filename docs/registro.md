@@ -37,6 +37,18 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 13:00, relatório da manhã publicado; pistas para o som
+
+- Relatório: https://claude.ai/artifact/TBAXXm6YEQhGsuDxmPHkyU (privado).
+- **Pistas do travamento da libsdr (sem build novo):** a `sceSdRemote` do jogo (`0x16aee8`) chama `sceSifCallRpc`
+  pela convenção de registradores: `mode` = 1 (NOWAIT) quando o 1º argumento é 0, end function = `*(0x410e50)`
+  (posta por `sceSdCallBack`, `0x16aec8`), end parameter em `sp+0` = o ponteiro do buffer. No runtime
+  (`Kernel/Syscalls/RPC.cpp`), quando o cliente não tem semáforo, `completionSemaphore = endParameter`: com a libsdr,
+  isso sinaliza um "semáforo" com o endereço do buffer. E com end function ≠ 0 o runtime chama a função pelo
+  escalonador. Uma das duas é a primeira suspeita do `missing-target 0xbd9c90` (thread do escalonador, `a0 1`). O EE
+  não registra nenhum servidor de callback do `sdrdrv` (o único `sceSifRegisterRpc` é o de `0x14264c`).
+- Próximo passo: recompilar com a libsdr e `HL_RPC_LOG=1` até o travamento, para ver a última chamada a `0x80000701`.
+
 ### 2026-11-03 12:50, correção da entrada de 09:40 (bisect)
 
 - Não existe `build/bisect/apk/a3dbcfc.apk`: a pasta só tem `cd8fca7.apk` (08:20), que não roda. O APK de `a3dbcfc`
