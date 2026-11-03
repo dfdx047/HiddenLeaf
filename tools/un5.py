@@ -357,6 +357,9 @@ def cmd_unpack(a):
 #   0x5e3a00-0x5e7208   the static constructors (their table follows at 0x5e7210)
 CODE_RANGES = {
     BASE_ELF_SHA256: [(0x100000, 0x3D5760), (0x5E3A00, 0x5E7208)],
+    # UN6 Alpha 3.5 (SLUS_556.06): the European program changed in place (same segment, 1687 words of code), its new code in
+    # the overlays MOD.BIN and TEXTBRA.BIN
+    "47c40141a3e1aeb0c96bc28e8dc311938b284d54fd21f4d8ba953c2e16234809": [(0x100000, 0x3D5760), (0x5E3A00, 0x5E7208)],
 }
 
 SHF_WRITE, SHF_ALLOC, SHF_EXEC = 1, 2, 4
@@ -412,6 +415,35 @@ def cmd_prepelf(a):
         print("%-8s %08x-%08x %s" % (s[0], s[3], s[3] + s[5], "code" if s[2] & SHF_EXEC else "data"))
 
 
+def data_code_islands(data, o):
+    """Code the overlay keeps in its data: the A35's MOD.BIN and TEXTBRA.BIN have a text of a few words and their
+    functions among the data. Found by their prologues (addiu sp, sp, -n) and returns (jr ra), in clusters: [(lo, hi)].
+    A cluster that starts with a return (a leaf function, no prologue: MOD.BIN's 0x940194) begins where the data does, or
+    where the last cluster ended, if that is near."""
+    if o["text"] >= 0x1000:
+        return []
+    lo_data = o["code"] + o["text"]
+    hi_data = min(o["code"] + o["text"] + o["data"], o["addr"] + len(data)) & ~3  # (TEXTBRA.BIN's header counts more)
+    marks = []
+    for v in range(lo_data, hi_data - 3, 4):
+        w = struct.unpack_from("<I", data, v - o["addr"])[0]
+        if ((w >> 16) == 0x27BD and w & 0x8000) or w == 0x03E00008:
+            marks.append((v, w == 0x03E00008))
+    islands = []
+    for v, ret in marks:
+        if islands and v - islands[-1][2] <= 0x2000:
+            islands[-1][2] = v
+            if ret:
+                islands[-1][1] = v + 8
+        elif not ret:
+            islands.append([v, v, v])
+        else:
+            start = islands[-1][1] if islands else lo_data
+            if v - start <= 0x1000:
+                islands.append([start, v + 8, v])
+    return [(lo, hi) for lo, hi, _ in islands if hi > lo]
+
+
 def cmd_ovlelf(a):
     raw = open(a.ovl, "rb").read()
     o = mwo3(raw)
@@ -428,7 +460,18 @@ def cmd_ovlelf(a):
     secs = [(".text", 1, SHF_ALLOC | SHF_EXEC, o["code"], body_off, o["text"])]
     # the data, with the static constructors' code in it as code sections of its own
     at, n = o["code"] + o["text"], 0
-    for lo, hi in ctor_islands(raw, o) + [(o["code"] + o["text"] + o["data"],) * 2]:
+    islands = []
+    for lo, hi in sorted(ctor_islands(raw, o) + data_code_islands(raw, o)):
+        if islands and lo <= islands[-1][1]:
+            islands[-1] = (islands[-1][0], max(hi, islands[-1][1]))
+        else:
+            islands.append((lo, hi))
+    # an island right after the text continues it (MOD.BIN's first function starts in its text, at 0x940070, and goes
+    # on in the data: as two sections the recompiler ended it at the text's end)
+    if islands and islands[0][0] == at:
+        secs[0] = (".text", 1, SHF_ALLOC | SHF_EXEC, o["code"], body_off, islands[0][1] - o["code"])
+        at = islands.pop(0)[1]
+    for lo, hi in islands + [(o["code"] + o["text"] + o["data"],) * 2]:
         if lo > at:
             secs.append((".data%d" % n, 1, SHF_ALLOC | SHF_WRITE, at, body_off + at - o["code"], lo - at))
         if hi > lo:
@@ -526,7 +569,7 @@ def cmd_fnmap(a):
         for name, addr, off, size, flags, t in sections_of(blob):
             if t != 1 or not flags & SHF_ALLOC:
                 continue
-            for i in range(0, size - 3, 4):
+            for i in range(0, min(size, len(blob) - off) - 3, 4):  # (a section may run past the file: the A35's MOD.BIN)
                 w, = struct.unpack_from("<I", blob, off + i)
                 call = bool(flags & SHF_EXEC) and (w >> 26) in (2, 3)
                 v = (w & 0x03FFFFFF) << 2 if call else w
@@ -536,7 +579,11 @@ def cmd_fnmap(a):
                 if first is None or first == 0:
                     continue
                 prologue = (first >> 16) == 0x27BD and bool(first & 0x8000)
-                if prologue or (call and after_return(v)):
+                # a J from another ELF's code goes back into the middle of a function here: the A35's MOD.BIN hooks the
+                # game's code and jumps back after its own (0x941838 -> 0x10bd74). That has to be an entry too.
+                back = call and (w >> 26) == 2
+                # (and a call to code after padding: the A35's main ELF calls 0x9476c0 in MOD.BIN, a leaf after zeros)
+                if prologue or back or (call and (after_return(v) or word(v - 4) == 0)):
                     starts.add(v)
                     outside += 1
     if a.also:

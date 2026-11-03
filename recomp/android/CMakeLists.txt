@@ -74,6 +74,10 @@ file(GLOB RUNNER_SRC CONFIGURE_DEPENDS "${RT}/src/runner/*.cpp")
 list(REMOVE_ITEM RUNNER_SRC "${RT}/src/runner/main.cpp")
 add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp")
 set_target_properties(un5 PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
+# HL_PACK_ID=<mod>: a mod's code pack (recomp/android/build.sh --mod <mod>), libun5_<mod>.so, which runs the mod's program
+if(HL_PACK_ID)
+    set_source_files_properties("${HOST}/un5_main.cpp" PROPERTIES COMPILE_DEFINITIONS "HL_PACK_ID=\"${HL_PACK_ID}\"")
+endif()
 set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 set_source_files_properties("${RT}/src/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=ps2x_runtime_main")
 # the function tables are long and plain: optimizing them only costs time

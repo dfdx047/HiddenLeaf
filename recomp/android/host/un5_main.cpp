@@ -384,6 +384,54 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         return 1;
     }
     setenv("HL_CD_IMAGE", iso.c_str(), 1);
+    // The mods switched on (the launcher's un5_mods.txt, "modlib/<id>/disc" in order): their files over the disc's
+    // (hl_image.cpp). A mod's own program runs only from its code pack, the libun5_<id>.so built for it (HL_PACK_ID).
+    static std::string modElf;
+    {
+        std::string dirs;
+        if (FILE *f = std::fopen((root + "/un5_mods.txt").c_str(), "r"))
+        {
+            char line[512];
+            while (std::fgets(line, sizeof(line), f))
+            {
+                std::string dir = line;
+                while (!dir.empty() && (dir.back() == '\n' || dir.back() == '\r' || dir.back() == ' '))
+                    dir.pop_back();
+                if (dir.empty())
+                    continue;
+                dirs += root + "/" + dir + "\n";
+#ifdef HL_PACK_ID
+                const std::string id = dir.size() > 12 && dir.compare(0, 7, "modlib/") == 0 ? dir.substr(7, dir.find('/', 7) - 7) : "";
+                if (id == HL_PACK_ID)
+                    if (FILE *p = std::fopen((root + "/modlib/" + id + "/mod.properties").c_str(), "r"))
+                    {
+                        char prop[256];
+                        while (std::fgets(prop, sizeof(prop), p))
+                            if (std::strncmp(prop, "boot=", 5) == 0)
+                            {
+                                std::string boot = prop + 5;
+                                while (!boot.empty() && (boot.back() == '\n' || boot.back() == '\r'))
+                                    boot.pop_back();
+                                if (access((root + "/" + dir + "/" + boot).c_str(), R_OK) == 0)
+                                    modElf = root + "/" + dir + "/" + boot;
+                            }
+                        std::fclose(p);
+                    }
+#endif
+            }
+            std::fclose(f);
+        }
+        if (!dirs.empty())
+            setenv("HL_MODS", dirs.c_str(), 1);
+#ifdef HL_PACK_ID
+        if (modElf.empty())
+        {
+            fail("This is the code pack of a mod (" HL_PACK_ID "), and the mod is not switched on.");
+            return 1;
+        }
+        std::fprintf(stderr, "un5: mod %s, program %s\n", HL_PACK_ID, modElf.c_str());
+#endif
+    }
     static std::string saves = root + "/saves";
     setenv("HL_MC_ROOT", saves.c_str(), 0);
 
@@ -433,7 +481,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     }
 
     // the game, with its ELF from the boot files the launcher copied
-    static std::string elf = data + "/SLES_556.05";
+    static std::string elf = modElf.empty() ? data + "/SLES_556.05" : modElf;
     std::thread([] {
         static char arg0[] = "ps2EntryRunner";
         static char *args[] = {arg0, elf.data(), nullptr};

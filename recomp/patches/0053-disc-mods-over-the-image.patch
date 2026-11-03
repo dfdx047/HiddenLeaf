@@ -1,0 +1,271 @@
+diff --git a/ps2xRuntime/src/lib/hl_image.cpp b/ps2xRuntime/src/lib/hl_image.cpp
+index b5ceb44..e15a464 100644
+--- a/ps2xRuntime/src/lib/hl_image.cpp
++++ b/ps2xRuntime/src/lib/hl_image.cpp
+@@ -1,6 +1,10 @@
+ // Hidden Leaf: the disc image, read in place. On Android the launcher hands it over open, as /proc/self/fd/<n>: opening that
+ // path again repeats the storage permission check, which an app without storage permission fails, so it is read through the
+ // descriptor, with pread (no shared offset). Sectors are the disc's real ones; file names come from its ISO 9660 directory.
++//
++// HL_MODS=<folder>\n<folder>...: the mods switched on, in order, each a folder with the disc's paths (the launcher's
++// modlib/<id>/disc). Their files are read in place of the disc's (a later mod wins): a file that fits in the sectors of the
++// one it replaces takes its place there; a larger or a new one gets sectors after the end of the image.
+ #include <cstddef>
+ #include <cstdint>
+ #include <string>
+@@ -13,6 +17,8 @@ bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
+ #include <cstdlib>
+ #include <cstring>
+ #include <fcntl.h>
++#include <filesystem>
++#include <map>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <vector>
+@@ -25,6 +31,41 @@ namespace
+ 
+     constexpr uint32_t kSector = 2048u;
+ 
++    struct ModFile
++    {
++        std::string host;
++        uint64_t size;
++        uint32_t lbn, sectors;
++        int fd;
++    };
++    std::vector<ModFile> s_mods;               // by lbn
++    std::map<std::string, size_t> s_modByPath; // the disc's path (upper case, '/') -> s_mods
++    uint64_t s_virtualSize = 0;                 // the image and the mods' sectors after it
++    void loadMods();
++
++    bool baseRead(uint64_t offset, void *dst, size_t bytes)
++    {
++        auto *out = static_cast<uint8_t *>(dst);
++        if (offset >= s_size)
++        {
++            std::memset(out, 0, bytes);
++            return true;
++        }
++        const size_t inImage = static_cast<size_t>(std::min<uint64_t>(bytes, s_size - offset));
++        std::memset(out + inImage, 0, bytes - inImage);
++        size_t left = inImage;
++        while (left > 0u)
++        {
++            const ssize_t n = ::pread(s_fd, out, left, static_cast<off_t>(offset));
++            if (n <= 0)
++                return false;
++            out += n;
++            offset += static_cast<uint64_t>(n);
++            left -= static_cast<size_t>(n);
++        }
++        return true;
++    }
++
+     uint32_t le32(const uint8_t *p)
+     {
+         return static_cast<uint32_t>(p[0]) | static_cast<uint32_t>(p[1]) << 8 | static_cast<uint32_t>(p[2]) << 16 |
+@@ -35,7 +76,7 @@ namespace
+     bool findEntry(uint32_t lbn, uint32_t size, const std::string &name, uint32_t &outLbn, uint32_t &outSize)
+     {
+         std::vector<uint8_t> dir(size);
+-        if (!hlImageRead(static_cast<uint64_t>(lbn) * kSector, dir.data(), size))
++        if (!baseRead(static_cast<uint64_t>(lbn) * kSector, dir.data(), size))
+             return false;
+         uint32_t pos = 0;
+         while (pos + 33u < size)
+@@ -77,6 +118,7 @@ bool hlImageOpen(const std::string &path)
+     s_fd = fd;
+     s_path = path;
+     s_size = static_cast<uint64_t>(st.st_size);
++    loadMods();
+     return true;
+ }
+ 
+@@ -84,31 +126,134 @@ bool hlImageActive() { return s_fd >= 0; }
+ 
+ bool hlImageIs(const std::string &path) { return s_fd >= 0 && path == s_path; }
+ 
+-uint64_t hlImageSize() { return s_size; }
++uint64_t hlImageSize() { return s_virtualSize; }
+ 
+ int hlImageDup() { return s_fd >= 0 ? ::dup(s_fd) : -1; }
+ 
+ bool hlImageRead(uint64_t offset, void *dst, size_t bytes)
+ {
++    if (!baseRead(offset, dst, bytes))
++        return false;
++    if (s_mods.empty())
++        return true;
+     auto *out = static_cast<uint8_t *>(dst);
+-    while (bytes > 0u)
++    const uint64_t end = offset + bytes;
++    for (const ModFile &m : s_mods)
+     {
+-        const ssize_t n = ::pread(s_fd, out, bytes, static_cast<off_t>(offset));
+-        if (n <= 0)
+-            return false;
+-        out += n;
+-        offset += static_cast<uint64_t>(n);
+-        bytes -= static_cast<size_t>(n);
++        const uint64_t from = static_cast<uint64_t>(m.lbn) * kSector, to = from + static_cast<uint64_t>(m.sectors) * kSector;
++        if (to <= offset || from >= end)
++            continue;
++        const uint64_t a = std::max(from, offset), b = std::min(to, end);
++        std::memset(out + (a - offset), 0, static_cast<size_t>(b - a));
++        const uint64_t fileEnd = std::min(b, from + m.size);
++        for (uint64_t at = a; at < fileEnd;)
++        {
++            const ssize_t n = ::pread(m.fd, out + (at - offset), static_cast<size_t>(fileEnd - at), static_cast<off_t>(at - from));
++            if (n <= 0)
++                return false;
++            at += static_cast<uint64_t>(n);
++        }
+     }
+     return true;
+ }
+ 
++namespace
++{
++    bool baseResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size);
++
++    std::string discKey(const std::string &guestPath)
++    {
++        const size_t device = guestPath.find(':');
++        std::string key;
++        for (const char c : device == std::string::npos ? guestPath : guestPath.substr(device + 1u))
++        {
++            if (c == ';')
++                break;
++            const char d = c == '\\' ? '/' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
++            if (d == '/' && (key.empty() || key.back() == '/'))
++                continue;
++            key.push_back(d);
++        }
++        return key;
++    }
++
++    void loadMods()
++    {
++        s_virtualSize = (s_size + kSector - 1u) / kSector * kSector;
++        const char *list = std::getenv("HL_MODS");
++        if (!list || !list[0])
++            return;
++        std::map<std::string, std::pair<std::string, uint64_t>> files; // later mods win
++        std::string text = list;
++        size_t at = 0;
++        while (at <= text.size())
++        {
++            const size_t nl = text.find('\n', at);
++            const std::string dir = text.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
++            at = nl == std::string::npos ? text.size() + 1u : nl + 1u;
++            std::error_code ec;
++            if (dir.empty() || !std::filesystem::is_directory(dir, ec))
++                continue;
++            for (auto it = std::filesystem::recursive_directory_iterator(dir, ec); !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec))
++            {
++                if (!it->is_regular_file(ec))
++                    continue;
++                const std::string rel = std::filesystem::relative(it->path(), dir, ec).generic_string();
++                files[discKey(rel)] = {it->path().string(), static_cast<uint64_t>(it->file_size(ec))};
++            }
++        }
++        uint32_t next = static_cast<uint32_t>(s_virtualSize / kSector);
++        next = (next + 15u) & ~15u;
++        for (const auto &[key, file] : files)
++        {
++            const int fd = ::open(file.first.c_str(), O_RDONLY | O_CLOEXEC);
++            if (fd < 0)
++            {
++                std::fprintf(stderr, "[hl] mod file cannot be read: %s\n", file.first.c_str());
++                continue;
++            }
++            const uint32_t sectors = static_cast<uint32_t>((file.second + kSector - 1u) / kSector);
++            uint32_t lbn = 0u, size = 0u;
++            const bool inPlace = baseResolve(key, lbn, size) && sectors <= (size + kSector - 1u) / kSector;
++            if (!inPlace)
++            {
++                lbn = next;
++                next += (sectors + 15u) & ~15u;
++            }
++            s_modByPath[key] = s_mods.size();
++            s_mods.push_back({file.first, file.second, lbn, sectors, fd});
++            std::fprintf(stderr, "[hl] mod: %s %s (%llu bytes, lbn %u)\n", key.c_str(), inPlace ? "in place" : "after the disc",
++                         static_cast<unsigned long long>(file.second), lbn);
++        }
++        s_virtualSize = static_cast<uint64_t>(next) * kSector;
++    }
++}
++
+ bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
++{
++    if (s_fd < 0)
++        return false;
++    if (!s_mods.empty())
++    {
++        const auto it = s_modByPath.find(discKey(guestPath));
++        if (it != s_modByPath.end())
++        {
++            lbn = s_mods[it->second].lbn;
++            size = static_cast<uint32_t>(s_mods[it->second].size);
++            return true;
++        }
++    }
++    return baseResolve(guestPath, lbn, size);
++}
++
++namespace
++{
++bool baseResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
+ {
+     if (s_fd < 0)
+         return false;
+     uint8_t pvd[kSector];
+-    if (!hlImageRead(16ull * kSector, pvd, kSector) || std::memcmp(pvd + 1, "CD001", 5) != 0)
++    if (!baseRead(16ull * kSector, pvd, kSector) || std::memcmp(pvd + 1, "CD001", 5) != 0)
+         return false;
+     uint32_t curLbn = le32(pvd + 156 + 2);
+     uint32_t curSize = le32(pvd + 156 + 10);
+@@ -142,6 +287,7 @@ bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
+     size = curSize;
+     return true;
+ }
++}
+ 
+ namespace
+ {
+@@ -196,9 +342,11 @@ namespace
+ std::FILE *hlImageOpenFile(const std::string &guestPath, uint64_t *sizeOut)
+ {
+     uint32_t lbn = 0u, size = 0u;
+-    if (!hlImageResolve(guestPath, lbn, size))
++    if (!guestPath.empty() && !hlImageResolve(guestPath, lbn, size))
+         return nullptr;
+-    auto *view = new ExtentView{static_cast<uint64_t>(lbn) * kSector, size, 0u};
++    // (no path: the whole image, with the mods)
++    const uint64_t length = guestPath.empty() ? s_virtualSize : size;
++    auto *view = new ExtentView{static_cast<uint64_t>(lbn) * kSector, length, 0u};
+ #if defined(__ANDROID__)
+     std::FILE *stream = funopen64(view, viewRead, nullptr, viewSeek, viewClose);
+ #else
+@@ -214,6 +362,6 @@ std::FILE *hlImageOpenFile(const std::string &guestPath, uint64_t *sizeOut)
+         return nullptr;
+     }
+     if (sizeOut)
+-        *sizeOut = size;
++        *sizeOut = length;
+     return stream;
+ }
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+index e721af2..f934570 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -326,8 +326,7 @@ uint64_t PS2IopHostAdapter::openHostFile(std::string_view path)
+     const std::filesystem::path hostPath{std::string(path)};
+     if (hlImageIs(hostPath.string()))
+     {   // Hidden Leaf: the path of an image handed over open cannot be opened again
+-        const int fd = hlImageDup();
+-        std::FILE *image = fd >= 0 ? ::fdopen(fd, "rb") : nullptr;
++        std::FILE *image = hlImageOpenFile(std::string(), nullptr); // (through the reader, for the mods)
+         if (!image)
+             return 0u;
+         std::lock_guard<std::mutex> lock(m_hostFileMutex);
