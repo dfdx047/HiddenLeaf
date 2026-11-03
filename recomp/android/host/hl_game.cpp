@@ -99,9 +99,23 @@ namespace
         }
         else if (s_count != 0u)
         {
+            // Only where the field still holds the wide scale we wrote: when the fight ends the game frees some of these
+            // cameras, and writing into a freed (or reused) block broke the heap's free list (the hang after the KO, the
+            // allocator 0x118E60 reading a bad pointer forever).
+            const float wide = hl_game::g_cameraXScale.load(std::memory_order_relaxed);
+            uint32_t back = 0u;
             for (uint32_t i = 0; i < s_count; ++i)
-                std::memcpy(rdram + ((s_cameras[i] + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
-            std::fprintf(stderr, "[cam] v%llu %u cameras back to 1\n", static_cast<unsigned long long>(g_tick), s_count);
+            {
+                uint8_t *field = rdram + ((s_cameras[i] + kCameraXScale) & 0x1FFFFFFu);
+                float now;
+                std::memcpy(&now, field, 4);
+                if (now == wide)
+                {
+                    std::memcpy(field, &scale, 4);
+                    ++back;
+                }
+            }
+            std::fprintf(stderr, "[cam] v%llu %u of %u cameras back to 1\n", static_cast<unsigned long long>(g_tick), back, s_count);
             s_count = 0u;
         }
     }
