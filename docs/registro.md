@@ -16,11 +16,11 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
-| Campanha (Master Mode) | parcial | `a6c40f5` | RP5 | rota de campanha gravada (`rp5_camp3`) | anda, troca de área e menu START a 50 fps (sem limite de 480p); antes 43,7 fps no `sd480p`; Cube 17% de pares lentos (VU1). Cube, Odin e 20:9 não refeitos |
+| Campanha (Master Mode) | parcial | `a6c40f5` | RP5 rota de campanha gravada (`*_camp*`) | anda, troca de área e menu START: RP5 50 fps, Odin 50, Cube 40–55 (VU1). Em 20:9, transição de área em 4:3 com faixa preta |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
-| Widescreen em 20:9 | parcial | build de 11-03 12:00 | Odin 3 (2400x1080) | rota v3 gravada, `ana.py` | câmera `x 0.600`, 0 quadros com barra no jogo; menus esticados |
+| Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: transição de área em 4:3 com faixa preta (~7 s); menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
 | Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5 | rota fixa, log `[sp]` | responde sozinho em segundo plano (não é o que se quer). Um toque dá o Ougi; uma etapa mostrou "ERROR"; △△, disputa e multiplicador não vistos |
 | Painel de pausa | funciona | `9c6c786` | RP5 | prints (11-02) | não reconferido depois de 11-02 |
@@ -44,7 +44,11 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
   (`LRIGHT`, `LUP`, `LDOWN`, `LLEFT`) → **troca de área** (Hidden Leaf Gate, tela de carga) → anda → START do jogo (menu,
   tutorial "Start menu items"). **50,0 fps** de v5998 a v12370 (`[perf]`, sem limite de 480p), sem `missing-target`,
   som presente (rms 0,08–0,16). Sem barras visíveis no 16:9.
-- **Falta na rota:** o painel de pausa do launcher (widescreen liga/desliga) e sair; Cube, Odin e 20:9 na campanha.
+- **Falta na rota:** o painel de pausa do launcher (widescreen liga/desliga) e sair.
+- **Odin 3 em 2400x1080 (`odin209_camp`) e Cube (`cube_camp`), mesma rota:** os dois andam, trocam de área e abrem o
+  menu START, sem `missing-target`. Odin 49,8–50,2 fps; Cube 40,1–54,7 fps (VU1). **Defeito novo no 20:9:** nas
+  transições de área (tela de carga, telas claras), a imagem sai em 4:3 com faixa preta à esquerda: `ana.py` acusa
+  56,8–64,2 s e trechos curtos em 13–15 s. Na vila, sem barras. Item 3 (widescreen).
 
 ### 2026-11-03 12:10, `hl_native.cpp`: o fantasma depois da luta 2 era SCANMSK 2 preso no GS (corrigido na rota v3)
 
