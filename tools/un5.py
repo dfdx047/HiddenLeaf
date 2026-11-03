@@ -424,24 +424,57 @@ def data_code_islands(data, o):
         return []
     lo_data = o["code"] + o["text"]
     hi_data = min(o["code"] + o["text"] + o["data"], o["addr"] + len(data)) & ~3  # (TEXTBRA.BIN's header counts more)
+    # Marks: prologues start code; returns end it; a J or JAL into the game's main code (the mod's hooks call the game's
+    # functions and jump back into them, 0x9509a0 has no prologue nor return near it) is code too, and its island
+    # starts up to 0x100 bytes before it.
     marks = []
     for v in range(lo_data, hi_data - 3, 4):
         w = struct.unpack_from("<I", data, v - o["addr"])[0]
-        if ((w >> 16) == 0x27BD and w & 0x8000) or w == 0x03E00008:
-            marks.append((v, w == 0x03E00008))
+        game = (w >> 26) in (2, 3) and 0x100000 <= ((w & 0x03FFFFFF) << 2) < 0x3E0000
+        if ((w >> 16) == 0x27BD and w & 0x8000) or w == 0x03E00008 or game:
+            marks.append((v, "ret" if w == 0x03E00008 else "game" if game else "pro"))
     islands = []
-    for v, ret in marks:
+    for v, kind in marks:
         if islands and v - islands[-1][2] <= 0x2000:
             islands[-1][2] = v
-            if ret:
-                islands[-1][1] = v + 8
-        elif not ret:
-            islands.append([v, v, v])
+            islands[-1][1] = max(islands[-1][1], v + 8)
+        elif kind == "pro":
+            islands.append([v, v + 4, v])
         else:
-            start = islands[-1][1] if islands else lo_data
-            if v - start <= 0x1000:
-                islands.append([start, v + 8, v])
+            before = islands[-1][1] if islands else lo_data
+            start = before if v - before <= 0x1000 else max(before, v - 0x100)
+            islands.append([start, v + 8, v])
     return [(lo, hi) for lo, hi, _ in islands if hi > lo]
+
+
+def called_islands(data, o, callers):
+    """With --from ELF...: where other ELFs' code jumps or calls into this overlay's data (only for overlays that keep
+    their code there, like the A35's MOD.BIN: BTL.BIN jumps to 0x9cb104, right after an island the marks found), code
+    from there to the next return (at most 0x1000 bytes, else 0x100): [(lo, hi)]."""
+    if o["text"] >= 0x1000 or not callers:
+        return []
+    lo_data = o["code"] + o["text"]
+    hi_data = min(o["code"] + o["text"] + o["data"], o["addr"] + len(data)) & ~3
+    out = []
+    for path in callers:
+        blob = open(path, "rb").read()
+        for name, addr, off, size, flags, t in sections_of(blob):
+            if t != 1 or not flags & SHF_EXEC:
+                continue
+            for i in range(0, min(size, len(blob) - off) - 3, 4):
+                w, = struct.unpack_from("<I", blob, off + i)
+                if (w >> 26) not in (2, 3):
+                    continue
+                v = (w & 0x03FFFFFF) << 2
+                if not lo_data <= v < hi_data:
+                    continue
+                end = v + 0x100
+                for p in range(v, min(v + 0x1000, hi_data - 4), 4):
+                    if struct.unpack_from("<I", data, p - o["addr"])[0] == 0x03E00008:
+                        end = p + 8
+                        break
+                out.append((v, min(end, hi_data)))
+    return out
 
 
 def cmd_ovlelf(a):
@@ -461,7 +494,7 @@ def cmd_ovlelf(a):
     # the data, with the static constructors' code in it as code sections of its own
     at, n = o["code"] + o["text"], 0
     islands = []
-    for lo, hi in sorted(ctor_islands(raw, o) + data_code_islands(raw, o)):
+    for lo, hi in sorted(ctor_islands(raw, o) + data_code_islands(raw, o) + called_islands(raw, o, getattr(a, "callers", None))):
         if islands and lo <= islands[-1][1]:
             islands[-1] = (islands[-1][0], max(hi, islands[-1][1]))
         else:
@@ -564,8 +597,13 @@ def cmd_fnmap(a):
     # 0x72f340, in BTL): JAL and J in their code, and pointers in anything they load. Only code is read as instructions,
     # data that happens to look like a JAL would split functions at any word after a return.
     outside = 0
+    mine = [(lo, hi) for lo, hi, _ in code]
     for path in a.also or []:
         blob = open(path, "rb").read()
+        # another overlay loaded at the same addresses (ADV and BTL) calls its own code there, not ours: skipped
+        theirs = [(addr, addr + size) for name, addr, off, size, flags, t in sections_of(blob) if flags & SHF_EXEC]
+        if any(lo < h and l < hi for lo, hi in mine for l, h in theirs):
+            continue
         for name, addr, off, size, flags, t in sections_of(blob):
             if t != 1 or not flags & SHF_ALLOC:
                 continue
@@ -667,7 +705,7 @@ def main():
     s = sub.add_parser("diff"); s.add_argument("base"); s.add_argument("mod"); s.add_argument("-o"); s.set_defaults(fn=cmd_diff)
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
     s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
-    s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.set_defaults(fn=cmd_ovlelf)
+    s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.add_argument("--from", nargs="*", dest="callers"); s.set_defaults(fn=cmd_ovlelf)
     s = sub.add_parser("stubfix"); s.add_argument("config"); s.set_defaults(fn=cmd_stubfix)
     s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.add_argument("--also", nargs="*"); s.set_defaults(fn=cmd_fnmap)
     a = ap.parse_args()

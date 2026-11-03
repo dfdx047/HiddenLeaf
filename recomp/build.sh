@@ -119,17 +119,30 @@ say "6. the overlays"
 rm -rf "$B_GEN/ovl"
 mkdir -p "$B_GEN/ovl/modules"
 names=()
+# every overlay's ELF first: one calls another (the A35's BTL.BIN calls into MOD.BIN), fnmap skips those that overlap
+for bin in "$B_DISC"/PRG/*.BIN; do
+    n=$(basename "$bin" .BIN | tr 'A-Z' 'a-z')
+    head -c 4 "$bin" | grep -q MWo3 || continue
+    mkdir -p "$B_GEN/ovl/$n"
+    python3 "$here/tools/un5.py" ovlelf "$bin" "$B_GEN/ovl/$n/$n.elf" >/dev/null
+done
+# again, with the code the others jump or call into (an overlay that keeps its code in its data: the A35's MOD.BIN)
+for bin in "$B_DISC"/PRG/*.BIN; do
+    n=$(basename "$bin" .BIN | tr 'A-Z' 'a-z')
+    head -c 4 "$bin" | grep -q MWo3 || continue
+    others=(); for e in "$B_GEN"/ovl/*/*.elf; do [ "$e" = "$B_GEN/ovl/$n/$n.elf" ] || others+=("$e"); done
+    python3 "$here/tools/un5.py" ovlelf "$bin" "$B_GEN/ovl/$n/$n.elf" --from "$B_GEN/un5_split.elf" "${others[@]}" >/dev/null
+done
 for bin in "$B_DISC"/PRG/*.BIN; do
     n=$(basename "$bin" .BIN | tr 'A-Z' 'a-z')
     head -c 4 "$bin" | grep -q MWo3 || continue
     d="$B_GEN/ovl/$n"
-    mkdir -p "$d"
-    python3 "$here/tools/un5.py" ovlelf "$bin" "$d/$n.elf" >/dev/null
     ( cd "$d"
       "$B/PS2Recomp/build-tools/ps2xAnalyzer/ps2_analyzer" "$n.elf" cfg.toml > analyzer.log 2>&1
       sed -i 's|^output = .*|output = "./output/"|' cfg.toml
       "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1
-      python3 "$here/tools/un5.py" fnmap "$n.elf" output map.csv --also "$B_GEN/un5_split.elf" >/dev/null
+      others=(); for e in "$B_GEN"/ovl/*/*.elf; do [ "$e" = "$d/$n.elf" ] || others+=("$e"); done
+      python3 "$here/tools/un5.py" fnmap "$n.elf" output map.csv --also "$B_GEN/un5_split.elf" "${others[@]}" >/dev/null
       sed -i 's|^ghidra_output = .*|ghidra_output = "map.csv"|' cfg.toml
       rm -rf output
       "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" cfg.toml > recomp.log 2>&1
