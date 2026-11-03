@@ -437,7 +437,8 @@ class GameActivity : SDLActivity() {
         mark.writeText(want + "\n")
     }
 
-    override fun getLibraries(): Array<String> = arrayOf("SDL3", EngineBridge.LIBRARY)
+    override fun getLibraries(): Array<String> =
+        arrayOf("SDL3", EngineBridge.libraryFor(this, com.dfdx047.hiddenleaf.data.GamePaths(this).activeMods))
 
     /** The base ISO, opened here (the engine reads it through /proc/self/fd: a content:// address cannot be reopened
      *  by path from native code). Kept open for the life of the game's process. */

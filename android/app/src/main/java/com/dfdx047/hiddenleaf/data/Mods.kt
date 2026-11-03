@@ -64,7 +64,8 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
                 dir = d,
                 changesCode = p.getProperty("code") == "1",
                 known = p.getProperty("known") == "1",
-                pack = KnownVersions.MODS.firstOrNull { it.id == id }?.pack ?: (p.getProperty("code") != "1"),
+                pack = com.dfdx047.hiddenleaf.engine.EngineBridge.has(context, com.dfdx047.hiddenleaf.engine.EngineBridge.packOf(id)) ||
+                    (KnownVersions.MODS.firstOrNull { it.id == id }?.pack ?: (p.getProperty("code") != "1")),
                 boot = p.getProperty("boot", ""),
             )
         }

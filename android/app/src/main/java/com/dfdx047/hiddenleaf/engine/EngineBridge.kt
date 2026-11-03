@@ -12,8 +12,20 @@ object EngineBridge {
     const val LIBRARY = "un5"
 
     /** Whether the engine library is packaged in this APK. Looked up without loading it. */
-    fun isAvailable(context: Context): Boolean {
+    fun isAvailable(context: Context): Boolean = has(context, LIBRARY)
+
+    /** A mod's code pack: the engine built with the mod's code (recomp/android/build.sh --mod <id>). */
+    fun packOf(modId: String) = LIBRARY + "_" + modId.replace('-', '_')
+
+    fun has(context: Context, library: String): Boolean {
         val loader = context.classLoader as? dalvik.system.BaseDexClassLoader ?: return false
-        return loader.findLibrary(LIBRARY) != null
+        return loader.findLibrary(library) != null
+    }
+
+    /** The library to run: the code pack of the mod switched on that has one (un5_mods.txt), else the base engine. */
+    fun libraryFor(context: Context, activeMods: java.io.File): String {
+        val ids = runCatching { activeMods.readLines() }.getOrDefault(emptyList())
+            .map { it.trim() }.filter { it.startsWith("modlib/") }.map { it.removePrefix("modlib/").substringBefore('/') }
+        return ids.map { packOf(it) }.firstOrNull { has(context, it) } ?: LIBRARY
     }
 }
