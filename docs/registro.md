@@ -37,6 +37,13 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 12:55, painel de pausa pela rota: ainda não
+
+- No RP5, o overlay de controles é desenhado pelo SDL e o `uiautomator` não vê nada dele (`ui.py` vazio). Um toque
+  em (900, 85), onde fica o ☰ no layout do Cube, não abriu o painel; a alça azul da borda direita abre o "Odin Hub" do
+  sistema do aparelho, não o nosso. Falta achar a posição do ☰ no RP5 (ele fica sob o HUD de desempenho do sistema)
+  para pôr o painel (widescreen liga/desliga) e o "sair" na rota.
+
 ### 2026-11-03 12:50, correção da entrada de 12:35 (20:9 na campanha)
 
 - A "imagem em 4:3 com faixa preta" na troca de área em 20:9 é, na verdade, a **cortina de transição** do jogo (o logo do
