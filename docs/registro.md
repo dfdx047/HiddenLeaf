@@ -37,6 +37,57 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 10:05, `un5_main.cpp` (leitor do `hl_env.txt`) e `HL_PRIV_LOG`: vitória nos 3 aparelhos e em 20:9
+
+- **Bug da ferramenta de teste:** `loadEnvFile` lia o `hl_env.txt` com `fgets` em 2048 bytes. A rota v3 (3049 bytes)
+  era cortada sem aviso e parava em v11265 (último `[hl_pad] tick`): por isso a luta 2 da primeira v3 "não respondia".
+  Agora lê com `getline` (sem limite). Conferido: rota v3 até v15900 nos três aparelhos.
+- **`HL_PRIV_LOG=1`** (`hl_game.cpp` `onVsync`): uma linha `[priv]` com PMODE, SMODE2, DISPFB/DISPLAY 1 e 2 e BGCOLOR
+  sempre que mudam (chave de depuração, desligada por padrão).
+- **Rota v3 (`build/lab/hl_env_v3.txt`):** a v1 até a luta 1, `POKE` da vida da CPU nas duas lutas (`d7ba0c` em v6450,
+  `d7ba8c` em v11150: o jogo reinicia a vida no começo do round, ~444 vsyncs depois da câmera da luta; antes disso o
+  `POKE` se perde), ○ a cada 12 vsyncs e ✕ a cada 150 depois de cada KO.
+- **Vitória da luta 1, os três aparelhos (`rec/odin_v2`, `rp5_v2`, `cube_v2`, 16:9; `odin209_v3b` em 2400x1080):** KO
+  v7936 → WINNER "Naruto Uzumaki" com a arte → "Ninja Song" (85/96/1161/1342) → seleção → luta 2. Igual nos três, os
+  mesmos lutadores nos mesmos endereços (`d69a00`/`d7b9a0`, luta 2 `d69a80`/`d7ba20`).
+- **Vitória da luta 2: quebrada no RP5 (`rp5_v3b`).** WINNER e resultado aparecem com a imagem da WINNER por baixo em
+  linhas alternadas, e esse fantasma listrado fica na seleção, no VS e na carga (~50 s) até o START BATTLE. A mesma
+  tela listrada e desbotada apareceu na seleção depois da luta 2 no Odin em 20:9 (`odin209_v3`, com a CPU vencendo).
+  No Odin em 16:9 (`odin_cur1`) e no RP5 com a CPU vencendo (`rp5_v3`), a seleção saiu limpa: **intermitente**. É o
+  relato "fica presa numa imagem parada, o jogo segue por trás". Em investigação (captura `w2.bin` + `[priv]`).
+- **Barras laterais (`ana.py`, v3b, 170 s cada):** fora do launcher, 0 quadros com barra de verdade nos três; os
+  acusados (Odin 20:9 aos 149 s, Cube aos 27 s) são cenário escuro na borda e tela preta de carga. Câmera larga em 20:9:
+  `x 0.600`. O Cube não usa câmera larga (tela 1:1).
+- **Piscadas:** o detector acusa 17–19 por vídeo; as que olhei (Odin 111 s, 128 s, 137 s) são flash de golpe e troca
+  de pose. Nenhum personagem sumindo num quadro. **Quadro preto com HUD** no Cube logo depois do Ougi "Linked" da CPU
+  (`cube_v2`, ~67 s): a anotar no item 4.
+- **Som:** picos de 1,04 a 1,25 nos três (`[snd] peak`): estoura. O filtro de DC de `spu2Output` passa de 1,0 depois
+  do `clamp_mix`.
+- **RP5:** no carregador, 100% às 09:23 (às 08:00 estava em 41% sem carregar).
+
+### 2026-11-03 09:40, sem código novo: a tela de vitória aparece quando o P1 vence (Odin 3, build `21c8a48`)
+
+- **Rota nova para a vitória (`build/lab/hl_env_p1w.txt`):** a rota v1 (o P1 parado) sempre perde, e com a CPU vencendo o
+  jogo vai do KO ao branco, ao NOW LOADING e à seleção, sem WINNER nem resultado (v10046 KO → v10220–10300 branco →
+  v10306 NOW LOADING). Para o P1 vencer: `6450:POKE:d7ba0c:3c:4` põe 0,0115 na vida da CPU e ○ a cada 12 vsyncs dá o golpe.
+  A vida é o float `lutador+0x6c` (1,0 = cheia; lutadores em `0xd69a00` e `0xd7b9a0` nesta rota, pelo `HL_FTRACE`;
+  conferido com 4 dumps de RAM: P1 0,945 → 0,542 → 0,142 → 0,009, CPU 1,0).
+- **Resultado (Odin 3, 16:9, `rec/odin_p1w2`):** KO em v7936 → WINNER com "Naruto Uzumaki" e **a arte do personagem
+  inteira** → resultado "Ninja Song" (Health 85, Time 96, Bonus 1161, 1342 ryo, "Outstanding!") → ✕ → seleção → VS →
+  segunda luta (Naruto x Sakura). Também apareceu um Ougi "Linked" da CPU (Sakura), sem erro.
+- **O relato "presa numa imagem parada, o jogo segue por trás"** era o travamento do heap depois do KO (`2fee126`,
+  corrigido em `21c8a48`): nesta rota não acontece mais.
+- **Correção do que eu achei antes (nesta manhã):** as texturas que tomei por "arte WINNER" na captura do GS
+  (`tbp 3e80/3c00`, v10280–10430 da rota v1) são do NOW LOADING; o branco depois do KO é o fade do jogo, igual com o GS
+  em software (`HL_GS_API=sw`), sem o renderizador nativo e sem câmera larga (`HL_ASPECT=1333`).
+- **Não conferido:** se, no PCSX2, a CPU vencendo também pula a WINNER (o vídeo de referência termina no meio da luta;
+  o savestate `SLES-55605 (C071D4C1).01.p2s` de 07:50 é o resultado de uma vitória do jogador, "Winner GUY").
+- **Ainda nesta rota (Odin 3):** os controles na tela continuam os da luta na WINNER e no resultado; os filmes e logos
+  sem som (`[snd] rms 0`); um trecho de dupla exposição aos 188–189 s da luta 1 (`rec/odin_cur1`).
+- **Bisect de 11-01:** o build de referência `cd8fca7` não roda com o código gerado de hoje (`[guest-branch:missing-target]
+  target=0x100008`, tela preta no RP5); causa não achada em ~25 min. O APK de `a3dbcfc` está feito
+  (`build/bisect/apk/a3dbcfc.apk`), sem teste.
+
 ### 2026-11-03 08:06, `21c8a48`: o jogo não trava mais depois do KO (APK 0.2.0 de 08:06)
 
 - **Sintoma (Odin 3, rota completa, build `0259d54`):** no fim da luta (CPU vence, v10046 KO) o jogo parou em v10257:

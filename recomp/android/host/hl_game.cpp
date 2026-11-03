@@ -487,6 +487,22 @@ namespace
                 hl_game::g_cameraXScale = static_cast<float>(std::atof(w));
         }
         g_tick = tick;
+        // HL_PRIV_LOG=1: the GS's display registers, a line each time one changes (for screens the display reads wrong)
+        static const bool s_privLog = std::getenv("HL_PRIV_LOG") != nullptr;
+        if (s_privLog)
+        {
+            const GSRegisters &r = runtime->memory().gs();
+            const uint64_t now[7] = {r.pmode, r.smode2, r.dispfb1, r.display1, r.dispfb2, r.display2, r.bgcolor};
+            static uint64_t s_last[7] = {~0ull, ~0ull, ~0ull, ~0ull, ~0ull, ~0ull, ~0ull};
+            if (std::memcmp(now, s_last, sizeof(now)) != 0)
+            {
+                std::fprintf(stderr, "[priv] v%llu pmode %llx smode2 %llx dispfb1 %llx display1 %llx dispfb2 %llx display2 %llx bgcolor %llx\n",
+                             static_cast<unsigned long long>(tick), static_cast<unsigned long long>(now[0]), static_cast<unsigned long long>(now[1]),
+                             static_cast<unsigned long long>(now[2]), static_cast<unsigned long long>(now[3]), static_cast<unsigned long long>(now[4]),
+                             static_cast<unsigned long long>(now[5]), static_cast<unsigned long long>(now[6]));
+                std::memcpy(s_last, now, sizeof(now));
+            }
+        }
         if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
             unlockEverything();
         const uint32_t gfx = read32(kGfxPointer);

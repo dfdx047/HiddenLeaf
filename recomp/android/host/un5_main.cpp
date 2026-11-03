@@ -282,8 +282,10 @@ namespace
         FILE *fp = std::fopen(path.c_str(), "r");
         if (!fp)
             return;
-        char line[2048];
-        while (std::fgets(line, sizeof(line), fp))
+        // (lines of any length: a long HL_PADROUTE was cut at 2048 bytes and the route stopped halfway, with no message)
+        char *line = nullptr;
+        size_t capacity = 0u;
+        while (getline(&line, &capacity, fp) != -1)
         {
             line[std::strcspn(line, "\r\n")] = '\0';
             char *eq = std::strchr(line, '=');
@@ -294,6 +296,7 @@ namespace
                 std::fprintf(stderr, "un5: env %s=%s\n", line, eq + 1);
             }
         }
+        std::free(line);
         std::fclose(fp);
     }
 
