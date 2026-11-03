@@ -22,7 +22,6 @@ namespace hl_native
 	// the stream's vsyncs must not.
 	void setRate(int rate);
 	bool presentsHere();
-	uint32_t prompt(); // (the button prompt on screen: see updatePrompt)
 	int presentRate();
 	// A packet to send to the GS ahead of whatever is read next. Runs what is queued for the GS thread on the way.
 	bool next(uint8_t* path, const uint8_t** data, uint32_t* size);

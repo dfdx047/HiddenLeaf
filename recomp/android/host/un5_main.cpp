@@ -144,6 +144,12 @@ namespace
                 g_settings.fpsMode = v;
             else if (!std::strcmp(line, "dr_unlock_all"))
                 hl_game::g_unlockAll = v != 0;
+            else if (!std::strcmp(line, "special_one"))
+                hl_game::g_specialOn = v != 0;
+            else if (!std::strcmp(line, "special_button"))
+                hl_game::g_specialMask = static_cast<uint32_t>(v);
+            else if (!std::strcmp(line, "mash_percent"))
+                hl_game::g_mashPercent = v;
         }
         std::fclose(fp);
     }
@@ -159,7 +165,6 @@ namespace
     };
     void (*g_gsxSetVideo)(const GsxVideo *) = nullptr;
     int (*g_gsxPresentRate)() = nullptr;
-    uint32_t (*g_gsxPrompt)() = nullptr;
     int g_windowW = 0, g_windowH = 0;
 
     // The shape asked for against the screen: a wider picture is the 3D's horizontal scale, 0.75 at 16:9, as the
@@ -339,7 +344,6 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 extern "C" JNIEXPORT jboolean JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuOpen(JNIEnv *, jclass) { return JNI_FALSE; }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeScene(JNIEnv *, jclass) { return hl_game::scene(); }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeDivider(JNIEnv *, jclass) { return hl_game::divider(); }
-extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePrompt(JNIEnv *, jclass) { return g_gsxPrompt ? static_cast<jint>(g_gsxPrompt()) : 0; }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePresentRate(JNIEnv *, jclass) { return g_gsxPresentRate ? g_gsxPresentRate() : 0; }
 // The panel: the game frozen (EE, IOP and sound together) while it is open
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPaused(JNIEnv *, jclass, jboolean paused)
@@ -418,7 +422,6 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     const auto gsxStop = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_Stop"));
     g_gsxSetVideo = reinterpret_cast<void (*)(const GsxVideo *)>(dlsym(gsx, "Bt4Gsx_SetVideo"));
     g_gsxPresentRate = reinterpret_cast<int (*)()>(dlsym(gsx, "Bt4Gsx_PresentRate"));
-    g_gsxPrompt = reinterpret_cast<uint32_t (*)()>(dlsym(gsx, "Bt4Gsx_Prompt"));
     hl_game::g_nativeOn = reinterpret_cast<bool (*)()>(dlsym(gsx, "Bt4Gsx_NativeOn"));
     g_windowW = width;
     g_windowH = height;

@@ -373,7 +373,6 @@ struct Bt4GsxArgs
 
 __attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
 __attribute__((visibility("default"))) int Bt4Gsx_PresentRate() { return hl_native::presentRate(); }
-__attribute__((visibility("default"))) uint32_t Bt4Gsx_Prompt() { return hl_native::prompt(); }
 
 __attribute__((visibility("default"))) void Bt4Gsx_SetVideo(const void* video)
 {

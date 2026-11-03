@@ -161,6 +161,29 @@ fun ControlsScreen(vm: AppViewModel) {
             ToggleRow(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { vm.updateTouch(c.copy(sticksFloat = it)) }
         }
 
+        SectionCard(stringResource(R.string.special_one), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
+            val specialOn = (engine[EngineSettings.SPECIAL_ONE] ?: 1) != 0
+            ToggleRow(stringResource(R.string.special_one), stringResource(R.string.special_one_text), specialOn) {
+                vm.setting(EngineSettings.SPECIAL_ONE, if (it) 1 else 0)
+            }
+            if (specialOn) {
+                Text(stringResource(R.string.special_button), style = MaterialTheme.typography.titleSmall)
+                ChipRow(
+                    options = listOf("○" to 0x20, "□" to 0x80, "△" to 0x10, "✕" to 0x40, "L1" to 0x04, "R1" to 0x08, "L2" to 0x01, "R2" to 0x02),
+                    selected = engine[EngineSettings.SPECIAL_BUTTON] ?: 0x20,
+                    onSelect = { vm.setting(EngineSettings.SPECIAL_BUTTON, it) },
+                )
+                Text(stringResource(R.string.special_button_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.mash_multiplier), style = MaterialTheme.typography.titleSmall)
+                ChipRow(
+                    options = listOf("1x" to 100, "1,25x" to 125, "1,5x" to 150, "1,65x" to 165, "2x" to 200),
+                    selected = engine[EngineSettings.MASH_PERCENT] ?: 100,
+                    onSelect = { vm.setting(EngineSettings.MASH_PERCENT, it) },
+                )
+                Text(stringResource(R.string.mash_multiplier_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
         SectionCard(stringResource(R.string.macros), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
             Text(stringResource(R.string.macros_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             c.macros.forEach { m ->

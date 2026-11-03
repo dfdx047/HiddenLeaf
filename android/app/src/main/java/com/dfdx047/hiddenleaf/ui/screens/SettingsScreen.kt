@@ -125,9 +125,6 @@ fun SettingsScreen(vm: AppViewModel) {
             ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.unlock_all_text), get(EngineSettings.UNLOCK_ALL, 0) != 0) {
                 vm.setting(EngineSettings.UNLOCK_ALL, if (it) 1 else 0)
             }
-            ToggleRow(stringResource(R.string.prompt_buttons), stringResource(R.string.prompt_buttons_text), get(EngineSettings.PROMPT, 1) != 0) {
-                vm.setting(EngineSettings.PROMPT, if (it) 1 else 0)
-            }
             ToggleRow(stringResource(R.string.show_fps), stringResource(R.string.show_fps_text), get(EngineSettings.METER, 0) != 0) {
                 vm.setting(EngineSettings.METER, if (it) 1 else 0)
             }

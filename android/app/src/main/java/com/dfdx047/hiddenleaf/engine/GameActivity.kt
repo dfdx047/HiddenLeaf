@@ -49,31 +49,8 @@ class GameActivity : SDLActivity() {
 
     private val watchMenu = object : Runnable {
         override fun run() {
-            watchPrompt()
             pad?.suppressed = panel != null
             handler.postDelayed(this, 50)
-        }
-    }
-
-    // ---- the game asks for a button ("Mash", a jutsu's sequence): it comes big and near the thumb, over the right half of the
-    // controller. The left half stays: what is drawn does not say whose prompt it is, and it may be the opponent's.
-    private var promptEnabled = true
-    private var promptView: PromptView? = null
-    private var promptOn = false
-    private var promptSeen = 0L
-
-    private fun watchPrompt() {
-        val view = promptView ?: return
-        val value = if (promptEnabled && panel == null && pad?.hiddenForPad != true && pad?.editing != true && pad?.config?.mode != TouchMode.OFF) TouchBridge.prompt() else 0
-        val now = android.os.SystemClock.uptimeMillis()
-        if (value != 0) {
-            promptSeen = now
-            if (!promptOn) android.util.Log.i("un5", "touch: prompt %x".format(value))
-            promptOn = true
-            view.show(value)
-        } else if (promptOn && now - promptSeen > 400L) {
-            promptOn = false
-            view.show(0)
         }
     }
 
@@ -202,10 +179,6 @@ class GameActivity : SDLActivity() {
         }
         layout.addView(view.view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pad = view
-        promptEnabled = runCatching { EngineSettings(paths.settings).get(EngineSettings.PROMPT, 1) != 0 }.getOrDefault(true)
-        promptView = PromptView(this) { mask -> TouchBridge.setPad(mask, 128, 128, 128, 128) }.also {
-            layout.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        }
         meterLevel = runCatching { EngineSettings(paths.settings).get(EngineSettings.METER, 0) }.getOrDefault(0)
         addPerfOverlay(layout)
     }

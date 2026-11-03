@@ -464,7 +464,11 @@
     <string name="saves_export_folder">Export folder</string>
     <string name="saves_backup_hint">Before each import the card goes to saves_backups, as a zip (the last 10). Backups now: %1$d. A save that comes in replaces the one with the same name; the others stay.</string>
     <string name="meter_interpolated">%1$d fps interpolated (game: %2$d)</string>
-    <string name="prompt_buttons">Big button prompts</string>
-    <string name="prompt_buttons_text">When the game asks for a button (Mash, Unleash Ultimate Jutsu, a jutsu\'s sequence), it appears big near your thumb in place of the controller.</string>
     <string name="panel_resolution_hint">Takes effect the next time the game starts.</string>
+    <string name="special_one">Special with one button</string>
+    <string name="special_one_text">One tap does the Jutsu or the Ougi the chakra allows (the Ougi with 2 levels), and counts as the right button in an Ougi\'s sequence. Off: the game as it is.</string>
+    <string name="special_button">Button</string>
+    <string name="special_button_text">Standing still and without a direction, the circle is the special while there is chakra; with a direction or in a combo it is still the attack. The other buttons lose what they do in a fight.</string>
+    <string name="mash_multiplier">Each press is worth</string>
+    <string name="mash_multiplier_text">In the steps that ask to press repeatedly.</string>
 </resources>

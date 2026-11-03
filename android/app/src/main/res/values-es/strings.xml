@@ -463,7 +463,11 @@
     <string name="saves_export_folder">Exportar carpeta</string>
     <string name="saves_backup_hint">Antes de cada importación la tarjeta va a saves_backups, en zip (las 10 últimas). Copias ahora: %1$d. La partida que entra sustituye a la del mismo nombre; las demás se quedan.</string>
     <string name="meter_interpolated">%1$d fps interpolado (juego: %2$d)</string>
-    <string name="prompt_buttons">Botones grandes en los comandos</string>
-    <string name="prompt_buttons_text">Cuando el juego pide un botón (Mash, Unleash Ultimate Jutsu, la secuencia de un jutsu), aparece grande cerca del pulgar, en lugar del control.</string>
     <string name="panel_resolution_hint">Se aplica la próxima vez que se abra el juego.</string>
+    <string name="special_one">Especial con un botón</string>
+    <string name="special_one_text">Un toque hace el Jutsu o el Ougi que el chakra permite (el Ougi con 2 niveles) y cuenta como el botón correcto en la secuencia de un Ougi. Apagado: el juego original.</string>
+    <string name="special_button">Botón</string>
+    <string name="special_button_text">Quieto y sin dirección, el círculo es el especial mientras haya chakra; con dirección o en un combo sigue siendo el ataque. Los otros botones pierden lo que hacen en la pelea.</string>
+    <string name="mash_multiplier">Cada toque vale</string>
+    <string name="mash_multiplier_text">En las etapas de pulsar repetidamente.</string>
 </resources>

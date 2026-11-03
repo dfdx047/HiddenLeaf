@@ -304,77 +304,6 @@ namespace
 		return f;
 	}
 
-	// ---- the game's button prompts ("Mash", "Unleash Ultimate Jutsu", the sequences of a jutsu): what the player sees is what
-	// the player must press, so they are read from what is drawn: which icon of the game's own sheets, left to right.
-	// Codes: 1 circle 2 triangle 3 square 4 cross 5 up 6 right 7 down 8 left. In nibbles from bit 4, the count in the lowest.
-	constexpr uint64_t kPromptSheet = 0xb4632ed2e6242b9full, kPromptClut = 0x4c8bd97dcf4bac6cull;
-	constexpr uint64_t kSequenceSheet = 0xc69da492afd2ac87ull, kSequenceClut = 0xdf797daaa20abe4cull;
-	int32_t s_promptTex = -1, s_sequenceTex = -1;
-	std::atomic<uint32_t> s_prompt{0};
-
-	void updatePrompt(const Frame& f)
-	{
-		if (s_promptTex < 0 && s_sequenceTex < 0)
-			return;
-		struct Icon
-		{
-			float x;
-			uint32_t code;
-		};
-		Icon icons[7];
-		uint32_t count = 0u;
-		for (const Draw& d : f.draws)
-		{
-			if (d.key.tex < 0 || (d.key.tex != s_promptTex && d.key.tex != s_sequenceTex))
-				continue;
-			for (uint32_t q = 0; q + 6u <= d.count && count < 7u; q += 6u)
-			{
-				float s0 = 1e9f, t0 = 1e9f, x0 = 1e9f, x1 = -1e9f;
-				for (uint32_t k = d.first + q; k < d.first + q + 6u; ++k)
-				{
-					const Vertex& v = f.vertices[f.indices[k]];
-					s0 = std::min(s0, v.s);
-					t0 = std::min(t0, v.t);
-					x0 = std::min(x0, v.x);
-					x1 = std::max(x1, v.x);
-				}
-				uint32_t code = 0u;
-				if (d.key.tex == s_promptTex)
-				{
-					// (rows of 24 of 128: cross, square, triangle, circle; the row above is an ornament)
-					const int row = static_cast<int>((t0 + 0.01f) / 0.1875f);
-					code = row == 4 ? 1u : row == 3 ? 2u : row == 2 ? 3u : row == 1 ? 4u : 0u;
-				}
-				else
-				{
-					if ((x0 + x1) * 0.5f >= kSceneW * 0.5f)
-						continue; // (that side's is the other player's: the game shows the first player's on the left)
-					if (t0 >= 0.49f)
-					{
-						const int col = static_cast<int>((s0 + 0.01f) / 0.25f);
-						code = col == 0 ? 7u : col == 1 ? 5u : col == 2 ? 6u : 8u;
-					}
-					else
-					{
-						const int col = static_cast<int>((s0 + 0.01f) / 0.2f);
-						code = col < 4 ? static_cast<uint32_t>(col) + 1u : 0u;
-					}
-				}
-				if (code == 0u)
-					continue;
-				icons[count++] = Icon{x0, code};
-			}
-		}
-		std::sort(icons, icons + count, [](const Icon& a, const Icon& b) { return a.x < b.x; });
-		uint32_t packed = count;
-		for (uint32_t i = 0; i < count; ++i)
-			packed |= icons[i].code << (4u + i * 4u);
-		static const bool s_log = std::getenv("HL_HUD_LOG") != nullptr;
-		if (s_log && packed != s_prompt.load(std::memory_order_relaxed))
-			std::fprintf(stderr, "[prompt] v%llu %x (first x %.0f)\n", static_cast<unsigned long long>(s_vsync), packed, count ? static_cast<double>(icons[0].x) : 0.0);
-		s_prompt.store(packed, std::memory_order_relaxed);
-	}
-
 	// HL_HUD_LOG=1: flat textured draws on top of everything that were not there in the last 100 pictures (how the game's button
 	// prompts were found). HL_TEX_DUMP=1: the textures as they arrive, hl_frames/tex_<id>_<w>x<h>.rgba.
 	void hudLog(const Frame& f)
@@ -411,7 +340,6 @@ namespace
 		if (!s_frame || (s_frame->draws.empty() && s_frame->textures.empty()))
 			return;
 		hudLog(*s_frame);
-		updatePrompt(*s_frame);
 		s_stats.frames++;
 		s_stats.draws += s_frame->draws.size();
 		s_stats.verts += s_frame->vertices.size();
@@ -661,10 +589,6 @@ namespace
 			return found->second;
 		const int32_t id = s_nextTexture++;
 		s_textureIds.emplace(key, id);
-		if (key.texHash == kPromptSheet && key.clutHash == kPromptClut)
-			s_promptTex = id;
-		else if (key.texHash == kSequenceSheet && key.clutHash == kSequenceClut)
-			s_sequenceTex = id;
 		static const bool s_texLog = std::getenv("HL_HUD_LOG") != nullptr;
 		if (s_texLog)
 			std::fprintf(stderr, "[tex] id %d %016llx %016llx psm %x %dx%d\n", id, static_cast<unsigned long long>(key.texHash), static_cast<unsigned long long>(key.clutHash), psm, w, h);
@@ -2256,11 +2180,6 @@ int presentRate()
 	return s_presentRate.load(std::memory_order_relaxed);
 }
 
-uint32_t prompt()
-{
-	return s_prompt.load(std::memory_order_relaxed);
-}
-
 bool sceneOn()
 {
 	return s_sceneOnShared.load(std::memory_order_relaxed);
@@ -2360,7 +2279,6 @@ void vsync()
 		flushAll();
 		s_sceneOn = false;
 		s_sceneOnShared.store(false, std::memory_order_relaxed);
-		s_prompt.store(0u, std::memory_order_relaxed);
 		applyAspect();
 		s_fightFrames = 0u;
 		toAllCores();
