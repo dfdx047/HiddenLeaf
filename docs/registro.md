@@ -37,6 +37,11 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-03 12:50, correção da entrada de 09:40 (bisect)
+
+- Não existe `build/bisect/apk/a3dbcfc.apk`: a pasta só tem `cd8fca7.apk` (08:20), que não roda. O APK de `a3dbcfc`
+  ainda precisa ser feito.
+
 ### 2026-11-03 12:55, painel de pausa pela rota: ainda não
 
 - No RP5, o overlay de controles é desenhado pelo SDL e o `uiautomator` não vê nada dele (`ui.py` vazio). Um toque
