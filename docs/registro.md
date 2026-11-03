@@ -16,11 +16,11 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
-| Campanha (Master Mode) | parcial | `a6c40f5` | RP5, Cube, Odin 3 (20:9) | rota de campanha gravada (`*_camp*`) | anda, troca de área e menu START: RP5 50 fps, Odin 50, Cube 40–55 (VU1). Em 20:9, transição de área em 4:3 com faixa preta |
+| Campanha (Master Mode) | parcial | `a6c40f5` | RP5, Cube, Odin 3 (20:9) | rota de campanha gravada (`*_camp*`) | anda, troca de área e menu START: RP5 50 fps, Odin 50, Cube 40–55 (VU1). Em 20:9, a cortina de transição não cobre a largura (~1 s por troca) |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
-| Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: transição de área em 4:3 com faixa preta (~7 s); menus esticados |
+| Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: a cortina de transição não cobre a largura (~1 s por troca); menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
 | Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5 | rota fixa, log `[sp]` | responde sozinho em segundo plano (não é o que se quer). Um toque dá o Ougi; uma etapa mostrou "ERROR"; △△, disputa e multiplicador não vistos |
 | Painel de pausa | funciona | `9c6c786` | RP5 | prints (11-02) | não reconferido depois de 11-02 |
@@ -36,6 +36,13 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-03 12:50, correção da entrada de 12:35 (20:9 na campanha)
+
+- A "imagem em 4:3 com faixa preta" na troca de área em 20:9 é, na verdade, a **cortina de transição** do jogo (o logo do
+  UN5 entrando como pincelada), que em 2400x1080 não cobre a largura: fica uma borda preta irregular à esquerda e o
+  cenário à direita por ~1 s a cada troca (`odin209_camp`, 105 s). Os 56,8–64,2 s que o `ana.py` acusou são cenário
+  escuro na borda (um prédio): falso positivo. Defeito real, mas pequeno (item 3).
 
 ### 2026-11-03 12:35, sem código novo: a campanha com a build `a6c40f5` (RP5)
 
