@@ -15,7 +15,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Som dos logos e da abertura (filme) | quebrado | build de 11-03 12:00 | Cube | `HL_MPEG_LOG`, `HL_RPC_LOG`, `[snd]` | causa: `sceSdRemote`/`sceSdTransToIOP` do EE são stubs mudos; recompilados dão som desde v1502, mas o jogo trava em ~v10000 (`missing-target`). Desfeito, a resolver |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
-| Tela de vitória / resultado | parcial | build de 11-03 12:00 (`hl_native` SCANMSK) | RP5, Cube, Odin 3 (20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK). Falta a rota completa e o Odin 16:9. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
+| Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
 | Campanha (Master Mode) | parcial | `2fee126` | RP5 | rota de campanha (`plano.md`) | 43,7 fps no `sd480p`, 83% de pares lentos; Cube 17% de pares lentos (VU1) |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
@@ -54,6 +54,8 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 - **Ainda quebrado:** o Ougi que o GS desenha antes do KO (v12280–13097 no RP5) sai escuro e listrado, pelo mesmo
   SCANMSK 2. Fica para o item 4/6. A rota completa (campanha, pausa, sair) e o Odin em 16:9 não foram refeitos com esta
   build: **não conta como corrigido pela regra C**.
+- **Odin 3 em 16:9 (`odin_v3h`, `wm size reset`):** luta 1 com WINNER → resultado (85/96/851 → 1161, 1342) →
+  seleção; luta 2 vencida pela CPU → seleção limpa. Sem `missing-target`.
 - **Fica no código:** `dropTallSceneTarget` (11:30) e `HL_SCANMSK_LOG`; patch `0054-mpeg-stream-log.patch`
   (`HL_MPEG_LOG`). Build sem a libsdr recompilada: sem `missing-target` nos três (`rp5_v3g`, `odin209_v3g`, `cube_v3g`),
   o que confirma que o travamento das 11:30 vinha dela.
