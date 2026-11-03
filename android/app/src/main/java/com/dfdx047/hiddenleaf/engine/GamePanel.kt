@@ -86,7 +86,7 @@ class GamePanel(
             listOf(
                 "30" to 30, context.getString(R.string.panel_fps_50) to 50,
                 context.getString(R.string.panel_fps_60) to 60, context.getString(R.string.panel_fps_120) to 120,
-            ),
+            ).filter { it.second != 120 || DisplayCaps.offers120(context) },
             settings.get(EngineSettings.FPS_MODE, 50),
         ) {
             settings.set(EngineSettings.FPS_MODE, it)

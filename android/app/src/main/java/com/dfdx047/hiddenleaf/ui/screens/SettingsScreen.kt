@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import com.dfdx047.hiddenleaf.data.REPO_URL
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +60,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(vm: AppViewModel) {
     val s by vm.engineSettings.collectAsStateWithLifecycle()
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     fun get(k: String, d: Int) = s[k] ?: d
 
     Column(
@@ -123,7 +125,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 options = listOf(
                     "30" to 30, stringResource(R.string.panel_fps_50) to 50,
                     stringResource(R.string.panel_fps_60) to 60, stringResource(R.string.panel_fps_120) to 120,
-                ),
+                ).filter { it.second != 120 || com.dfdx047.hiddenleaf.engine.DisplayCaps.offers120(context) },
                 selected = get(EngineSettings.FPS_MODE, 50),
                 onSelect = { vm.setting(EngineSettings.FPS_MODE, it) },
             )

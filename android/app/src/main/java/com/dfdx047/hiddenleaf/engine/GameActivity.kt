@@ -64,6 +64,8 @@ class GameActivity : SDLActivity() {
             val lang = when (resources.configuration.locales[0].language) { "pt" -> 1; "es" -> 2; else -> 0 }
             if (es.get(EngineSettings.LANG, -1) != lang) es.set(EngineSettings.LANG, lang)
             orientation = es.get(EngineSettings.ORIENTATION, 0)
+            // 120 chosen on another screen, or before the option was limited: 60 here (DisplayCaps.offers120)
+            if (es.get(EngineSettings.FPS_MODE, 50) == 120 && !DisplayCaps.offers120(this)) es.set(EngineSettings.FPS_MODE, 60)
         }
         requestedOrientation = orientationFlag()
         store = TouchStore(paths.root)
