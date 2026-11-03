@@ -12,15 +12,15 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Função | Estado | Último build verificado | Aparelhos | Como foi verificado | Observações |
 |---|---|---|---|---|---|
 | Boot e logos (imagem) | funciona | `2fee126` (libun5 de 11-03 03:31) | RP5, Cube | rota fixa, prints | |
-| Som dos logos e da abertura (filme) | quebrado | `2fee126` | Cube | linha `[snd]` do `HL_PERF` | logos em silêncio; o filme de abertura nunca foi conferido (a rota pula com START). Relato do desenvolvedor: piorou desde 11-01. Sem bisect ainda |
+| Som dos logos e da abertura (filme) | quebrado | build de 11-03 12:00 | Cube | `HL_MPEG_LOG`, `HL_RPC_LOG`, `[snd]` | causa: `sceSdRemote`/`sceSdTransToIOP` do EE são stubs mudos; recompilados dão som desde v1502, mas o jogo trava em ~v10000 (`missing-target`). Desfeito, a resolver |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
-| Luta | parcial | `2fee126` | RP5, Cube | rota fixa, `measure.sh` | 50 fps nos dois (11-01). Relato: personagens piscando e sombra preta nova. Nunca contados por gravação |
-| Tela de vitória / resultado | quebrado | `2fee126` | RP5, Cube | rota fixa | relato: fica presa numa imagem parada, o jogo segue por trás e não dá para sair. O personagem não chega ao GS na tela de WINNER |
+| Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
+| Tela de vitória / resultado | parcial | build de 11-03 12:00 (`hl_native` SCANMSK) | RP5, Cube, Odin 3 (20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK). Falta a rota completa e o Odin 16:9. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
 | Campanha (Master Mode) | parcial | `2fee126` | RP5 | rota de campanha (`plano.md`) | 43,7 fps no `sd480p`, 83% de pares lentos; Cube 17% de pares lentos (VU1) |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
-| Widescreen em 20:9 | não testado | | | | |
+| Widescreen em 20:9 | parcial | build de 11-03 12:00 | Odin 3 (2400x1080) | rota v3 gravada, `ana.py` | câmera `x 0.600`, 0 quadros com barra no jogo; menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
 | Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5 | rota fixa, log `[sp]` | responde sozinho em segundo plano (não é o que se quer). Um toque dá o Ougi; uma etapa mostrou "ERROR"; △△, disputa e multiplicador não vistos |
 | Painel de pausa | funciona | `9c6c786` | RP5 | prints (11-02) | não reconferido depois de 11-02 |
@@ -36,6 +36,60 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-03 12:10, `hl_native.cpp`: o fantasma depois da luta 2 era SCANMSK 2 preso no GS (corrigido na rota v3)
+
+- **Causa (`HL_SCANMSK_LOG=1`, `rp5_v3g`):** em v12280, com a cena nativa desligada (um Ougi que o GS desenha), o jogo
+  escreve `SCANMSK 2` (só linhas pares) **uma vez** e nunca escreve 0, nem na luta seguinte. O PMODE não muda a rota
+  toda, então não há `sceGsResetGraph` que zere o GS. A partir daí o GS não desenha as linhas ímpares, que guardam a
+  última imagem (o Ougi, a WINNER ou o último quadro da luta, conforme quem desenhou antes). O nativo ignora SCANMSK,
+  por isso a luta seguinte "limpa" a tela. No Odin e no Cube o jogo não escreveu SCANMSK nessa rodada (o Ougi não
+  aconteceu no mesmo ponto): daí o "intermitente".
+- **Correção:** ao desligar a cena da luta, se o SCANMSK do jogo for ≠ 0, o nativo manda `SCANMSK 0` ao GS (log
+  `fight over with SCANMSK 2: 0 to the GS`). Nada depois da luta é desenhado linha sim, linha não.
+- **Rota v3, três aparelhos (`rp5_v3h`, `odin209_v3h` em 2400x1080, `cube_v3h` em 720x720):** RP5, luta 2 vencida pelo
+  P1: WINNER "Naruto Uzumaki", resultado (Health 44, Time 92, Bonus 671, 753 → 807, 2149 Ryo), seleção, VS e carga
+  **limpos** (antes, listrados por ~50 s). GS em `SCANMSK 0` desde v13367. Odin 20:9: a CPU venceu a luta 2, seleção
+  limpa. Cube: a luta 2 foi ao tempo, seleção limpa. Nenhum `missing-target`. Barras: 0 no jogo.
+- **Ainda quebrado:** o Ougi que o GS desenha antes do KO (v12280–13097 no RP5) sai escuro e listrado, pelo mesmo
+  SCANMSK 2. Fica para o item 4/6. A rota completa (campanha, pausa, sair) e o Odin em 16:9 não foram refeitos com esta
+  build: **não conta como corrigido pela regra C**.
+- **Fica no código:** `dropTallSceneTarget` (11:30) e `HL_SCANMSK_LOG`; patch `0054-mpeg-stream-log.patch`
+  (`HL_MPEG_LOG`). Build sem a libsdr recompilada: sem `missing-target` nos três (`rp5_v3g`, `odin209_v3g`, `cube_v3g`),
+  o que confirma que o travamento das 11:30 vinha dela.
+
+### 2026-11-03 11:30, fantasma da luta 2 e som dos filmes: duas tentativas, nenhuma resolvida
+
+- **Fantasma depois da luta 2 (RP5), tentativa 1, `drawFrame` (`hl_native.cpp`):** um Ougi que o GS desenha sozinho
+  (fallback) deixa o alvo da página 0 com 2047 linhas, por cima da página 0x70 que a tela lê. Recriar o alvo do nativo
+  a cada quadro quando ele está alto (`rp5_v3c`, `odin209_v3c`, `cube_v3c`): **fantasma igual no RP5**, e o alvo alto
+  voltava a cada fallback. Desfeito.
+- **Tentativa 2, desligar a cena (`dropTallSceneTarget`, pela fila do GS):** o alvo alto sai quando a cena termina
+  (log `scene over, the tall target 513x2047 ... goes`, 3 vezes em `rp5_v3e`). **Fantasma continua**, mas mudou: em vez
+  da WINNER, fica o último quadro da luta, escuro, em linhas alternadas. Ou seja, metade das linhas da tela não é mais
+  redesenhada depois da luta, e o conteúdo dela depende de quem desenhou por último. Mantido no código (não piora nada
+  e o log ajuda), sem contar como correção.
+- **Desentrelaçamento desligado (`HL_GS_EXTRA=deinterlace_mode=1`, `rp5_v3d`, `odin209_v3d`):** fantasma igual no RP5.
+  Não é o desentrelaçador.
+- **O que sobra:** PMODE `7f67`, SMODE2 1 (entrelaçado por campo), DISPFB1/2 `1070` iguais (o `[priv]` não muda a rota
+  toda). O GS do ARMSX2 conta SCANMSK (`m_scanmask_used`) e as cenas de Ougi desenham linha sim, linha não com SCANMSK:
+  se o GS ficar com SCANMSK ≠ 0 depois da luta, metade das linhas para. Pela leitura, `emitRegisters` reenvia SCANMSK
+  quando `s_gsInSync` cai. **`HL_SCANMSK_LOG=1`** (novo, desligado por padrão): SCANMSK do jogo, a que o nativo manda e
+  a que o GS tem a cada vsync. Rodada com ele (`rp5_v3s`) estragada pela build da libsdr (abaixo); a refazer.
+- **Som dos logos e dos filmes: causa achada.** `HL_MPEG_LOG=N` (novo, patch `0054-mpeg-stream-log.patch`) mostra que o
+  player registra o callback de áudio (tipo 2, `0x1046a0`) e o recebe nos três filmes. O callback põe o ADPCM num anel
+  (`-0x3D8($gp)`), e o envio ao IOP é pela libsdr do EE: `sceSdTransToIOP` (`0x16ae40`) e `sceSdRemote` (`0x16aee8`,
+  BlockTrans), que o analisador liga aos **stubs do runtime**, que respondem e não mandam nada. O IOP roda o `sdrdrv`
+  4.0.1 da Sony de verdade (em `MODULES.BIN`, sid `0x80000701`).
+- **Tentativa: recompilar `sceSdRemoteInit`/`sceSdRemote`/`sceSdTransToIOP` (`un5.py` `UNSTUB`).** No Cube, até o
+  título: `BindRpc 0x80000701`, 1762 chamadas, **som a partir de v1502** (rms 0,39–0,58; antes 0 até v2977). Mas na rota
+  v3 o EE salta para dado: `missing-target 0xbd9c90` (thread do escalonador, `a1 0xbd9c30`) em ~v11500 no RP5 e ~v10000
+  no Odin 20:9; no RP5 o 3D da luta saiu preto. **Desfeito** (o `un5.py` guarda a nota). Suspeita: o callback do
+  `sdrdrv` para o EE, ou a regeneração completa do código (primeira desde o fim de 11-02). A build sem a libsdr separa
+  as duas.
+- **Estouro:** `spu2Output` é igual ao do PCSX2. Picos de 1,07–1,12 e rms 0,4–0,58 nos filmes e na luta. Falta medir
+  o nível no PCSX2 para comparar.
+- **Ferramenta:** a ISO europeia está em `~/Downloads/Naruto UN5/`, não no caminho do `CLAUDE.md`.
 
 ### 2026-11-03 10:05, `un5_main.cpp` (leitor do `hl_env.txt`) e `HL_PRIV_LOG`: vitória nos 3 aparelhos e em 20:9
 

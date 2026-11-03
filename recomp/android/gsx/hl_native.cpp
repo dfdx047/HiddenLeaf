@@ -171,6 +171,8 @@ namespace
 	uint64_t s_regs[256] = {};
 	bool s_seen[256] = {};
 	bool s_gsInSync = true;
+	// HL_SCANMSK_LOG=1: SCANMSK as the game writes it, as this module sends it, and as the GS holds it at each vsync
+	const bool s_scanLog = std::getenv("HL_SCANMSK_LOG") != nullptr;
 	uint32_t s_prim = 0;
 
 	// the current vertex
@@ -393,6 +395,8 @@ namespace
 				continue;
 			const uint64_t pair[2] = {s_regs[r], r};
 			pushBytes(path, pair, sizeof(pair));
+			if (r == R_SCANMSK && s_scanLog)
+				std::fprintf(stderr, "hl_native: v%llu SCANMSK %llu to the GS\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(s_regs[r] & 3u));
 		}
 		// (what a vertex has now, not the last register write: most of it comes in packed form, which leaves no register here)
 		uint64_t st, rgbaq;
@@ -1024,6 +1028,8 @@ namespace
 			s_f = (value >> 56) & 255u;
 		if (drawsDependOn(r) && s_regs[r & 255u] != value)
 			s_dirty = true;
+		if (r == R_SCANMSK && s_regs[r] != value && s_scanLog)
+			std::fprintf(stderr, "hl_native: v%llu game SCANMSK %llu (scene %d)\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(value & 3u), s_sceneOn ? 1 : 0);
 		s_regs[r & 255u] = value;
 		s_seen[r & 255u] = true;
 		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame)
@@ -2076,6 +2082,29 @@ void main()
 		}
 	}
 
+	// An Ultimate Jutsu the GS draws itself (a fallback) leaves page 0's target 2047 lines tall, over page 0x70 that the
+	// display reads. The game mixes its two display circuits at half (PMODE 7f67, one line apart), and after the fight one
+	// of them kept reading that tall target: the WINNER, the results and the menus came out over the last Ultimate frame,
+	// on every other line, until the next fight. When the scene is over, the tall one goes (the GS's own copy of the
+	// picture to page 0x70 is what the display shows from then on).
+	void dropTallSceneTarget()
+	{
+		if (!g_texture_cache)
+			return;
+		GIFRegTEX0 frameTex{};
+		frameTex.TBP0 = kSceneFbp * 32u;
+		frameTex.TBW = kSceneFbw;
+		frameTex.PSM = PSMCT32;
+		const GSVector4i rc(0, 0, kSceneW, kSceneH);
+		GSTextureCache::Target* rt = g_texture_cache->LookupDrawTarget(frameTex, GSVector2i(kSceneW, kSceneH), GSConfig.UpscaleMultiplier,
+			GSTextureCache::RenderTarget, true, 0u, false, true, true, rc);
+		if (rt && rt->GetUnscaledHeight() > kSceneH + 32)
+		{
+			std::fprintf(stderr, "hl_native: scene over, the tall target %dx%d over the display page goes\n", rt->GetUnscaledWidth(), rt->GetUnscaledHeight());
+			g_texture_cache->InvalidateVideoMemType(GSTextureCache::RenderTarget, kSceneFbp * 32u);
+		}
+	}
+
 	void execute(Frame* f)
 	{
 		const int rate = s_rate.load(std::memory_order_relaxed);
@@ -2247,6 +2276,16 @@ bool transfer(uint8_t path, const uint8_t* data, uint32_t size)
 
 void vsync()
 {
+	if (s_scanLog)
+		MTGS::RunOnGSThread([]() {
+			static uint64_t s_last = ~0ull;
+			if (!g_gs_renderer)
+				return;
+			const uint64_t now = (g_gs_renderer->m_env.SCANMSK.U64 & 3u) | (static_cast<uint64_t>(g_gs_renderer->m_scanmask_used) << 8);
+			if (now != s_last)
+				std::fprintf(stderr, "hl_native: v%llu GS SCANMSK %llu used %llu\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(now & 3u), static_cast<unsigned long long>(now >> 8));
+			s_last = now;
+		});
 	if (!s_on)
 		return;
 	flushFrame();
@@ -2279,6 +2318,17 @@ void vsync()
 	{
 		// (the GS takes over from what the targets hold: it needs the registers and whatever was held back of the uploads)
 		flushAll();
+		// (an Ultimate Jutsu the GS draws itself can write SCANMSK 2 (every other line) once and never 0 again: from the
+		// WINNER to the next fight the GS left the odd lines alone and they kept the last fight picture under the
+		// results and the menus. Here nothing after the fight is drawn line by line: the fight's SCANMSK ends with it.)
+		if (s_regs[R_SCANMSK] & 3u)
+		{
+			std::fprintf(stderr, "hl_native: fight over with SCANMSK %llu: 0 to the GS\n", static_cast<unsigned long long>(s_regs[R_SCANMSK] & 3u));
+			s_regs[R_SCANMSK] = 0u;
+			const uint64_t packet[4] = {1ull | (1ull << 60), 0xEull, 0ull, R_SCANMSK};
+			pushBytes(3u, packet, sizeof(packet));
+		}
+		MTGS::RunOnGSThread([]() { dropTallSceneTarget(); });
 		s_sceneOn = false;
 		s_sceneOnShared.store(false, std::memory_order_relaxed);
 		applyAspect();

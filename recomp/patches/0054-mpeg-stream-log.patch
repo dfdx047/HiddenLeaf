@@ -1,0 +1,26 @@
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1168,6 +1168,14 @@
+             event.pts = pts90k >= 0 ? static_cast<uint64_t>(pts90k) : 0xFFFFFFFFFFFFFFFFull;
+             event.dts = dts90k >= 0 ? static_cast<uint64_t>(dts90k) : 0xFFFFFFFFFFFFFFFFull;
+             event.callbacks = matchingStreamCallbacks(mpegAddr, streamType);
++            // Hidden Leaf: HL_MPEG_LOG=N, the first N stream events of each type (a movie's sound goes by the PCM/ADPCM ones)
++            static const long s_mpegLog = [] { const char *v = std::getenv("HL_MPEG_LOG"); return v ? std::atol(v) : 0L; }();
++            static long s_mpegLogged[3] = {};
++            if (streamType < 3u && s_mpegLogged[streamType] < s_mpegLog)
++            {
++                ++s_mpegLogged[streamType];
++                std::fprintf(stderr, "[mpeg] stream type %u at %x len %u callbacks %zu\n", streamType, dataAddr, len, event.callbacks.size());
++            }
+             if (!event.callbacks.empty())
+             {
+                 callbackEvents.push_back(std::move(event));
+@@ -1964,6 +1972,8 @@
+         const uint32_t handle = g_mpeg_stub_state.nextCallbackHandle++;
+         g_mpeg_stub_state.callbacksByMpeg[mpegAddr].push_back(
+             MpegRegisteredCallback{streamType, streamId, callbackFunc, callbackData, handle, true});
++        if (std::getenv("HL_MPEG_LOG"))
++            std::fprintf(stderr, "[mpeg] add stream callback mpeg %x type %u id %u func %x data %x\n", mpegAddr, streamType, streamId, callbackFunc, callbackData);
+         setReturnU32(ctx, 0u);
+     }
+ 

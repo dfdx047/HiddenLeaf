@@ -661,6 +661,10 @@ STUB_AT = {
 # The math library too: fabs, sin, cos, floor and atan here are the soft-float double versions (argument in $a0, result
 # in $v0) while the runtime's C++ reads $f12 and writes $f0; and its rem_pio2f gives NaN for an angle of 0x7f800000,
 # where the game's own gets 0 (x - x), so sin = 0 and cos = 1.
+# (Not libsdr yet: sceSdRemoteInit, sceSdRemote and sceSdTransToIOP stay stubs, so the movie player's sound
+# (sceSdTransToIOP, then BlockTrans to the SPU2) goes nowhere and the logos and films play silent. Recompiled, they
+# bind Sony's sdrdrv (sid 0x80000701, run for real on the IOP) and the films have sound, but the EE later jumps into
+# data (missing-target 0xbd9c90, v10300-11700) on the RP5 and the Odin: docs/registro.md, 2026-11-03 11:30.)
 UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin")
 
 
