@@ -10,6 +10,11 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 - Conversa com o desenvolvedor em **português do Brasil**. Comandos git **em inglês**, simples e curtos.
 - Commits só locais, cada mudança testada; o desenvolvedor publica (ou pede o push).
 - Experimentos em branch de laboratório, nunca direto na `main`.
+- **Antes de começar qualquer trabalho:** ler `docs/registro.md` inteiro (estado das funções e histórico), este arquivo
+  e o `docs/plano.md`. **Ao terminar cada item** (e antes de qualquer `/compact`): atualizar o `docs/registro.md` e
+  commitar junto com o código. Nunca apagar entradas antigas; corrigir com uma entrada nova.
+- Nada é dado como corrigido sem a rota completa gravada nos 3 aparelhos e no 20:9 (método no fim do
+  `docs/registro.md`).
 
 ## Onde está cada coisa
 
