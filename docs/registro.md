@@ -41,6 +41,139 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-04 15:50, item 13: as funções que mais gastam CPU na campanha e na luta (RP5, sd480p, VU1 do Nominum)
+
+**Método:**
+
+- **Aparelho:** RP5 no perfil `sd480p`, com o driver da Qualcomm. A tabela manda o GS para o ARMSX2, e com
+  `NOMINUM_VU1=1` (combinação b da rodada 3) a VU1 e o VIF1 são os do Nominum.
+- **APK:** `build/lab/app_norm.apk`, com `libun5_norm0060.so`.
+- **Gravação:** `simpleperf record --app` (o app é depurável; `-p` é negado sem root), `cpu-clock` a 4000 Hz por 30 s,
+  a partir de ~v6400. As rotas são `hl_env_n3_camp_b.txt` (vila e caminhada, 50 fps) e `hl_env_n3_v3_b.txt` (luta 1 e
+  Ougi, 50 fps).
+- **Script:** `build/lab/profq.sh`. Os resumos são feitos com `proftop.py` (top N) e `profcat.py` (categorias), que
+  usam o `simpleperf` do NDK com `--symfs build/lab/symfs_v3`.
+- **Saída:** `build/lab/rec/prof_rp5_{camp,v3,camp_c}/` (`perf.data`, `report*.txt`).
+
+**Threads (% de todas as amostras):**
+
+| cena | GameThread (EE+IOP+SPU2) | VuWorker (VIF1/VU1) | CPU Thread (GS do Nominum/ARMSX2) | GS (ARMSX2, Vulkan) |
+|---|---|---|---|---|
+| campanha, b | 35,2 | 33,7 | 24,6 | 3,7 |
+| luta, b | 36,6 | 22,3 | 10,9 | 27,0 |
+| campanha, c (VU1 do runtime) | 31,7 | 40,4 | 21,2 | 3,7 |
+
+**O que a GameThread faz (% da própria thread):**
+
+| categoria | campanha b | luta b | campanha c |
+|---|---|---|---|
+| código do jogo recompilado (`sub_`, `adv_sub_`, `btl_sub_`) | 34,6 | 37,0 | 34,7 |
+| escalonador, despacho, memória (`checkpointDue`, `PS2Memory`, `lookupFunction`) | 18,3 | 15,9 | 17,9 |
+| interpretador do IOP (`IopCpuCore::executeInstruction`, `step`, `runCycles`) | 17,4 | 19,8 | 17,6 |
+| SPU2 (`spu2Mix`, reverb) | 6,0 | 8,6 | 6,1 |
+| VU0/VU1 do runtime na GameThread (`VU1Interpreter::fastExecute`) | 4,9 | 1,7 | 4,6 |
+| travas e atômicos | 4,9 | 3,0 | 4,7 |
+| núcleo do sistema | 3,8 | 4,8 | 3,8 |
+
+**O que a VuWorker faz:**
+
+- **Com b:** dois terços são a VU1 do Nominum (`recBlock<…>` e `fastExecute`). O resto é o `Vif1::transfer` (9–11%)
+  e o `memcpy` (5–6%), que em boa parte é o espelho do `hl_nominum_vu1.cpp` (16 KB de dados entrando e saindo a cada
+  transferência, mais a comparação do micro).
+- **Com c:** 76% é o `VU1Interpreter::fastExecute` do runtime.
+
+**Funções do jogo que mais pesam na GameThread (% da thread):**
+
+- **Campanha:** `adv_sub_7f0d90` 2,0, `0x194530` 2,0, `0x152dd8` 1,4, `0x195b40` 1,3, `0x3c3370` 1,1, `0x195ee0` 0,8,
+  `0x1963b0` 0,7, `0x10fc20` 0,6, `0x19fec0` 0,5, `0x1c42c0` 0,5, `0x194390` 0,5, `0x1933f0` 0,5.
+- **Luta:** `0x1d70f0` 2,3, `0x19fec0` 1,9, `0x1d6640` 1,2, `0x1d73d0` 1,2, `0x1d76a0` 1,0, `0x1d14d0` 1,0, `0x194530`
+  0,9, `0x194390` 0,8, `0x152dd8` 0,8, `0x1a58d0` 0,7, `0x1abd00` 0,6, `0x10fc20` 0,6.
+
+  Nenhuma passa de 2,3%: o código do jogo está espalhado.
+
+**Top 30 do processo, campanha b (% de todas as amostras):**
+
+| # | % | thread | library | function |
+|---|---|---|---|---|
+| 1 | 6.46 | CPU Thread | libbt4gsx.so | `nominum::core::kick` |
+| 2 | 6.29 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<7539251845881921587ul>` |
+| 3 | 3.88 | CPU Thread | libbt4gsx.so | `nominum::core::transfer` |
+| 4 | 3.63 | VuWorker | libun5.so | `nominum::core::Vif1::transfer` |
+| 5 | 2.87 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::fastExecute` |
+| 6 | 2.68 | GameThread | libun5.so | `ps2x::iop::detail::IopCpuCore::executeInstruction` |
+| 7 | 2.21 | CPU Thread | libc.so | `__memcpy` |
+| 8 | 2.07 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<13807691333433948256ul>` |
+| 9 | 2.06 | CPU Thread | libbt4gsx.so | `std::vector<nominum::core::Vertex, std::allocator<nominum::core::Vertex> >::push` |
+| 10 | 1.77 | VuWorker | libc.so | `__memcpy` |
+| 11 | 1.71 | CPU Thread | libbt4gsx.so | `nominum::core::hashOf` |
+| 12 | 1.66 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<12529414650559193755ul>` |
+| 13 | 1.55 | GameThread | libun5.so | `ps2x::iop::detail::IopEmulator::Impl::step` |
+| 14 | 1.48 | GameThread | libun5.so | `EeScheduler::checkpointDue` |
+| 15 | 1.48 | CPU Thread | libbt4gsx.so | `std::vector<unsigned int, std::allocator<unsigned int> >::push_back[abi:nn210000` |
+| 16 | 1.41 | VuWorker | libun5.so | `nominum::core::Vif1::transfer` |
+| 17 | 1.38 | GameThread | libun5.so | `VU1Interpreter::fastExecute` |
+| 18 | 1.37 | GameThread | libun5.so | `isa_native::spu2Mix` |
+| 19 | 1.29 | GameThread | libun5.so | `std::__wrap_iter<unsigned char*> std::vector<unsigned char, std::allocator<unsig` |
+| 20 | 1.20 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<6222360698763564915ul>` |
+| 21 | 1.08 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<5386084775297249833ul>` |
+| 22 | 1.00 | CPU Thread | libbt4gsx.so | `nominum::core::addIndices` |
+| 23 | 0.95 | CPU Thread | libbt4gsx.so | `live_next` |
+| 24 | 0.87 | GameThread | libun5.so | `ps2x::iop::detail::IopEmulator::Impl::runCycles` |
+| 25 | 0.82 | CPU Thread | libbt4gsx.so | `nominum::core::writeRegister` |
+| 26 | 0.77 | GameThread | [kernel.kallsyms] | `[kernel.kallsyms][+ffffff90b0e836f4]` |
+| 27 | 0.72 | GameThread | libun5.so | `adv_sub_007F0D90_0x7f0d90` |
+| 28 | 0.71 | GameThread | libun5.so | `sub_00194530_0x194530` |
+| 29 | 0.66 | GameThread | libc.so | `__aarch64_swp2_rel` |
+| 30 | 0.64 | VuWorker | [kernel.kallsyms] | `[kernel.kallsyms][+ffffff90b0e836f4]` |
+
+**Top 30 do processo, luta b:**
+
+| # | % | thread | library | function |
+|---|---|---|---|---|
+| 1 | 3.13 | GameThread | libun5.so | `ps2x::iop::detail::IopCpuCore::executeInstruction` |
+| 2 | 2.82 | GS | libbt4gsx.so | `GSState::GIFPackedRegHandlerXYZ2<4u, 0u, false>` |
+| 3 | 2.79 | GS | libc.so | `__memcpy` |
+| 4 | 2.34 | GameThread | libun5.so | `EeScheduler::checkpointDue` |
+| 5 | 2.01 | GameThread | libun5.so | `isa_native::spu2Mix` |
+| 6 | 1.96 | VuWorker | libun5.so | `nominum::core::Vif1::transfer` |
+| 7 | 1.86 | GS | libbt4gsx.so | `GSRendererHW::Draw` |
+| 8 | 1.81 | CPU Thread | libc.so | `__memcpy` |
+| 9 | 1.76 | GameThread | libun5.so | `ps2x::iop::detail::IopEmulator::Impl::step` |
+| 10 | 1.69 | CPU Thread | libbt4gsx.so | `nominum::core::kick` |
+| 11 | 1.46 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::fastExecute` |
+| 12 | 1.45 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<5386084775297249833ul>` |
+| 13 | 1.35 | VuWorker | libc.so | `__memcpy` |
+| 14 | 1.32 | GS | libbt4gsx.so | `GSRendererHW::ClearGSLocalMemory` |
+| 15 | 1.16 | GS | vulkan.adreno.so | `!!!0000!4c1ccfa0a5caed359b512f9c9e680b!c095b0f6a5b!` |
+| 16 | 1.12 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<934311555775441768ul>` |
+| 17 | 1.12 | CPU Thread | libbt4gsx.so | `nominum::core::transfer` |
+| 18 | 1.01 | GameThread | libun5.so | `ps2x::iop::detail::IopEmulator::Impl::runCycles` |
+| 19 | 1.00 | GS | libbt4gsx.so | `GSState::Transfer<3>` |
+| 20 | 1.00 | GameThread | libun5.so | `std::__wrap_iter<unsigned char*> std::vector<unsigned char, std::allocator<unsig` |
+| 21 | 0.95 | GameThread | [kernel.kallsyms] | `[kernel.kallsyms][+ffffff90b0e836f4]` |
+| 22 | 0.86 | CPU Thread | libbt4gsx.so | `nominum::core::hashOf` |
+| 23 | 0.82 | GS | libbt4gsx.so | `GSVector4i GSVertexKickKernel::RunChunk<4u,` |
+| 24 | 0.82 | GameThread | libun5.so | `sub_001D70F0_0x1d70f0` |
+| 25 | 0.81 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<13465663943026878050ul>` |
+| 26 | 0.79 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<7539251845881921587ul>` |
+| 27 | 0.73 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<14222797883197560457ul>` |
+| 28 | 0.72 | VuWorker | libun5.so | `nominum::vu1::VU1Interpreter::recBlock<7509493376599568744ul>` |
+| 29 | 0.70 | GameThread | libun5.so | `sub_0019FEC0_0x19fec0` |
+| 30 | 0.67 | VuWorker | libun5.so | `nominum::core::Vif1::transfer` |
+
+**O que isso diz para os itens seguintes:**
+
+- **Item 14 (NEON no MMI e no VU0 em modo macro):** as funções vetoriais do runtime (`ps2_vadd`, `ps2_vmul`,
+  `ps2_vslow`, `ps2_fmul_slow`…) somam menos de 0,1% da GameThread nas duas cenas, e o NEON não tem onde ganhar ali.
+  O que aparece é o `VU1Interpreter::fastExecute` rodando na GameThread (3,9% na campanha). São os micros chamados
+  pela GameThread, a verificar se é o VU0 em modo micro (`VCALLMS`).
+- **Item 15 (funções do SDK nativas):** nas duas cenas, o maior custo único fora do código do jogo é o
+  **interpretador do IOP** (17–20% da GameThread), seguido de `EeScheduler::checkpointDue` (4%), `spu2Mix` (4%) e um
+  `vector<unsigned char>::insert` (3,7%, de onde vem a ver). As funções do jogo da lista acima precisam ser
+  identificadas (SDK ou jogo) antes de escolher a primeira.
+- **VuWorker com b:** o espelho do estado a cada transferência (o `memcpy`, 5–6% da thread) é um custo do HL, não do
+  Nominum. Copiar só o que mudou é uma medida a fazer.
+
 ### 2026-11-04 15:25, itens 8 e 9: a libsdr corrompe uma lista livre do heap no tempo dos filmes; o Ougi de um botão é mostrado pelo jogo
 
 **Item 8, som dos logos e filmes (em andamento, sem correção):**
