@@ -199,6 +199,88 @@ namespace
         }
         g_freeOriginal(rdram, ctx, runtime);
     }
+
+    // HL_LISTCHECK=2: 0x18DB30(obj, flag) frees the node list at obj+0x14 (next at +0x9C). Before it runs, walk the list and,
+    // if a link is not a heap pointer, log obj, every node, the bytes around the last good node's +0x9C and the callers.
+    void stackCalls(uint32_t sp, char *out, size_t size);
+    constexpr uint32_t kListFree = 0x18DB30u;
+    PS2Runtime::RecompiledFunction g_listFreeOriginal = nullptr;
+
+    void listFree(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t obj = GPR_U32(ctx, 4);
+        auto ok = [](uint32_t a) { return a == 0u || ((a & 15u) == 0u && a >= 0x100000u && a < 0x2000000u); };
+        static int s_logged = 0;
+        if (obj != 0u && ok(obj) && s_logged < 20)
+        {
+            uint32_t nodes[64];
+            int n = 0;
+            uint32_t q = read32(obj + 0x14u);
+            while (q != 0u && ok(q) && n < 64)
+            {
+                nodes[n++] = q;
+                q = read32(q + 0x9Cu);
+            }
+            if (q != 0u && n < 64)
+            {
+                ++s_logged;
+                char list[64 * 10 + 1];
+                int m = 0;
+                list[0] = 0;
+                for (int i = 0; i < n && m < static_cast<int>(sizeof(list)) - 10; ++i)
+                    m += std::snprintf(list + m, sizeof(list) - m, " %x", nodes[i]);
+                char calls[200];
+                stackCalls(GPR_U32(ctx, 29), calls, sizeof(calls));
+                std::fprintf(stderr, "[listfree] v%llu obj 0x%08x (header %08x %08x %08x %08x): %d nodes%s, then 0x%08x; stack%s\n",
+                             static_cast<unsigned long long>(g_tick), obj, read32(obj - 0x10u), read32(obj - 0xCu), read32(obj - 8u),
+                             read32(obj - 4u), n, list, q, calls);
+                const uint32_t last = n > 0 ? nodes[n - 1] : obj;
+                for (uint32_t a = last - 0x10u; a < last + 0xC0u; a += 16u)
+                    std::fprintf(stderr, "[listfree]   %08x: %08x %08x %08x %08x\n", a, read32(a), read32(a + 4u), read32(a + 8u), read32(a + 12u));
+            }
+        }
+        g_listFreeOriginal(rdram, ctx, runtime);
+    }
+
+    // HL_LISTCHECK=1: the list the bad frees come from. 0x18D410(a0, a1) appends a 0xA0-byte node (next at +0x9C) through
+    // the tail pointer at a1+8 (node+0x9C = *tail; *tail = node; tail = &node+0x9C): a tail slot that is not 0 is a tail
+    // left pointing into a freed node. Logs a1, the tail, its value and the callers on the stack.
+    constexpr uint32_t kListAppend = 0x18D410u;
+    PS2Runtime::RecompiledFunction g_appendOriginal = nullptr;
+
+    void stackCalls(uint32_t sp, char *out, size_t size)
+    {
+        int n = 0, found = 0;
+        out[0] = 0;
+        for (uint32_t o = 0; o < 0x200u && found < 8 && n < static_cast<int>(size) - 24; o += 4u)
+        {
+            const uint32_t w = read32(sp + o);
+            if (w >= 0x100008u && w < 0x3d5760u && (w & 3u) == 0u)
+            {
+                n += std::snprintf(out + n, size - n, " %x", w);
+                ++found;
+            }
+        }
+    }
+
+    void listAppend(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t list = GPR_U32(ctx, 5);
+        const uint32_t tail = read32(list + 8u);
+        const uint32_t at = read32(tail);
+        static int s_logged = 0, s_seen = 0;
+        ++s_seen;
+        if ((at != 0u || s_seen <= 3) && s_logged < 60)
+        {
+            ++s_logged;
+            char calls[200];
+            stackCalls(GPR_U32(ctx, 29), calls, sizeof(calls));
+            std::fprintf(stderr, "[list] v%llu append #%d: owner 0x%08x list 0x%08x tail 0x%08x holds 0x%08x%s, ra 0x%x, thread %d; stack%s\n",
+                         static_cast<unsigned long long>(g_tick), s_seen, GPR_U32(ctx, 4), list, tail, at, at != 0u ? " (STALE TAIL)" : "",
+                         GPR_U32(ctx, 31), runtime->eeScheduler().currentThreadId(), calls);
+        }
+        g_appendOriginal(rdram, ctx, runtime);
+    }
 #endif
 
     void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -502,12 +584,44 @@ namespace
             q.step = -1;
     }
 
+    // HL_CPU_HP=<vsync>[,<vsync>...] (test routes): at the first input of a CPU fighter on or after each vsync, its health
+    // (the float at fighter+0x6C, 1.0 full) becomes 0.0115, so one hit wins the fight. The routes used to POKE a fixed address
+    // (d7ba0c, the CPU fighter at 0xd7b9a0 of the stub-libsdr build): with the real libsdr the heap is laid out otherwise and
+    // that poke landed in the game's node list (docs/registro.md, 2026-11-04 18:40).
+    void cpuHealthRoute(uint32_t f)
+    {
+        static std::vector<uint64_t> s_at;
+        static size_t s_next = 0;
+        static bool s_read = false;
+        if (!s_read)
+        {
+            s_read = true;
+            if (const char *v = std::getenv("HL_CPU_HP"))
+                for (const char *c = v; *c != 0;)
+                {
+                    char *end = nullptr;
+                    const unsigned long long t = std::strtoull(c, &end, 10);
+                    if (end == c)
+                        break;
+                    s_at.push_back(t);
+                    c = *end == ',' ? end + 1 : end;
+                }
+        }
+        if (s_next >= s_at.size() || g_tick < s_at[s_next] || (read32(f + kFighterKind) & 0x1E0u) == 0u)
+            return;
+        const float hp = 0.0115f;
+        std::memcpy(g_rdram + f + 0x6Cu, &hp, 4);
+        std::fprintf(stderr, "[route] v%llu CPU fighter 0x%x: health %.4f\n", static_cast<unsigned long long>(g_tick), f, hp);
+        ++s_next;
+    }
+
     void fighterInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
         g_fighterTick = g_tick;
         special(f);
+        cpuHealthRoute(f);
         static const bool s_trace = std::getenv("HL_FTRACE") != nullptr;
         if (!s_trace)
             return;
@@ -733,6 +847,17 @@ namespace
 #if defined(HL_WATCH_BUILD)
             if (const char *f = std::getenv("HL_FREECHECK"))
                 g_freeCheck = std::atoi(f);
+            const char *listCheck = std::getenv("HL_LISTCHECK");
+            if (listCheck != nullptr && listCheck[0] == '2' && (g_listFreeOriginal = runtime->lookupFunction(kListFree)) != nullptr)
+            {
+                runtime->registerFunction(kListFree, listFree);
+                std::fprintf(stderr, "[listfree] checking the lists 0x18DB30 frees\n");
+            }
+            else if (listCheck != nullptr && (g_appendOriginal = runtime->lookupFunction(kListAppend)) != nullptr)
+            {
+                runtime->registerFunction(kListAppend, listAppend);
+                std::fprintf(stderr, "[list] checking the appends of 0x18D410\n");
+            }
             if (g_freeCheck > 0 && (g_freeOriginal = runtime->lookupFunction(kHeapFree)) != nullptr)
             {
                 runtime->registerFunction(kHeapFree, heapFree);

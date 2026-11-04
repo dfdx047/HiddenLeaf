@@ -12,7 +12,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Função | Estado | Último build verificado | Aparelhos | Como foi verificado | Observações |
 |---|---|---|---|---|---|
 | Boot e logos (imagem) | funciona | `2fee126` (libun5 de 11-03 03:31) | RP5, Cube | rota fixa, prints | |
-| Som dos logos e da abertura (filme) | quebrado | build de 11-03 12:00 | Cube | `HL_MPEG_LOG`, `HL_RPC_LOG`, `[snd]` | causa: `sceSdRemote`/`sceSdTransToIOP` do EE são stubs mudos; recompilados dão som desde v1502, mas o jogo trava em ~v10000 (`missing-target`). Desfeito, a resolver |
+| Som dos logos e da abertura (filme) | em andamento | `app_sdr9.apk` (lab) | Cube, RP5 | `HL_MPEG_LOG`, `HL_RPC_LOG`, `[snd]` | com `HL_SDR=1`, som do logo ao fim; o travamento de ~v10000 era o `POKE` da rota (2026-11-04 18:40). Falta: `missing-target` no RP5 em v16860 (3ª luta), filmes escuros na gravação, Odin e 20:9 |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
@@ -40,6 +40,52 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 18:40, item 8: a falha da libsdr vinha da rota de teste (o `POKE`), não do jogo
+
+**Correção da entrada das 18:00:** os `free` ruins não são uma cauda velha da lista. Quem os causa é a nossa rota.
+
+- **O gancho da cauda** (`HL_LISTCHECK=1`, `app_sdrwatch6.apk`) não achou nenhuma cauda velha nos acréscimos de
+  `0x18d410`. O gancho seguinte (`HL_LISTCHECK=2`, `app_sdrwatch7.apk`, `libun5_sdrwatch7.so` sha1 `d5ba96e5`) percorre a
+  lista antes do `0x18db30`. Resultado igual no Cube (v10247, `rec/list2_cube_v3`) e no RP5 (v11000, `rec/list2_rp5_v3`):
+  - o objeto é `0xd7b730`, com 4 nós (`d7b760 d7b810 d7b8c0 d7b970`);
+  - o `+0x9c` do último nó, **`0xd7ba0c`**, vale `0x3c3c3c3c`.
+- **`0xd7ba0c` é o endereço do `6450:POKE:d7ba0c:3c:4` da rota v3.** Ele punha 0,0115 na vida da CPU (`lutador+0x6c`,
+  lutador em `0xd7b9a0`; entrada de 2026-11-03 09:40) e foi achado com a libsdr nos stubs. Com a libsdr de verdade, o
+  heap fica arrumado de outro jeito, e o mesmo endereço cai na última palavra de um nó dessa lista. O `0x10400002`
+  seguinte é o que já estava nos bytes de `0x3c3c3c3c` (a RAM dá a volta). A segunda luta fazia o mesmo com `d7ba8c`.
+  - O travamento de 11-03 (v10300–11700 no RP5 e no Odin, `missing-target 0xbd9c90`) e a pilha repetida das threads
+    131–133 têm esta mesma causa. Todos foram vistos com rotas que têm o `POKE`.
+- **Prova:** a mesma rota sem os `POKE` (`hl_env_sdr_nopoke.txt`, `app_sdrwatch7.apk`, `HL_FREECHECK=1` só no log):
+  - **Cube** (`rec/nopoke_cube_v3`, até v17929) e **RP5** (`rec/nopoke_rp5_v3`, até v17809): 0 `free` ruins, 0
+    `missing-target`, 0 listas quebradas.
+  - **Com som do começo ao fim:** rms 0,30 e 0,52 nos logos e filmes (v1595–2718), 0,08–0,50 depois.
+  - Sem o golpe de 1 ponto, a CPU não perde: VS, duas lutas e a volta à seleção, sem WINNER (contact sheet conferido).
+- **Mudanças:**
+  - **`hl_game.cpp`:**
+    - `HL_CPU_HP=<vsync>,...` (rotas de teste): na primeira entrada de um lutador da CPU (`+0x60 & 0x1e0`) a partir de
+      cada vsync, a vida dele vira 0,0115. Não depende de onde o heap põe o lutador. A rota v3 nova é
+      `build/lab/hl_env_hp_v3.txt`: os dois `POKE` trocados por `HL_CPU_HP=6450,11150`.
+    - `HL_LISTCHECK=1/2` (só na build da vigia).
+- **Regra para as rotas daqui em diante:** nenhum `POKE` de endereço do heap. Endereço fixo só em dado estático do ELF.
+- **A build normal com a libsdr** (`app_sdr9.apk`, `libun5_sdr9.so` sha1 `4ae117b3`, código gerado `build/lab/runner_sdr`)
+  e a rota `hl_env_hp_v3.txt`:
+  - **Onde o lutador fica:** `[route]` acha a CPU da luta 1 em **`0xd7ba20`**. Com os stubs (`app_sdr8.apk`, que por
+    engano saiu sem a libsdr: o `rsync -a` manteve as datas e o ninja não recompilou os 4 arquivos) ela fica em
+    `0xd7b9a0`. Isso confirma que o heap muda e que o `POKE` antigo caía em outro objeto.
+  - **Cube** (`rec/sdr9_cube_v3`, até v18006): 0 `missing-target`, com som. Rms 0,45 e 0,53 nos logos e filmes.
+  - **RP5** (`rec/sdr9_rp5_v3`, até v17771): som nos filmes (0,52 e 0,43). Luta 1: WINNER com o personagem e
+    resultado (Health 71, 726 ryo). A luta 2 vai até o fim.
+  - **RP5, falha nova:** **1 `missing-target`** em v16860, na terceira luta (já fora da rota pensada, que é ✕ a cada 150
+    vsyncs depois de v15900). A thread 8 salta para `0xe3b4c0` (dado), depois de um laço `0x3389ac`/`0x338c30`, com sp
+    `0xb6fc00`. O som e o perf seguem até o fim.
+  - **A conferir:** na gravação do RP5, os quadros dos filmes (v1600–2900) aparecem quase pretos. Na build da vigia
+    (`rec/nopoke_rp5_v3`), o logo "10th" e o filme apareciam.
+- **Decisão (a mais segura):** a libsdr **continua opcional** (`HL_SDR=1 recomp/build.sh`). Não liguei por padrão, por
+  causa da falha do RP5 em v16860 e dos filmes escuros. O próximo passo é a vigia de `free` (`HL_FREECHECK=1`) e a lista
+  (`HL_LISTCHECK=2`) na rota `hl_env_hp_v3.txt` até v17500, no RP5.
+- **Ainda falta para o item 8:** o callback do `sdrdrv` (o pedido do item), os picos acima de 1,0 vistos em 11-03, e a
+  rota completa nos 3 aparelhos e no 20:9.
 
 ### 2026-11-04 18:00, itens 8 e 11: quem libera os ponteiros ruins; câmera larga só volta em câmera viva
 
