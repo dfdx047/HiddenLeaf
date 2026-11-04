@@ -34,10 +34,102 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | UN6 Alpha 1.1X | quebrado | | | | sem entrada em `KNOWN_MODS`/`CODE_RANGES`, sem pacote |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
-| Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `2328b2c` (APK de teste de 11-03 23:27, não instalado agora) | Odin 3 (16:9 e 20:9); RP5 cai; Cube não sobe | rotas v3 e de campanha gravadas, `HL_PERF`, brilho quadro a quadro no KO | RP5: `VK_ERROR_DEVICE_LOST` na entrada do Mode Select (3 de 3). Cube: sem `dualSrcBlend`, volta ao ARMSX2. Odin: tudo certo, mas Ougi a 22 fps e vitória a 38; swapchain refeita a cada vsync no 16:9. Mantém o tingido do KO. Detalhe em 11-04 00:10 |
+| Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `12fb79b` (APK de teste de 11-04 05:45, não instalado agora) | Odin 3 (16:9 e 20:9), Cube; RP5 só com o Turnip | rotas v3 e de campanha gravadas a 1x, 2x, 4x e 6x, `HL_PERF`, memória da GPU, giro e 30 fps pelo painel | RP5 com o driver do sistema: `DEVICE_LOST` no mesmo ponto (rastro anotado); com o Turnip roda. Pré-rotação achata a imagem a 90/270 (certa com `NOMINUM_VK_PRETRANSFORM=0`). Cube roda sem `dualSrcBlend`, mas Ougi a 9,5 fps. Odin: Ougi 30,4 (era 21,5). Detalhe em 11-04 07:50 |
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 07:50, teste do backend próprio do Nominum no aparelho, rodada 2 (Nominum `12fb79b`, para a sessão do Nominum)
+
+**Para a sessão do Nominum:** o `12fb79b` sobe nos três aparelhos, e o Cube não volta mais ao ARMSX2. A swapchain não se refaz mais a cada vsync, e o Ougi do Odin passou de 21,5 para 30,4 fps. Mas sobram quatro defeitos, por ordem de gravidade. Nada no código do Nominum foi mudado.
+
+1. **RP5 com o driver do sistema: `VK_ERROR_DEVICE_LOST` continua, no mesmo ponto.** Caiu em v3737 (com `NOMINUM_VK_LOST_TRACE=1`) e em v3691 (sem ele), logo depois do NOW LOADING que vem depois de "New Game", como nas três da rodada 1. Não é a swapchain: até ali ela foi feita só 2 vezes.
+   - O driver é o Adreno 650 `0746.0`, de 09/27/23. Nas duas quedas, ele escreve 4 vezes `W/Adreno-GSL: <log_gpu_snapshot:471>: panel.gpuSnapshotPath is not set.not generating user snapshot` nos ~130–270 ms antes da falha: o driver do kernel viu uma falha ou trava da GPU.
+   - A chamada que falha é de novo o `vkQueueSubmit(m_queue, 1, &si, m_fence) failed (-4)`. A pilha: `fail` ← `NominumBackend::presentToWindow()+4844` ← `pcrtc(...)+2120` ← `vsync(...)+172` ← `nominum_vsync+116` ← `host::runOwn+2984` ← `Bt4Gsx_Run+612`, na thread "CPU Thread".
+   - **O rastro (`NOMINUM_VK_LOST_TRACE`, os 64 últimos comandos, do mais velho ao mais novo):** de `1365847` a `1365908`, 62 comandos alternam entre `dispatch clut 1x1, push 13084 0 0 0 0 0 0 0, buffer +0/0` e `dispatch upload 4x1, push 13072 2 20 0 0 32 0 1024, buffer +0/512`. Os dois últimos são `1365909: draw 32484: key 3f0120e count 6 z 1e00/31 frame 0/8/0 tex 0/0/0 1x1 scissor 0,0 512x448` e `1365910: dispatch upload 512x1, push 14848 4 19 0 0 256 0 131072, buffer +0/131072`.
+   - Com o rastro, a rota não ficou muito mais lenta até ali (v3737 em 164 s).
+   - Os logs inteiros estão em `build/lab/rec/n2_rp5_lost/` (`log.txt`, o `un5_log`; `logcat_all.txt`, o logcat das duas quedas) e em `n2_rp5_v3_s1/`.
+   - A tela logo antes mostra uma faixa branca no meio (a imagem achatada do item 2).
+   - **Com o Turnip v26.3.0-R6 (adrenotools) não cai.** O log diz `nominum-vk: custom driver libvulkan_freedreno.so (adrenotools)` e `nominum-vk: Turnip Adreno (TM) 650`. Ele fez a rota v3 até v12405, a campanha até v11981 e todas as escalas, sem `DEVICE_LOST`. Ou o defeito é do driver da Qualcomm, ou de algo que só esse driver não tolera. O resto da rodada no RP5 foi com o Turnip.
+2. **A pré-rotação achata a imagem (novo no `12fb79b`).** Com o giro de 90 ou 270 (RP5 e Odin em 16:9; a tela física é 1080x1920), o log diz `swapchain 1920x1080, ... turn 90`. A imagem do jogo ocupa só ~31% da altura, centrada e de largura inteira: (1080/1920)² = 0,316. A orientação está certa: em pé a 90 e a 270 no Odin. Pela proporção, a imagem da swapchain não troca largura e altura no giro de 90/270, e o compositor espreme os 1920x1080 na tela girada.
+   - Está assim na rota inteira: menus, luta pelo nativo, Ougi, a imagem atrás do painel de pausa. Nas gravações e nas capturas (`rec/n2_odin_rot/*.png`, `rec/n2_rp5_turnip_rot/*.png`).
+   - Certo no Odin em 20:9 (`wm size 2400x1080`, `turn 0`) e no Cube (720x720, `turn 90`; quadrado, então não espreme).
+   - **Com `NOMINUM_VK_PRETRANSFORM=0` a imagem sai inteira e certa**, a 90 e a 270 (Odin, `rec/n2_odin_pt0`), com 3 swapchains, todas `turn 0`.
+3. **Fora do nativo, o backend próprio ainda é mais lento que o ARMSX2, e no Cube e no RP5 bem mais.** Tabelas abaixo.
+   - **Odin:** o Ougi subiu de 21,5 para 30,4 fps (GS de 25,9 para 10,1 ms), a vitória de 37,5 para 44,3, e o resultado chega a 50. O ARMSX2 dá 50 nos três.
+   - **O gargalo não é mais a CPU:** com o painel em 30 fps, o jogo no Ougi sobe para 39,1 fps e a vitória para 50,0 (RP5: 34,1 e 40,2). Com menos presents, o jogo anda mais rápido. O que segura é o envio à GPU e o present FIFO, não a frente do GS. A thread do GS gasta ~10 ms de CPU por vsync no Ougi com `idle` 0.
+   - **Cube (Mali-G57, sem `dualSrcBlend`):** a 1x, luta 46 fps, Ougi 9,5, vitória 23,7, campanha 40–49. O ARMSX2 da rodada 1 dá 50 em tudo na luta e 43–50 na campanha.
+   - **RP5 (Turnip):** a 1x, luta 1 a 41,6 fps, luta 2 a 30,2, Ougi 30,7, vitória 38,3, campanha 23–30 (GS 26–35 ms). O **ARMSX2 com o mesmo Turnip** fica a 50,0 em todos os trechos da luta e da campanha. Então é o backend, não o driver.
+4. **O upscale funciona, mas o tempo de quadro cai muito no Cube e no RP5.** Tabela abaixo.
+   - Odin: a luta e a campanha ficam a 48–50 até 6x. Só o Ougi cai, de 30 a 20.
+   - RP5: a luta cai de 42 a 20 fps de 1x a 6x, a campanha de 30 a 17.
+   - Cube: a 4x, o Ougi fica a 2,5 fps; a 6x, a 1,4, e a rota não passou de v8333 em 25 min.
+   - A memória cresce menos que a do ARMSX2: no Odin a 6x, 583 MiB contra 987 MiB.
+
+**Build:** o `libbt4gsx.so` do Nominum `12fb79b` saiu do `tools/build_android.sh` de lá, com `NOMINUM_BUILD=build/gsx-nominum` (150 passos sobre a pasta da rodada 1). O stripped tem 34 740 016 bytes (sha1 `47f881cb…`); a cópia fica em `build/lab/libbt4gsx_nominum_12fb79b.so`. Ele foi para `jniLibs` num APK de teste, instalado nos três aparelhos; a integração por submódulo continua sem ser feita. Os dois backends são o mesmo binário: o ARMSX2 é o padrão, e `NOMINUM_BACKEND=nominum` no `hl_env.txt` liga o próprio. O `libun5.so` é o mesmo da rodada 1, e nenhum código do Hidden Leaf mudou nesta rodada. No fim, o APK com o `libbt4gsx.so` do Hidden Leaf (`bb0ee18`) voltou aos três. No RP5, o driver voltou ao do sistema (`files/drivers/selected` apagado; antes não havia nenhum escolhido), e a rotação dos dois Adreno voltou ao que era (RP5: `force_landscape=1`, `user_rotation=1`; Odin: `user_rotation=0`, `wm size` resetado).
+
+**Como medi (ferramentas de `build/lab`, ignoradas pelo git):**
+- `recfull2.sh` é o `recfull.sh` com três acréscimos:
+  - A memória da GPU a cada 10 s. No Adreno, `/sys/class/kgsl/kgsl/proc/<pid>/kernel` e `kernel_max` (o pico; o `user` fica 0). No Mali, `dumpsys gpu --gpumem` (a linha `Proc <pid> total`, amostrada; o pico é a maior amostra).
+  - Ações por vsync (`ACTS=V:rot270|rot90|fps30|fps50|shot`): o giro (`wm fixed-to-user-rotation enabled` + `cmd window user-rotation lock 1|3`) e o limite de fps pelo painel (voltar, tocar "30" ou "50 (nativo)", Continuar).
+  - A checagem de "jogo morto" com 3 tentativas.
+- `q2.sh` roda uma fila de rodadas por aparelho, e `n2sum.sh` faz o resumo de cada uma.
+- As envs são `hl_env_n2_{v3,camp}_s{1,2,4,6}.txt`, `hl_env_n2_v3_lost.txt` e `hl_env_n2_v3_pt0.txt`. Do ARMSX2 são `hl_env_nmn_{v3,camp}_arm.txt` e `hl_env_n2_v3_arm_s{4,6}.txt`.
+- Os trechos (por vsync) são: luta 1 6450–6900, Ougi 7000–7900, vitória 8000–8950, resultado 8950–9450 (conferido nas folhas por vsync: WINNER até ~8950, "Ninja Song" até ~9450), luta 2 11200–12100, vila 6300–8000, andar 8100–10500 e menu START 10550–11800. As rodadas de escala param em v9100 (a v3) e v11800 (a campanha).
+- **Rodadas refeitas por erro meu:** o primeiro `n2_odin_v3_s2` e os primeiros `n2_odin_v3_s4`, `n2_odin_rot`, `n2_odin_pt0` e `n2_odin_v3_s6` rodaram com duas filas ao mesmo tempo no Odin. Uma espera procurou o "done" no arquivo errado, e o `force-stop` de uma rodada matou a outra (o "GAME DIED at v4402" do 2x). Ficaram em `rec/*_invalid_overlap`, fora das tabelas, e todas foram refeitas sozinhas.
+
+**Item 1 do pedido, o RP5 com `NOMINUM_VK_LOST_TRACE=1`:** o item 1 acima.
+
+**Item 2 do pedido, 1x (fps / GS em ms por vsync), rodada 2 contra a rodada 1:**
+
+| Trecho | Odin 16:9 próprio r1 → r2 | Odin 20:9 próprio r1 → r2 | Odin ARMSX2 (r1) | Cube próprio r2 | Cube ARMSX2 (r1) | RP5 próprio, Turnip (r2) | RP5 ARMSX2, Turnip (r2) | RP5 ARMSX2, sistema (r1) |
+|---|---|---|---|---|---|---|---|---|
+| luta 1, nativo | 50,0 / 3,9 → 50,0 / 2,5 | 50,0 / 2,9 → 50,0 / 2,6 | 50,0 / 2,6 | 46,4 / 10,2 | 50,0 / 6,9 | 41,6 / 16,4 | 50,0 / 8,4 | 50,2 / 7,8 |
+| Ougi, pelo GS | 21,5 / 25,9 → **30,4 / 10,1** | 22,5 / 24,8 → **29,6 / 10,3** | 50,0 / 4,3 | **9,5 / 19,3** | 50,0 / 7,6 | **30,7 / 7,5** | 50,0 / 5,0 | 50,0 / 5,2 |
+| vitória | 37,5 / 10,2 → **44,3 / 4,2** | 37,2 / 10,2 → **44,4 / 3,8** | 50,0 / 3,1 | **23,7 / 12,1** | 50,0 / 7,4 | **38,3 / 9,2** | 50,0 / 5,9 | 50,0 / 5,9 |
+| resultado | 47,8 / 9,0 → 50,0 / 2,0 | 48,6 / 8,5 → 50,0 / 1,9 | 50,0 / 1,8 | 38,8 / 4,5 | 50,0 / 5,2 | 50,0 / 2,0 | 50,0 / 3,4 | 50,0 / 3,3 |
+| luta 2 | 50,0 / 5,2 → 50,0 / 3,9 | 50,0 / 4,3 → 50,0 / 4,0 | 50,0 / 4,0 | 46,1 / 13,9 | 50,0 / 10,4 | **30,2 / 26,7** | 50,0 / 12,0 | 50,0 / 10,4 |
+| campanha, vila | 49,6 / 6,0 → 50,0 / 3,9 | | 50,0 / 3,9 | 48,7 / 10,8 | 49,7 / 10,6 | **29,8 / 26,4** | 50,0 / 11,4 | 50,0 / 10,8 |
+| campanha, andar | 46,8 / 8,2 → 49,6 / 4,3 | | 49,1 / 4,1 | 43,0 / 14,0 | 48,2 / 12,1 | **28,7 / 28,1** | 50,0 / 11,7 | 49,1 / 11,4 |
+| campanha, menu START | 49,1 / 7,6 → 50,0 / 5,2 | | 50,0 / 5,1 | 40,2 / 15,4 | 43,1 / 14,1 | **23,4 / 35,4** | 50,0 / 13,7 | 50,0 / 13,2 |
+
+(No Odin r2, a campanha a 1x é a `n2_odin_camp_s1`. Com o backend próprio, a coluna GS é o tempo da thread "CPU Thread" só; com o ARMSX2, é a soma de "GS" e "CPU Thread", como na rodada 1. Rodada 1 em `rec/nmn_*`, rodada 2 em `rec/n2_*`.)
+
+Na rodada 2, a rota v3 do Odin 16:9 com o backend próprio levou ~230 s até v12887, contra 411 s na rodada 1: o `HL_FAST_UNTIL` voltou a correr (a 60–120 fps no vídeo até v6400).
+
+**Item 3 do pedido, upscale (fps no trecho / memória da GPU no pico, MiB; v3 até v9100, campanha até v11800):**
+
+| Aparelho, backend | Escala | luta 1 | Ougi | vitória | campanha (vila / andar / menu START) | memória da GPU no pico |
+|---|---|---|---|---|---|---|
+| Odin 16:9, próprio | 1x | 50,0 | 30,4 | 44,3 | 50,0 / 49,6 / 50,0 | 237 (v3), 241 (campanha) |
+| | 2x | 50,0 | 27,9 | 42,9 | 50,0 / 49,4 / 49,9 | 266, 263 |
+| | 4x | 50,0 | 25,2 | 42,1 | 50,0 / 48,9 / 49,6 | 385, 353 |
+| | 6x | 49,9 | 19,9 | 37,8 | 49,8 / 48,2 / 49,2 | **583**, 502 |
+| Odin 16:9, ARMSX2 | 1x | 50,0 | 50,0 | 50,0 | | 187 |
+| | 4x | 50,0 | 50,0 | 50,0 | | 537 |
+| | 6x | 50,0 | 50,0 | 50,0 | | **987** |
+| RP5, próprio, Turnip | 1x | 41,6 | 30,7 | 38,3 | 29,8 / 28,7 / 23,4 | 220, 217 |
+| | 2x | 39,5 | 27,2 | 37,5 | 26,6 / 26,2 / 20,9 | 249, 240 |
+| | 4x | 27,9 | 18,1 | 29,9 | 21,4 / 20,6 / 16,8 | 367, 329 |
+| | 6x | 20,2 | 12,1 | 23,0 | 17,6 / 16,8 / 14,0 | **564**, 477 |
+| RP5, ARMSX2, Turnip | 1x | 50,0 | 50,0 | 50,0 | 50,0 / 50,0 / 50,0 | 276, 289 |
+| Cube, próprio | 1x | 46,4 | 9,5 | 23,7 | 48,7 / 43,0 / 40,2 | 317, 327 |
+| | 2x | 39,7 | 5,9 | 20,4 | 33,1 / 28,6 / 25,3 | 356, 352 |
+| | 4x | 17,9 | 2,5 | 10,1 | 18,1 / 14,7 / 13,7 | 487, 443 |
+| | 6x | 9,8 | 1,4 | 9,0 (até v8333, 25 min) | 10,5 / 8,8 / 8,0 | **674**, 619 |
+| Cube, ARMSX2 | 1x | 50,0 | 50,0 | 50,0 | | 301 |
+
+(A memória no Adreno é o `kernel_max` do kgsl, do processo do jogo inteiro: o GS, o nativo, a swapchain e o resto do processo. No Mali é a maior amostra de 10 em 10 s do `dumpsys gpu --gpumem`, que pode perder um pico curto. Com o ARMSX2, o "4x" e o "6x" são o `upscale_multiplier` do `.ini`; o log diz `un5: PCSX2's GS, vulkan, 6x`.)
+
+**Item 4 do pedido, a tela girada de verdade e o 30 fps do painel:**
+- **Odin, as duas paisagens, no meio da rota (`rec/n2_odin_rot`):** o jogo começa a 90, gira para 270 em v2381 (filme) e volta para 90 em v4850 (seleção). O log tem 4 swapchains na rota toda: 2 a `turn 90` no começo, `turn 270` no giro e `turn 90` na volta. Ou seja, ela é refeita só quando o giro muda. A imagem fica em pé nas duas, mas achatada (item 2). Com `NOMINUM_VK_PRETRANSFORM=0`, as duas paisagens saem certas (`rec/n2_odin_pt0`).
+- **RP5: a 270 não dá para testar por software.** A ROM da Retroid prende a tela a 90° (`settings system force_landscape=1`). O `mUserRotation` continua `ROTATION_90` mesmo com `force_landscape=0`, `cmd window user-rotation lock 0|3`, `wm fixed-to-user-rotation enabled` e `cmd window set-ignore-orientation-request true`. E o jogo pede `sensorLandscape`. O Cube é quadrado.
+- **30 fps do painel, no meio da luta:**
+  - O toque em "30" e depois em "50 (nativo)" funciona no backend próprio (`rec/n2_odin_rot`, `rec/n2_rp5_turnip_rot`, `rec/n2_cube_fps`).
+  - Contando os quadros por segundo no vídeo gravado, no modo 30 o Odin fica a 25–27, o RP5 a 22–27 e o Cube a 24–25, onde o jogo acompanha (no Ougi do Cube, 4–6, porque o jogo está a 9,4). No modo 50 ficam a 50–54.
+  - Com o limite, o jogo anda mais rápido onde o backend é lento (item 3). Odin: Ougi 30,4 → 39,1 fps, vitória 42,6 → 50,0. RP5: Ougi 30,7 → 34,1, vitória 37,5 → 40,2. No Cube não muda nada (Ougi 9,5 → 9,4): lá o limite é a CPU (GS 19 ms por vsync).
+
+**Não feito:** o tingido do KO não foi medido de novo (não foi pedido nesta rodada). Também ficaram de fora a rota completa de uma vez só (v3 e campanha separadas, como na rodada 1), o A35 e a Alpha 1.1X, o RP5 com o driver do sistema além do ponto da queda, e a 270 no RP5.
 
 ### 2026-11-04 00:10, teste do backend próprio do Nominum no aparelho (para a sessão do Nominum)
 
