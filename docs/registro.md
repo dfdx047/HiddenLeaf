@@ -80,9 +80,11 @@ No RP5 com o driver da Qualcomm, a tabela do Nominum manda a e b para o ARMSX2. 
   do Nominum (recompilada pelo catálogo) custa de 25 a 30% menos que o caminho rápido do runtime nos três aparelhos.
 - **Cube, campanha, b pior que a, nas duas vezes (`n3_cube_camp_b` e `_b2`: vila 43,1 e 43,4 contra 49,4):** com b, a
   VU1 cai de 15,3 para 11,7 ms, mas a thread do GS do Nominum sobe de 10,9 para 15,6 ms. O fluxo é do mesmo tamanho
-  (3,2 MB por quadro nos dois). Sem a causa, por enquanto. Suspeita: com 1196 blocos recompilados, o código da VU1
-  disputa o cache com a thread do GS nos núcleos do Cube. O teste é b com `NOMINUM_VU1_REC=0`. No Odin, a mesma cena dá
-  GS 4,0 em a e b.
+  (3,2 MB por quadro nos dois). **São os blocos recompilados:** b com `NOMINUM_VU1_REC=0` (`n3_cube_camp_bnorec`, a VU1 do
+  Nominum interpretada) volta a vila 49,5 / andando 46,1 / menu 42,4, com GS 10,8 ms e VU1 14,9 (igual a a). Com os
+  blocos, a VU1 fica mais barata, mas a thread do GS do Nominum perde ~5 ms por quadro no Cube. Suspeita: o código
+  recompilado (1196 blocos) disputa o cache com a thread do GS. No Odin a mesma cena dá GS 4,0 em a e b, e no RP5
+  (ARMSX2) b é mais rápido. Para a sessão do Nominum.
 - **Os logos e filmes do Cube e a repetição `n3_cube_camp_a2` não foram feitos.** O Claude Code parou essa fila às
   14:41 por falta de memória no PC: a build da libsdr e a normal compilavam juntas. Ficam para a próxima rodada.
 - Os segundos abaixo de 10 fps são os mesmos em a, b e c: o EE leva ~236 ms por quadro no carregamento dos logos (RP5,
