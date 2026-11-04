@@ -113,8 +113,8 @@ No RP5 com o driver da Qualcomm, a tabela do Nominum manda a e b para o ARMSX2. 
 - Com o driver da Qualcomm a tabela vai para o ARMSX2, como esperado. O `files/drivers/selected` foi apagado no fim.
 
 **1.7 Dumps do VIF1 em 4:3:** `HL_ASPECT=1333`, a câmera da luta sem o alargamento (`build/lab/hl_env_vif43_*.txt`,
-`vif43q.sh`). As 11 cenas da luta e do menu estão em `~/Downloads/vifdumps/odin3_43_<cena>.{vif,gif}.zst`; as duas da
-campanha estavam em andamento quando esta entrada foi escrita.
+`vif43q.sh`). As **13 cenas** estão em `~/Downloads/vifdumps/odin3_43_<cena>.{vif,gif}.zst` (1,3 GB), e `tools/vifdump.py info` dá
+`ok` em todas.
 
 **Outros:**
 
