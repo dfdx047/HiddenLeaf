@@ -41,6 +41,54 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-04 18:00, itens 8 e 11: quem libera os ponteiros ruins; câmera larga só volta em câmera viva
+
+**Item 8: a origem do `free` ruim**
+
+- **Build `app_sdrwatch5.apk`** (`libun5_sdrwatch5.so` sha1 `e1028bfa`, `HL_SDR=1`). Com `HL_FREECHECK=1`, o `free` do jogo
+  (`0x1181b0`) é conferido, e um cabeçalho que não está ligado nos dois sentidos fica no log, com a thread e os
+  endereços de código achados na pilha.
+- **Resultado igual nos dois aparelhos** (Cube v10247, `rec/free5_cube_v3`; RP5 v11000, `rec/free5_rp5_v3`). São
+  exatamente dois `free` ruins:
+  - `free(0x3c3c3c3c)` (o "cabeçalho" dele são instruções MIPS: o endereço dá a volta na máscara da RAM);
+  - `free(0x10400002)`.
+
+  Os dois vêm da thread 8, pelo invólucro `0x117570` chamado em `0x18db5c`, com a pilha `0x18db64`, `0x18d2cc`,
+  `0x18d324`, `0x198658`, `0x21d104`, `0x21c990`, `0x29f764`.
+- **`0x18db30(obj, flag)`** libera uma lista: `p = obj+0x14`; enquanto `p`, `prox = p+0x9c`, `free(p)`; no fim, se
+  `flag`, `free(obj)`.
+  - O `0x3c3c3c3c` é o `+0x9c` do último nó bom: **a lista não termina em 0**.
+  - Os nós de 0xa0 bytes são feitos por `0x18d410`: `0x1176c0(0xa0)`, depois `0x18e340`, que zera o `+0x9c`. Eles
+    entram na lista pelo ponteiro de cauda do objeto (`+8`): `nó+0x9c = *cauda; *cauda = nó; cauda = &nó+0x9c`.
+  - Se a cauda ficou apontando para um nó já liberado, o acréscimo lê lixo para o "próximo" e escreve o nó novo em
+    memória livre.
+  - Ainda não sei qual objeto é este nem por que só com a libsdr de verdade. É código do jogo (`0x18d2a0`/`0x18d240`,
+    na volta do resultado da luta para a seleção).
+- **Teste de que é a causa:** com `HL_FREECHECK=2` (pula os dois `free`, `rec/free2_rp5_v3`, `app_sdrwatch4.apk`), o
+  RP5 passa da cena da falha sem `missing-target`. As threads 131–133 recebem pilhas válidas (`0xbec610`,
+  `0xc6db10`…), e o som segue até v12627. **Pular não é correção:** a escrita do nó novo em memória livre continua.
+- **O som dos filmes com a libsdr:** na mesma rota do RP5, rms 0,45 em v1652 e 0,17 em v2312. Com a build normal
+  (`rec/cam_rp5_v3`), 0,0. A libsdr de verdade é o caminho do item 8. O que falta é tirar essa falha.
+- **Próximo passo:** achar o objeto da lista (um gancho em `0x18d410` que registre `obj`, a cauda e os nós) e o
+  momento em que a cauda fica velha. Depois, corrigir onde o jogo esvazia a lista sem pôr a cauda de volta, ou onde a
+  libsdr faz o jogo pular essa volta.
+
+**Item 11: a volta da câmera larga (`hl_game.cpp`)**
+
+- **Mudança:** ao sair do modo largo, uma câmera só volta para 1 se ainda está na lista de câmeras vivas do jogo
+  (cabeça `*(gp-0x424)` = `0x617acc`, próxima em `+0x268`, a lista que a `0x10F420` percorre) **e** ainda tem a escala
+  larga que escrevemos. Antes bastava ter a escala larga. A lista foi conferida num dump de RAM (5 câmeras encadeadas,
+  todas com 1,0).
+- **Teste no RP5 16:9** (`app_norm4.apk`, `libun5_norm4.so` sha1 `1fc233e2`):
+  - **Rota v3, duas lutas** (`rec/cam_rp5_v3`, até v17912): câmera larga em v6006 e v10663, "2 of 12 cameras back to
+    1 (24 cameras live)" e "6 of 9 (29 live)". Também WINNER com o personagem, resultado, seleção e segunda luta. 0
+    `missing-target`.
+  - **Campanha** (`rec/cam_rp5_camp`): `x 0.750` desde v3523, 47,7–51,5 fps.
+- **Não feito:** Odin (bloqueado), 20:9, os menus ("Esticar" e "Desenhar em 16:9") e o recorte.
+
+**Outros:** a `libun5` normal deste commit é a `libun5_norm4.so`: Alpha 1.1X, câmera, e a verificação do `free` só na
+build da vigia.
+
 ### 2026-11-04 17:15, item 8: a vigia funciona e mostra o `free` de um ponteiro com cabeçalho de lixo
 
 **Builds:** `app_sdrwatch2.apk` (vigia corrigida, `libun5_sdrwatch2.so` sha1 `019ea76e`) e `app_sdrwatch3.apk`

@@ -6,6 +6,9 @@
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 #include "runtime/hl_vif_dump.h"
+#if defined(HL_WATCH_BUILD)
+#include "runtime/ee_scheduler.h"
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -47,6 +50,8 @@ namespace
     constexpr uint32_t kGfxPointer = 0x617AFCu;    // gp-0x3F4: the graphics state; byte 0 counts vsyncs, byte 1 is how many a frame waits for (0x108510)
     constexpr uint32_t kCameraMatrices = 0x10DD00u; // builds a camera's matrices from its fields; +0x274 is the horizontal scale
     constexpr uint32_t kCameraXScale = 0x274u;     // (the same field the community's widescreen patch writes)
+    constexpr uint32_t kCameraList = 0x617ACCu;    // *(gp-0x424), gp 0x617EF0: the first live camera
+    constexpr uint32_t kCameraNext = 0x268u;       // the next one
 
     uint8_t *g_rdram = nullptr;
     PS2Runtime::RecompiledFunction g_cameraOriginal = nullptr;
@@ -111,10 +116,25 @@ namespace
             // Only where the field still holds the wide scale we wrote: when the fight ends the game frees some of these
             // cameras, and writing into a freed (or reused) block broke the heap's free list (the hang after the KO, the
             // allocator 0x118E60 reading a bad pointer forever).
+            // And only the cameras still in the game's list of live cameras (head *(gp-0x424), next at +0x268, the list
+            // 0x10F420 walks): a camera taken out of it may already be a free block, whatever its +0x274 holds.
             const float wide = hl_game::g_cameraXScale.load(std::memory_order_relaxed);
+            uint32_t live[64];
+            uint32_t liveCount = 0u;
+            for (uint32_t c = read32(kCameraList); c != 0u && liveCount < 64u; c = read32(c + kCameraNext))
+            {
+                if ((c & 3u) != 0u || c < 0x100000u || c >= 0x2000000u)
+                    break;
+                live[liveCount++] = c;
+            }
             uint32_t back = 0u;
             for (uint32_t i = 0; i < s_count; ++i)
             {
+                bool isLive = false;
+                for (uint32_t j = 0; j < liveCount; ++j)
+                    isLive = isLive || live[j] == s_cameras[i];
+                if (!isLive)
+                    continue;
                 uint8_t *field = rdram + ((s_cameras[i] + kCameraXScale) & 0x1FFFFFFu);
                 float now;
                 std::memcpy(&now, field, 4);
@@ -124,10 +144,62 @@ namespace
                     ++back;
                 }
             }
-            std::fprintf(stderr, "[cam] v%llu %u of %u cameras back to 1\n", static_cast<unsigned long long>(g_tick), back, s_count);
+            std::fprintf(stderr, "[cam] v%llu %u of %u cameras back to 1 (%u cameras live)\n", static_cast<unsigned long long>(g_tick), back,
+                         s_count, liveCount);
             s_count = 0u;
         }
     }
+
+#if defined(HL_WATCH_BUILD)
+    // Lab builds only (HL_WATCH_BUILD): HL_FREECHECK=1 checks every free of the game's heap (0x1181B0, a0 = the pointer; the
+    // block's header 16 bytes before it: +0 the block before it in memory, +4 the one after, +8 the size, +0xC the tag) and
+    // logs a free whose header is not linked both ways (the pointer, its header and the caller); HL_FREECHECK=2 also skips it.
+    constexpr uint32_t kHeapFree = 0x1181B0u;
+    PS2Runtime::RecompiledFunction g_freeOriginal = nullptr;
+    int g_freeCheck = 0;
+
+    void heapFree(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t p = GPR_U32(ctx, 4);
+        if (p != 0u)
+        {
+            const uint32_t h = p - 0x10u;
+            auto ok = [](uint32_t a) { return (a & 15u) == 0u && a >= 0x100000u && a < 0x2000000u; };
+            const uint32_t before = read32(h), after = read32(h + 4u);
+            const bool linked = ok(h) && ok(before) && ok(after) && read32(before + 4u) == h && read32(after) == h;
+            if (!linked)
+            {
+                static int s_count = 0;
+                if (s_count++ < 60)
+                {
+                    // the callers: the code addresses on the guest stack (the free wrapper 0x117570 keeps its ra at sp+0)
+                    const uint32_t sp = GPR_U32(ctx, 29);
+                    char calls[256];
+                    int n = 0, found = 0;
+                    calls[0] = 0;
+                    for (uint32_t o = 0; o < 0x200u && found < 10 && n < 200; o += 4u)
+                    {
+                        const uint32_t w = read32(sp + o);
+                        if (w >= 0x100008u && w < 0x3d5760u && (w & 3u) == 0u)
+                        {
+                            n += std::snprintf(calls + n, sizeof(calls) - n, " sp+%x:%x", o, w);
+                            ++found;
+                        }
+                    }
+                    std::fprintf(stderr, "[free] v%llu bad free 0x%08x: header %08x %08x %08x %08x, ra 0x%x, sp 0x%x, thread %d%s; stack%s\n",
+                                 static_cast<unsigned long long>(g_tick), p, before, after, read32(h + 8u), read32(h + 12u),
+                                 GPR_U32(ctx, 31), sp, runtime->eeScheduler().currentThreadId(), g_freeCheck >= 2 ? " (skipped)" : "", calls);
+                }
+                if (g_freeCheck >= 2)
+                {
+                    ctx->pc = GPR_U32(ctx, 31);
+                    return;
+                }
+            }
+        }
+        g_freeOriginal(rdram, ctx, runtime);
+    }
+#endif
 
     void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -658,6 +730,15 @@ namespace
             if (g_sequenceOriginal != nullptr)
                 runtime->registerFunction(kSequenceStep, sequenceStep);
             hookOverlay();
+#if defined(HL_WATCH_BUILD)
+            if (const char *f = std::getenv("HL_FREECHECK"))
+                g_freeCheck = std::atoi(f);
+            if (g_freeCheck > 0 && (g_freeOriginal = runtime->lookupFunction(kHeapFree)) != nullptr)
+            {
+                runtime->registerFunction(kHeapFree, heapFree);
+                std::fprintf(stderr, "[free] checking the game's frees (0x1181B0)%s\n", g_freeCheck >= 2 ? ", skipping the bad ones" : "");
+            }
+#endif
             g_padOriginal = runtime->lookupFunction(kPadRead);
             if (g_padOriginal != nullptr)
                 runtime->registerFunction(kPadRead, padRead);
