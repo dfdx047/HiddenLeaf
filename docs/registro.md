@@ -41,6 +41,49 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-04 17:15, item 8: a vigia funciona e mostra o `free` de um ponteiro com cabeçalho de lixo
+
+**Builds:** `app_sdrwatch2.apk` (vigia corrigida, `libun5_sdrwatch2.so` sha1 `019ea76e`) e `app_sdrwatch3.apk`
+(`HL_WATCH_PTRS=1`: só o que não parece ponteiro de lista, com os 16 eventos anteriores; `2e2f5dbc`). As duas foram
+feitas com `HL_SDR=1`.
+
+**A falha se repete:**
+
+- Rota v3 no RP5 (`rec/watch2_rp5_v3`, `watch3_rp5_v3`) e no Cube (`watch2_cube_v3`, `watch3_cube_v3`).
+- O `missing-target 0xbd9c90` vem em v11007/v10974 no RP5 e em v10215/v10207 no Cube. **O Cube também tem a falha** (não
+  tinha sido rodado com a libsdr).
+
+**Quem escreve o `0x80852021` na lista `0x618a50`:**
+
+- É o próprio alocador do jogo: `sub_118E60` (pc `0x118ffc`, `sw v1, 4(s1)`), quando põe um bloco livre na lista. O
+  "bloco" que ele insere é o endereço `0x80852021`. Logo depois vem o `0xf9990000`.
+- O mesmo nos dois aparelhos, e o bloco tocado logo antes é sempre `0xd67ed0`.
+- O `sub_118E60` é chamado pelo `free` do jogo (`0x1181b0`, ra `0x118428`). Os blocos do heap formam uma lista por
+  endereço (cabeçalho: `+0` o bloco anterior, `+4` o seguinte, `+8` o tamanho, `+0xc` a etiqueta). O `free(p)` lê o
+  bloco anterior em `*(p-0x10)` e devolve à lista livre o espaço entre o fim desse bloco e o seguinte. O
+  `0x80852021` = anterior + tamanho do anterior: **o cabeçalho do ponteiro liberado é lixo**.
+
+**De onde vem o lixo (vigia em `0xd67ed0` e `0xd67ed8`, `rec/w4_cube_d67ed8`, `w5_cube_d67ed0`, `w5_rp5_d67ed0`):**
+
+- Durante os filmes (v1336–2737), a região é o buffer de imagem do filme. A thread de vídeo `0x101c00` (por
+  `0x101620`) escreve nela palavras `80RRGGBB`, que são pixels RGBA do PS2 (alfa `0x80`). O `0x80852021` é um pixel
+  assim (azul-escuro).
+- Depois do último filme, o alocador reaproveita a região e escreve cabeçalhos válidos em `0xd67ed0` (v5880–5904).
+  Ninguém mais escreve lá.
+- Então o estrago não é uma escrita atrasada nesse bloco. É um **`free` (por volta de v10198–10227) de um ponteiro que
+  aponta para uma parte do antigo buffer de imagem nunca entregue pelo alocador**, com o pixel no lugar do cabeçalho.
+  Na build normal, a libsdr é stub, e o jogo segue outro caminho no fim dos filmes. O ponteiro velho fica na mão de
+  quem o libera depois.
+
+**Próximo passo (build em andamento, `build/lab/watchbuild4.sh`):**
+
+- **Verificação do `free`:** com `HL_FREECHECK=1` (só na build da vigia, `hl_game.cpp`), o `free` do jogo é conferido.
+  Quando o cabeçalho não está ligado nos dois sentidos, a build registra o ponteiro, o cabeçalho, o `ra` e o `sp`. Com
+  `=2`, além disso, ela pula esse `free`, para ver se o resto da rota segue sem a falha. Pular é um teste, não uma
+  correção.
+- **Para não perder tempo de build:** `recomp/build.sh` ganha `HL_NO_PC=1` (só o código gerado, sem o runtime do PC
+  do passo 7). Os códigos gerados normal e `HL_SDR` ficam guardados em `build/lab/runner_{norm,sdr}`.
+
 ### 2026-11-04 16:10, itens 8, 10 e 16: a vigia de escrita não via nada; a Alpha 1.1X roda com a base; custo dos filmes
 
 **Item 8, vigia de escrita (correção da entrada de 15:25):**

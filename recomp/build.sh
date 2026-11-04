@@ -164,6 +164,11 @@ if [ "$iso" = "--mod" ]; then
     echo "next: recomp/android/build.sh --mod $id"
     exit 0
 fi
+# HL_NO_PC=1: only the generated code (for recomp/android/build.sh), without the PC runtime of step 7
+if [ "${HL_NO_PC:-0}" = 1 ]; then
+    echo "HL_NO_PC=1: the generated code is in place; the PC runtime (step 7) is not built"
+    exit 0
+fi
 # link-time optimization only with HL_LTO=1: the LTO link of the whole game takes long and a lot of memory
 no_lto=ON; [ "${HL_LTO:-0}" = "1" ] && no_lto=OFF
 cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-rt" -G Ninja -DCMAKE_BUILD_TYPE=Release \
