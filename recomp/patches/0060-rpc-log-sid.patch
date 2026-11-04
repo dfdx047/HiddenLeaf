@@ -1,0 +1,35 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+index 0accb09..fa7217e 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+@@ -22,7 +22,13 @@ namespace ps2_syscalls
+             g_sif_rpc_debug_history[event.seq % kSifRpcDebugHistoryCount] = event;
+             // Hidden Leaf: the same events on stderr with HL_RPC_LOG=1
+             static const bool s_rpcLog = std::getenv("HL_RPC_LOG") != nullptr;
+-            if (s_rpcLog)
++            // HL_RPC_LOG=<sid in hex> (more than one hex digit): only that service, with the receive buffer after the call
++            static const uint32_t s_rpcLogSid = []
++            {
++                const char *v = std::getenv("HL_RPC_LOG");
++                return v != nullptr && std::strlen(v) > 1 ? static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) : 0u;
++            }();
++            if (s_rpcLog && (s_rpcLogSid == 0u || event.sid == s_rpcLogSid))
+             {
+                 std::cerr << "[rpc] " << event.op << " thread=" << event.threadId << std::hex << " sid=0x" << event.sid
+                           << " fno=0x" << event.rpcNum << " send=0x" << event.sendSize << " recv=0x" << event.recvSize
+@@ -33,6 +39,15 @@ namespace ps2_syscalls
+                     static const char kHex[] = "0123456789abcdef";
+                     std::cerr << kHex[event.sendPreview[i] >> 4] << kHex[event.sendPreview[i] & 15];
+                 }
++                if (s_rpcLogSid != 0u)
++                {
++                    std::cerr << " rdata=";
++                    for (uint32_t i = 0; i < event.recvPreviewSize; ++i)
++                    {
++                        static const char kHex[] = "0123456789abcdef";
++                        std::cerr << kHex[event.recvPreview[i] >> 4] << kHex[event.recvPreview[i] & 15];
++                    }
++                }
+                 std::cerr << std::endl;
+             }
+         }

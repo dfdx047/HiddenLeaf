@@ -67,8 +67,8 @@ index 642a08f..17d3ea3 100644
 @@ -1,5 +1,6 @@
  #if defined(PS2X_HEADLESS_HOST)
  #include "runtime/hl_vu_worker.h"
-+#include "runtime/hl_vif_dump.h"
  #endif
++#include "runtime/hl_vif_dump.h"
  #include "runtime/hl_perf.h"
  #include "runtime/hl_image.h"
 @@ -836,6 +837,7 @@ bool PS2Runtime::syncCoreSubsystems()

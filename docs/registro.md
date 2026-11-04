@@ -35,10 +35,94 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 | Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `12fb79b` (APK de teste de 11-04 05:45, não instalado agora) | Odin 3 (16:9 e 20:9), Cube; RP5 só com o Turnip | rotas v3 e de campanha gravadas a 1x, 2x, 4x e 6x, `HL_PERF`, memória da GPU, giro e 30 fps pelo painel | RP5 com o driver do sistema: `DEVICE_LOST` no mesmo ponto (rastro anotado); com o Turnip roda. Pré-rotação achata a imagem a 90/270 (certa com `NOMINUM_VK_PRETRANSFORM=0`). Cube roda sem `dualSrcBlend`, mas Ougi a 9,5 fps. Odin: Ougi 30,4 (era 21,5). Detalhe em 11-04 07:50 |
+| VIF1 e VU1 do Nominum (`NOMINUM_VU1=1`, teste, desligado por padrão) | parcial | `0e8e877` + Nominum `b2ff28b` (APK de 11-04 14:02) | Odin 3 (16:9 e 20:9), RP5 (sd480p, Qualcomm e Turnip), Cube | rotas v3 e de campanha `rec/n3_*_b`, `HL_PERF`, capturas | VU1 25–30% mais barata; RP5 sd480p a 50 na campanha; no Cube a campanha cai (GS do Nominum sobe), ver 11-04 15:00 |
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 15:00, rodada 3 do Nominum (`b2ff28b`), itens 1.2–1.7: a VU1 do Nominum dá 50 fps na campanha do RP5 em sd480p
+
+APK: `libun5.so` `0e8e877` (o gancho `NOMINUM_VU1`) e a `libbt4gsx.so` do Nominum `b2ff28b`. As combinações:
+
+- **a:** `NOMINUM_BACKEND=nominum`;
+- **b:** a, mais `NOMINUM_VU1=1`;
+- **c:** o GS do ARMSX2, sem as duas.
+
+No RP5 com o driver da Qualcomm, a tabela do Nominum manda a e b para o ARMSX2. Lá, a e c são o mesmo caminho e b é o ARMSX2 com a VU1 do Nominum. **O RP5 ficou em `sd480p` em todas as rodadas**, inclusive as do Turnip (`tools/device-profile.sh limit sd480p`, com `HL_STOP_PERF=1`; continua ligado). Rotas `rec/n3_*`: a v3 (até v12300) e a campanha (até v11900), com `HL_GS_SCALE=1` e capturas.
+
+**1.2 Autoteste (zips em `build/lab/selftest3/`):**
+
+| Aparelho | Escolha | Zip |
+|---|---|---|
+| Odin 3 (Adreno 830, Qualcomm) | Nominum, sem alternativas | `odin3.zip` |
+| Cube (Mali-G57) | Nominum; a tabela liga `no-dual-source` | `cube.zip` |
+| RP5, Qualcomm 0746, pela tabela | ARMSX2 (a entrada do `DEVICE_LOST`), como esperado | `rp5_qualcomm_table.zip` |
+| RP5, Qualcomm, `NOMINUM_SELFTEST=force` + `IGNORE_TABLE=1` | **passa: Nominum, sem alternativas.** Os 15 casos do teste não pegam o `DEVICE_LOST` da campanha | `rp5_qualcomm_forced.zip` |
+| RP5, Turnip v26.3.0-R6 | Nominum, sem alternativas | `rp5_turnip.zip` |
+
+**1.3 fps (média do trecho) e VU1 (ms por vsync) do `HL_PERF`, a / b / c:**
+
+| Trecho | Odin 3 | RP5 sd480p | Cube |
+|---|---|---|---|
+| Luta 1 | 50 / 50 / 50; VU1 3,3 / 2,5 / 3,3 | 49,8 / 50,2 / 49,9; 7,3 / 5,9 / 7,2 | 49,6 / 48,4 / 50; 7,2 / 5,7 / 7,0 |
+| Ougi | 50 / 50 / 50; 4,2 / 3,0 / 4,2 | 50 / 50 / 50; 8,8 / 6,6 / 8,8 | 38,2 / 38,1 / 50; 9,7 / 7,7 / 8,3 |
+| Vitória | 50 / 50 / 50; 2,2 / 1,7 / 2,3 | 50 / 50 / 50; 4,9 / 3,6 / 4,4 | 38,7 / 38,6 / 50; 5,2 / 4,3 / 5,3 |
+| Resultado | 50 / 50 / 50 | 50 / 50 / 50 | 48,4 / 48,5 / 50 |
+| Luta 2 | 50 / 50 / 50; 5,6 / 4,4 / 5,7 | 50 / 50 / 49,6; 13,5 / 10,2 / 12,0 | 47,7 / 41,0 / 50; 12,6 / 9,6 / 12,9 |
+| Campanha, vila | 50 / 50 / 50; 6,9 / 5,2 / 6,7 | **43,6 / 50,0 / 43,9; 17,7 / 12,4 / 17,4** | 49,4 / 43,1 / 49,5; 15,3 / 11,7 / 15,1 |
+| Campanha, andando | 49,9 / 49,9 / 50 | **44,5 / 50,0 / 44,6** | 45,9 / 40,1 / 49,2 |
+| Campanha, menu START | 50 / 50 / 50; 8,4 / 6,5 / 7,9 | **36,7 / 47,8 / 36,6; 23,3 / 16,7 / 23,4** | 42,2 / 35,7 / 42,9 |
+| Logos (carregamento) | 42,7 / 42,6 / 41,3 | 28,8 / 28,8 / 28,9 | não medido |
+| Filme | 50 / 50 / 50 | 50 / 50 / 50 | não medido |
+
+- **A meta de 50 fps com b na campanha em sd480p foi alcançada** na vila e andando. O menu START fica em 47,8. A VU1
+  do Nominum (recompilada pelo catálogo) custa de 25 a 30% menos que o caminho rápido do runtime nos três aparelhos.
+- **Cube, campanha, b pior que a, nas duas vezes (`n3_cube_camp_b` e `_b2`: vila 43,1 e 43,4 contra 49,4):** com b, a
+  VU1 cai de 15,3 para 11,7 ms, mas a thread do GS do Nominum sobe de 10,9 para 15,6 ms. O fluxo é do mesmo tamanho
+  (3,2 MB por quadro nos dois). Sem a causa, por enquanto. Suspeita: com 1196 blocos recompilados, o código da VU1
+  disputa o cache com a thread do GS nos núcleos do Cube. O teste é b com `NOMINUM_VU1_REC=0`. No Odin, a mesma cena dá
+  GS 4,0 em a e b.
+- **Os logos e filmes do Cube e a repetição `n3_cube_camp_a2` não foram feitos.** O Claude Code parou essa fila às
+  14:41 por falta de memória no PC: a build da libsdr e a normal compilavam juntas. Ficam para a próxima rodada.
+- Os segundos abaixo de 10 fps são os mesmos em a, b e c: o EE leva ~236 ms por quadro no carregamento dos logos (RP5,
+  v1573–1603 e v1866–1881).
+
+**1.4 Rota com b:**
+
+- Odin 3 em 16:9 e 20:9 (`wm size 2400x1080`, `n3_odin209_*`): v3 e campanha inteiras a 50 fps, com **0 segundos
+  travados** e uma só swapchain (2400x1080 no 20:9).
+- RP5 e Cube: as rotas inteiras, com o mesmo número de segundos lentos de a e c (só os do carregamento).
+- Imagem: as capturas de a e b nas mesmas cenas (título, seleção de fase, luta, Ougi, Ninja Song/WINNER, seleção de
+  personagem) mostram o mesmo conteúdo, sem defeito à vista (`rec/n3_odin_v3_{a,b,c}/shot_*.png`). Não comparei pixel
+  a pixel, porque a rota não cai no mesmo vsync.
+- `[nvu1]` no log de todas as rodadas b.
+
+**1.5 Odin, tela girada e painel a 30 fps (`n3_odin_rot_b`):**
+
+- Gira para 270 em v2231 e volta para 90 em v4847. São refeitas só as swapchains do giro (turn 90 → 0 → 270 → 90), e a
+  imagem fica em pé nas duas (`rot270_v2231.png`, `rot90_v4847.png`).
+- No vídeo: a 30 do painel, 26–28 quadros por segundo; a 50, 50–54, igual à rodada 2. As quedas para 3 fps em v6928 e
+  v8842 são o jogo pausado com o painel aberto.
+
+**1.6 RP5 com o Turnip (`n3_rp5t_*`, sd480p):**
+
+- Com b (backend do Nominum mais a VU1): v3 41,3 / 43,1 / 36,7 / 45,0 / 50,0 (luta 1 / Ougi / vitória / resultado /
+  luta 2); campanha 27,3 / 26,9 / 21,5. O limite é a thread do GS do Nominum (26–35 ms), não a VU1.
+- O ARMSX2 com o Turnip (`n3_rp5t_v3_c`) fica a 50 em todos os trechos.
+- Com o driver da Qualcomm a tabela vai para o ARMSX2, como esperado. O `files/drivers/selected` foi apagado no fim.
+
+**1.7 Dumps do VIF1 em 4:3:** `HL_ASPECT=1333`, a câmera da luta sem o alargamento (`build/lab/hl_env_vif43_*.txt`,
+`vif43q.sh`). As 11 cenas da luta e do menu estão em `~/Downloads/vifdumps/odin3_43_<cena>.{vif,gif}.zst`; as duas da
+campanha estavam em andamento quando esta entrada foi escrita.
+
+**Outros:**
+
+- **Corrigido:** o `0058` (`HL_VIF_DUMP`) não compilava no PC. O `#include "runtime/hl_vif_dump.h"` do `ps2_runtime.cpp`
+  estava dentro do `#if PS2X_HEADLESS_HOST`. No Android, o unity build escondia o erro. O runner do PC volta a linkar.
+- **Novo, `0060-rpc-log-sid.patch`:** `HL_RPC_LOG=<sid em hex>` registra só aquele serviço, com o buffer de resposta
+  depois da chamada. É para o item 8.
+- A ISO da Alpha 1.1X está em `~/Downloads/Naruto UN5/`, não só no Odin, como dizia o `CLAUDE.md`.
 
 ### 2026-11-04 14:20, modo contínuo, item 1.1: `NOMINUM_VU1=1`, o VIF1 e a VU1 do Nominum `b2ff28b` no lugar dos do runtime
 

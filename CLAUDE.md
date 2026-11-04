@@ -69,7 +69,7 @@ pelo GS do ARMSX2 (`libbt4gsx`).
 1. Tela de vitória: o personagem não chega ao GS (só camadas 2D); achar onde o EE ou a VU1 perde o desenho.
 2. Campanha no `sd480p` (43,7 fps) e no Cube (17% de pares lentos): o limite é o interpretador da VU1.
 3. Mods de código: o A35 luta no Cube, mas só com um save em `BASLUS-55606NARUTO6` (copiei o do UN5 à mão); o
-   Alpha 1.1X (sha `20872b06...`) precisa de entrada em `KNOWN_MODS` e `CODE_RANGES`, e a ISO dele só está no Odin 3.
+   Alpha 1.1X (sha `20872b06...`) precisa de entrada em `KNOWN_MODS` e `CODE_RANGES`, e a ISO dele está em `~/Downloads/Naruto UN5/`.
 4. Menus em 16:9 ("Esticar" e "Desenhar em 16:9"), packs de textura, os `?` da grade de personagem ligado.
 5. Odin 3: 60 e 120 interpolados num painel de 120 Hz, resolução 1x a 4x.
 
