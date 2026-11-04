@@ -9,7 +9,7 @@ funções são aproximadas (fim de função por `jr ra`); o mapa real sai do Ghi
 |---|---|---|---|
 | Europa (original) | `SLES_556.05` | `20a43677397731a2a20899336d1165ace5b436906b9b89be90fb10f4558dd19d` | **base** |
 | Versão Brasileira | `SLES_556.05` | `7c3517aa09c0c3e34742b89ee19a2de5f71753380ee198e8861a8030cfcf8e51` | ELF empacotado com SjCRUNCH v0.3 (LZO, blocos de 256 KB, `tools/un5.py unpack`); descomprimido, difere do europeu em 446 bytes (4 correções do próprio empacotador e textos): é praticamente um mod só de dados |
-| UN6 Alpha 1.1X | `SLES_556.05` | `20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056` | ~5,8 KB de código mudado |
+| UN6 Alpha 1.1X | `SLES_556.05` | `20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056` | só dados: 606 palavras do ELF fora do código e 13 dos dados do `BTL.BIN` (2026-11-04); a base roda o programa dela |
 | UN6 Alpha 3.5 | `SLUS_556.06` | `47c40141a3e1aeb0c96bc28e8dc311938b284d54fd21f4d8ba953c2e16234809` | primeiro pacote de código |
 
 `SYSTEM.CNF` do A35: `59aecaa95b057f204f51b380b8fdccb50b8713ed10c986f38316a53d3d2c072c`

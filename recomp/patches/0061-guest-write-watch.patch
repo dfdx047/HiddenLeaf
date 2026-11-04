@@ -1,8 +1,7 @@
 diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
-index 2f4b095..8e6a786 100644
 --- a/ps2xRuntime/include/ps2_runtime.h
 +++ b/ps2xRuntime/include/ps2_runtime.h
-@@ -238,6 +238,13 @@ inline uint8_t ps2PathWatchExtractByteFromWrite(uint32_t writeAddr, uint32_t wat
+@@ -238,6 +238,14 @@ inline uint8_t ps2PathWatchExtractByteFromWrite(uint32_t writeAddr, uint32_t wat
      return static_cast<uint8_t>((valueHi >> ((byteIndex - 8u) * 8u)) & 0xFFu);
  }
  
@@ -11,12 +10,13 @@ index 2f4b095..8e6a786 100644
 +{
 +    extern uint32_t g_addr; // 0xFFFFFFF0 when HL_WATCH is not set
 +    void hit(uint32_t addr, uint32_t size, uint64_t lo, uint64_t hi, const char *op, uint32_t pc, uint32_t ra);
++    void poll(const uint8_t *rdram, uint32_t sourcePc, uint32_t targetPc, uint32_t ra);
 +}
 +#endif
  inline void ps2TraceGuestWrite(uint8_t *rdram,
                                 uint32_t guestAddr,
                                 uint32_t size,
-@@ -253,6 +260,13 @@ inline void ps2TraceGuestWrite(uint8_t *rdram,
+@@ -253,6 +261,13 @@ inline void ps2TraceGuestWrite(uint8_t *rdram,
      (void)valueHi;
      (void)op;
      (void)ctx;
@@ -30,7 +30,7 @@ index 2f4b095..8e6a786 100644
      // TODO we dont need this anymore so on next release it will be deleted
  }
  
-@@ -267,6 +281,11 @@ inline void ps2TraceGuestRangeWrite(uint8_t *rdram,
+@@ -267,6 +282,11 @@ inline void ps2TraceGuestRangeWrite(uint8_t *rdram,
      (void)size;
      (void)op;
      (void)ctx;
@@ -41,4 +41,80 @@ index 2f4b095..8e6a786 100644
 +#endif
      // TODO we dont need this anymore so on next release it will be deleted
  }
+ 
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -535,13 +535,33 @@ static inline __m128i Ps2FastRead128(const uint8_t *rdram, uint32_t addr)
+     return value;
+ }
+ 
++#if defined(HL_WATCH_BUILD)
++// Hidden Leaf (lab builds only): the generated code's fast stores, for HL_WATCH (host/hl_watch.cpp, patch 0061)
++namespace hl_watch
++{
++    extern uint32_t g_addr;
++    void hitFast(uint32_t addr, uint32_t size, uint64_t value);
++}
++#define HL_WATCH_FAST(addr, size, value)                                                         \
++    do                                                                                           \
++    {                                                                                            \
++        const uint32_t hlwA = (addr) & PS2_RAM_MASK;                                             \
++        if (hlwA < hl_watch::g_addr + 8u && hlwA + (size) > hl_watch::g_addr)                    \
++            hl_watch::hitFast(hlwA, (size), (value));                                            \
++    } while (0)
++#else
++#define HL_WATCH_FAST(addr, size, value) ((void)0)
++#endif
++
+ static inline void Ps2FastWrite8(uint8_t *rdram, uint32_t addr, uint8_t value)
+ {
++    HL_WATCH_FAST(addr, 1u, value);
+     rdram[addr & PS2_RAM_MASK] = value;
+ }
+ 
+ static inline void Ps2FastWrite16(uint8_t *rdram, uint32_t addr, uint16_t value)
+ {
++    HL_WATCH_FAST(addr, 2u, value);
+     const uint32_t offset = addr & PS2_RAM_MASK;
+     if (!Ps2FastRangeIsContiguous(offset, sizeof(uint16_t)))
+     {
+@@ -558,6 +578,7 @@ static inline void Ps2FastWrite16(uint8_t *rdram, uint32_t addr, uint16_t value)
+ 
+ static inline void Ps2FastWrite32(uint8_t *rdram, uint32_t addr, uint32_t value)
+ {
++    HL_WATCH_FAST(addr, 4u, value);
+     const uint32_t offset = addr & PS2_RAM_MASK;
+     if (!Ps2FastRangeIsContiguous(offset, sizeof(uint32_t)))
+     {
+@@ -574,6 +595,7 @@ static inline void Ps2FastWrite32(uint8_t *rdram, uint32_t addr, uint32_t value)
+ 
+ static inline void Ps2FastWrite64(uint8_t *rdram, uint32_t addr, uint64_t value)
+ {
++    HL_WATCH_FAST(addr, 8u, value);
+     const uint32_t offset = addr & PS2_RAM_MASK;
+     if (!Ps2FastRangeIsContiguous(offset, sizeof(uint64_t)))
+     {
+@@ -590,6 +612,7 @@ static inline void Ps2FastWrite64(uint8_t *rdram, uint32_t addr, uint64_t value)
+ 
+ static inline void Ps2FastWrite128(uint8_t *rdram, uint32_t addr, __m128i value)
+ {
++    HL_WATCH_FAST(addr, 16u, static_cast<uint64_t>(_mm_cvtsi128_si64(value)));
+     const uint32_t offset = addr & PS2_RAM_MASK;
+     if (!Ps2FastRangeIsContiguous(offset, sizeof(__m128i)))
+     {
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1515,6 +1515,11 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+                                      GuestBranchKind kind,
+                                      const char *debugName)
+ {
++#if defined(HL_WATCH_BUILD)
++    // Hidden Leaf (lab builds only): HL_WATCH also notices a change of the watched bytes made by anything (DMA, the IOP,
++    // host code), at the first guest call or jump after it
++    hl_watch::poll(rdram, sourcePc, targetPc, static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31])));
++#endif
+     ctx->pc = targetPc;
+     const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
  

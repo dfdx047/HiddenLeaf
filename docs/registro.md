@@ -31,7 +31,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
 | Mods de dados | parcial | `264b764` | Cube | A35 com `HL_MODS` | só testado junto com o A35 |
 | UN6 A35 (pacote de código) | parcial | `43b39fa` (libun5_un6_a35 de 11-03 05:27) | Cube | rota até a luta | precisa de save copiado à mão em `BASLUS-55606NARUTO6`; resultado não conferido |
-| UN6 Alpha 1.1X | quebrado | | | | sem entrada em `KNOWN_MODS`/`CODE_RANGES`, sem pacote |
+| UN6 Alpha 1.1X | parcial | (este commit; `libun5_a11x.so` de 11-04 15:59) | Cube | rota v3 gravada (11-04 16:10) | só dados mudam: a base roda o programa da mod; luta, Ougi, WINNER e resultado vistos; faltam RP5, Odin e 20:9 |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 | Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `12fb79b` (APK de teste de 11-04 05:45, não instalado agora) | Odin 3 (16:9 e 20:9), Cube; RP5 só com o Turnip | rotas v3 e de campanha gravadas a 1x, 2x, 4x e 6x, `HL_PERF`, memória da GPU, giro e 30 fps pelo painel | RP5 com o driver do sistema: `DEVICE_LOST` no mesmo ponto (rastro anotado); com o Turnip roda. Pré-rotação achata a imagem a 90/270 (certa com `NOMINUM_VK_PRETRANSFORM=0`). Cube roda sem `dualSrcBlend`, mas Ougi a 9,5 fps. Odin: Ougi 30,4 (era 21,5). Detalhe em 11-04 07:50 |
@@ -40,6 +40,64 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 16:10, itens 8, 10 e 16: a vigia de escrita não via nada; a Alpha 1.1X roda com a base; custo dos filmes
+
+**Item 8, vigia de escrita (correção da entrada de 15:25):**
+
+- **O que rodou:** a build da vigia (`app_sdrwatch.apk`, `libun5_sdrwatch.so`) na rota v3 do RP5 até v12844
+  (`rec/watch_rp5_v3`). A falha voltou igual, em v11588: `missing-target 0xbd9c90`, `sp 0x20821380`, `a2 0x852021`.
+  Houve **0 linhas `[watch]`**.
+- **No Odin:** a mesma rota não rodou. O aparelho estava na tela de bloqueio (`mDreamingLockscreen=true`, padrão) e fica
+  de fora até ser desbloqueado.
+- **Causa das 0 linhas, por dois motivos:**
+  1. O `hl_watch::g_addr` era lido do `HL_WATCH` num inicializador estático, que roda no `dlopen`, antes de o
+     `un5_main.cpp` carregar o `hl_env.txt`. A vigia nunca ligou.
+  2. As escritas do código recompilado vão pelos `Ps2FastWrite*` (`ps2_runtime_macros.h`), que não passam pelo
+     `ps2TraceGuestWrite`. Mesmo ligada, a vigia só veria o `memcpy`/`memset` do runtime.
+- **Patch `0061` refeito:**
+  - `hl_watch::setup()` passa a ser chamado logo depois do `loadEnvFile`.
+  - Os `Ps2FastWrite8..128` ganham o gancho `HL_WATCH_FAST`, com o endereço de retorno do host
+    (`[watch-fast] … from libun5+0x…`, para o `llvm-addr2line`).
+  - O `PS2Runtime::dispatchGuestBranch` ganha um `poll`, que compara os 8 bytes vigiados a cada chamada ou salto do
+    jogo e registra qualquer mudança, venha de onde vier (DMA, IOP, código do HL), com a origem e o destino do salto
+    (`[watch-poll]`).
+  - Tudo fica atrás de `-DHL_WATCH_BUILD`, e a build normal não muda. A série inteira de patches aplica limpa no
+    `e563698` (conferido numa árvore à parte).
+- **Engano meu durante o trabalho:** rodei `git stash` no `build/PS2Recomp` (a árvore com os patches aplicados) e
+  desfiz na hora com `git stash pop`. As 72 mudanças voltaram, a pilha ficou vazia, e o `0061` aplicado é igual ao do
+  patch.
+- **Pista nova, ainda não seguida:** a entrada de 11-03 08:06 mostra que o `cameraScale` do `hl_game.cpp` já
+  escreveu em câmeras liberadas e quebrou a lista livre do heap. Os ganchos do HL que escrevem na RAM do jogo (câmera,
+  Ougi, controle) são candidatos tão bons quanto a libsdr. O `[watch-poll]` deve mostrar a diferença.
+
+**Item 10, Alpha 1.1X (`un5_main.cpp`):**
+
+- **O programa só muda dados:** o `SLES_556.05` da Alpha tem os mesmos cabeçalhos de programa que o europeu. As 606
+  palavras diferentes estão todas fora do código (`0x4452b4`…`0x54c8d8`, tabelas). No `BTL.BIN` só mudam 13
+  palavras, todas na parte de dados (depois de `text 0x1e5b40`). `ADV`, `ETC` e os `TEXT*` são iguais (`un5.py diff`,
+  `build/mods/a11x_pack.json`). Isso corrige a `analise-elf.md` ("~5,8 KB de código mudado"): o que muda são dados.
+- **A falta era outra:** a Alpha não precisa de pacote de código. Ela precisa que a `libun5` base rode o programa da
+  mod. Hoje a base sempre roda o `SLES_556.05` europeu e só troca os arquivos do disco.
+- **Mudança:** com a mod ligada, se ela tem um `SLES_556.05` com os mesmos cabeçalhos e os mesmos bytes nas faixas de
+  código do `CODE_RANGES` (`0x100000–0x3d5760`, `0x5e3a00–0x5e7208`), a base roda esse programa
+  (`un5: mod program … (the base's code, its own data)`). Senão, roda o europeu e avisa que a mod precisa do pacote.
+  Função `sameCodeAsBase`.
+- **Teste no Cube** (`build/lab/app_a11x.apk`, `libun5_a11x.so` sha1 `8ce229f7`): a Alpha já estava importada em
+  `modlib/un6-a11x`, e a ligação foi feita à mão (`un5_mods.txt`, `modlib/mods.txt`, restaurados depois). Rota v3 até
+  v9260, em `rec/a11x_cube_v3`:
+  - o log diz `un5: mod program …/modlib/un6-a11x/disc/SLES_556.05 (the base's code, its own data)`, e o `BTL`
+    residente é o de sempre;
+  - o vídeo tem o título "Ultimate Ninja 6", o CyberConnect2, o 10th, a abertura, a carga da UN6, a seleção, a luta
+    Naruto x Sakura (50 fps de v6535 em diante), o Ougi, o WINNER com o personagem e a tela de resultado, com som (rms
+    0,09–0,17 na luta).
+- **Não feito:** RP5, Odin (bloqueado) e 20:9. O A35 com a build de hoje também não. O pacote `libun5_un6_a35.so` é de
+  11-03 05:27, anterior ao Nominum `b2ff28b` e a todos os patches de hoje.
+
+**Item 16, filmes:** medidas e proposta em `docs/ipu.md` (`04f01ba`). O resumo: o runtime não emula a IPU, a `libmpeg`
+é HLE com FFmpeg na GameThread, e os filmes rodam a 50 fps nos três aparelhos, com 12–17 ms ociosos. No Cube, o filme
+custa ~5% do processo, e o YUV para RGBA usa o caminho em C do swscale (`yuv2rgb_c_32`). A primeira proposta é essa
+conversão em NEON.
 
 ### 2026-11-04 15:50, item 13: as funções que mais gastam CPU na campanha e na luta (RP5, sd480p, VU1 do Nominum)
 

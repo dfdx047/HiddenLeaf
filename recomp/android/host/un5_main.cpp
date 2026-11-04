@@ -30,12 +30,62 @@
 #include <thread>
 
 int ps2x_runtime_main(int argc, char *argv[]); // the runtime's main() (src/main.cpp, renamed by the build)
+#if defined(HL_WATCH_BUILD)
+namespace hl_watch
+{
+    void setup();
+}
+#endif
 namespace hl_nominum_vu1
 {
     void setup(); // NOMINUM_VU1=1: Nominum's VIF1 and VU1 (hl_nominum_vu1.cpp)
 }
 void hl_spu2_install();                        // the sound (recomp/android/spu2/hl_spu2.cpp)
 void hl_spu2_pause(bool paused);
+
+namespace
+{
+    // True when the ELF at mod has the base's program headers and the same bytes where the base has code (tools/un5.py
+    // CODE_RANGES): a mod that changed only the program's data (the Alpha 1.1X: tables), which this engine can run with its
+    // own program. Anything else needs the mod's code pack.
+    bool sameCodeAsBase(const std::string &base, const std::string &mod)
+    {
+        auto readAll = [](const std::string &path, std::string &out) {
+            FILE *f = std::fopen(path.c_str(), "rb");
+            if (f == nullptr)
+                return false;
+            char buf[1 << 16];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+                out.append(buf, n);
+            std::fclose(f);
+            return true;
+        };
+        std::string a, b;
+        if (!readAll(base, a) || !readAll(mod, b) || a.size() < 0x34 || a.size() != b.size())
+            return false;
+        uint32_t phoff = 0;
+        uint16_t phnum = 0;
+        std::memcpy(&phoff, a.data() + 0x1c, 4);
+        std::memcpy(&phnum, a.data() + 0x2c, 2);
+        if (std::memcmp(a.data(), b.data(), 0x34) != 0 || phoff + phnum * 32u > a.size() ||
+            std::memcmp(a.data() + phoff, b.data() + phoff, phnum * 32u) != 0)
+            return false;
+        uint32_t off = 0, vaddr = 0, filesz = 0;
+        std::memcpy(&off, a.data() + phoff + 4, 4);
+        std::memcpy(&vaddr, a.data() + phoff + 8, 4);
+        std::memcpy(&filesz, a.data() + phoff + 16, 4);
+        static const uint32_t kCode[][2] = {{0x100000u, 0x3d5760u}, {0x5e3a00u, 0x5e7208u}};
+        for (const auto &r : kCode)
+        {
+            if (r[0] < vaddr || r[1] > vaddr + filesz || off + (r[1] - vaddr) > a.size())
+                return false;
+            if (std::memcmp(a.data() + off + (r[0] - vaddr), b.data() + off + (r[0] - vaddr), r[1] - r[0]) != 0)
+                return false;
+        }
+        return true;
+    }
+}
 
 namespace
 {
@@ -379,6 +429,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     redirectOutput(root);
     std::fprintf(stderr, "un5: Hidden Leaf, Ultimate Ninja 5 engine\n");
     loadEnvFile(root + "/hl_env.txt");
+#if defined(HL_WATCH_BUILD)
+    hl_watch::setup();
+#endif
     hl_game::g_gsDumpDir = root + "/gsdumps";
     if (std::getenv("HL_GS_DUMP"))
         mkdir(hl_game::g_gsDumpDir.c_str(), 0775);
@@ -415,6 +468,20 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
                 if (dir.empty())
                     continue;
                 dirs += root + "/" + dir + "\n";
+#ifndef HL_PACK_ID
+                // the base engine: a mod with the base's boot program changed only in its data runs with that program
+                if (modElf.empty() && access((root + "/" + dir + "/SLES_556.05").c_str(), R_OK) == 0)
+                {
+                    const std::string candidate = root + "/" + dir + "/SLES_556.05";
+                    if (sameCodeAsBase(data + "/SLES_556.05", candidate))
+                    {
+                        modElf = candidate;
+                        std::fprintf(stderr, "un5: mod program %s (the base's code, its own data)\n", candidate.c_str());
+                    }
+                    else
+                        std::fprintf(stderr, "un5: mod program %s has other code: it needs its code pack; the base program runs\n", candidate.c_str());
+                }
+#endif
 #ifdef HL_PACK_ID
                 const std::string id = dir.size() > 12 && dir.compare(0, 7, "modlib/") == 0 ? dir.substr(7, dir.find('/', 7) - 7) : "";
                 if (id == HL_PACK_ID)
