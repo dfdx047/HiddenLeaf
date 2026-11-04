@@ -24,6 +24,7 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 | `docs/registro.md` | **estado das funções e histórico por build (ler primeiro)** |
 | `docs/plano.md` | plano, decisões, controles na tela, contrato do motor |
 | `tools/un5.py` | `verify`, `extract`, `overlays`, `diff`, `unpack`, `prepelf`, `ovlelf` |
+| `tools/vifdump.py`, `docs/vifdump.md` | dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`, patch `0058`) para a Fase 3 do Nominum: leitor e formato |
 | `tools/ramdiff.py` | compara estruturas do jogo entre a RAM do PCSX2 (savestate) e a do recomp (`hl_ram`), seguindo ponteiros |
 | `recomp/build.sh` | ISO → disco extraído → ELF dividido → PS2Recomp → código gerado → runtime (→ `--run`); `--mod <iso>` gera o código de um mod em `build/mods/<id>/` |
 | `recomp/android/build.sh` | `libun5.so` do Android; `--mod <id>` faz `libun5_<id>.so`, carregada pelo launcher quando o mod está ligado |

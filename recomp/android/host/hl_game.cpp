@@ -5,6 +5,7 @@
 
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
+#include "runtime/hl_vif_dump.h"
 
 #include <algorithm>
 #include <cctype>
@@ -29,6 +30,7 @@ namespace hl_game
     bool (*g_nativeOn)() = nullptr;
     void (*g_gsDump)(const char *, int) = nullptr;
     std::string g_gsDumpDir;
+    std::string g_vifDumpDir;
 }
 
 
@@ -471,6 +473,8 @@ namespace
     // with a detector starts where the detector first sees it; the others at a fixed vsync of the route (build/lab: hl_env_v3.txt
     // for the fight route, hl_env_camp.txt for the campaign). "scene@vsync" puts any of them at a vsync of one's own.
     // HL_GS_DUMP_DEVICE names the device (by default ro.product.model).
+    // HL_VIF_DUMP=scene,... (HL_VIF_DUMP_FRAMES=N, 300) takes the same scenes and triggers for the VIF1 stream and the GIF the
+    // VIF1/VU1 interpreters make of it: <game folder>/vifdumps/<device>_<scene>.vif and .gif (runtime/hl_vif_dump.cpp).
     enum class DumpBy { Vsync, FightStart, OugiHuman, OugiCpu };
     struct DumpScene
     {
@@ -507,18 +511,22 @@ namespace
     {
         DumpScene scene;
         bool done;
+        bool vif; // HL_VIF_DUMP, not HL_GS_DUMP
     };
     std::vector<DumpWanted> g_dumpWanted;
-    int g_dumpFrames = 300;
+    int g_dumpFrames = 300, g_vifDumpFrames = 300;
     std::string g_dumpDevice;
 
     void dumpSetup()
     {
-        const char *list = std::getenv("HL_GS_DUMP");
-        if (list == nullptr || list[0] == '\0')
+        const char *gsList = std::getenv("HL_GS_DUMP");
+        const char *vifList = std::getenv("HL_VIF_DUMP");
+        if ((gsList == nullptr || gsList[0] == '\0') && (vifList == nullptr || vifList[0] == '\0'))
             return;
         if (const char *f = std::getenv("HL_GS_DUMP_FRAMES"))
             g_dumpFrames = std::max(1, std::atoi(f));
+        if (const char *f = std::getenv("HL_VIF_DUMP_FRAMES"))
+            g_vifDumpFrames = std::max(1, std::atoi(f));
         if (const char *d = std::getenv("HL_GS_DUMP_DEVICE"); d != nullptr && d[0] != '\0')
             g_dumpDevice = d;
         else
@@ -530,40 +538,46 @@ namespace
             if (g_dumpDevice.empty())
                 g_dumpDevice = "android";
         }
-        std::string text = list;
-        size_t pos = 0;
-        while (pos <= text.size())
+        for (int vif = 0; vif < 2; ++vif)
         {
-            const size_t comma = std::min(text.find(',', pos), text.size());
-            std::string item = text.substr(pos, comma - pos);
-            pos = comma + 1;
-            if (item.empty())
+            const char *list = vif ? vifList : gsList;
+            if (list == nullptr)
                 continue;
-            uint64_t at = 0u;
-            const size_t atSign = item.find('@');
-            if (atSign != std::string::npos)
+            std::string text = list;
+            size_t pos = 0;
+            while (pos <= text.size())
             {
-                at = std::strtoull(item.c_str() + atSign + 1, nullptr, 10);
-                item.resize(atSign);
-            }
-            bool known = false;
-            for (const DumpScene &s : kDumpScenes)
-                if (item == s.name)
+                const size_t comma = std::min(text.find(',', pos), text.size());
+                std::string item = text.substr(pos, comma - pos);
+                pos = comma + 1;
+                if (item.empty())
+                    continue;
+                uint64_t at = 0u;
+                const size_t atSign = item.find('@');
+                if (atSign != std::string::npos)
                 {
-                    DumpWanted w{s, false};
-                    if (at != 0u)
-                    {
-                        w.scene.by = DumpBy::Vsync;
-                        w.scene.at = at;
-                    }
-                    g_dumpWanted.push_back(w);
-                    known = true;
+                    at = std::strtoull(item.c_str() + atSign + 1, nullptr, 10);
+                    item.resize(atSign);
                 }
-            if (!known)
-                std::fprintf(stderr, "[gsdump] unknown scene '%s'\n", item.c_str());
+                bool known = false;
+                for (const DumpScene &s : kDumpScenes)
+                    if (item == s.name)
+                    {
+                        DumpWanted w{s, false, vif != 0};
+                        if (at != 0u)
+                        {
+                            w.scene.by = DumpBy::Vsync;
+                            w.scene.at = at;
+                        }
+                        g_dumpWanted.push_back(w);
+                        known = true;
+                    }
+                if (!known)
+                    std::fprintf(stderr, "[gsdump] unknown scene '%s'\n", item.c_str());
+            }
         }
-        std::fprintf(stderr, "[gsdump] %zu scenes, %d vsyncs each, device %s, into %s\n", g_dumpWanted.size(), g_dumpFrames, g_dumpDevice.c_str(),
-                     hl_game::g_gsDumpDir.c_str());
+        std::fprintf(stderr, "[gsdump] %zu scenes (GS %d vsyncs each into %s, VIF %d into %s), device %s\n", g_dumpWanted.size(), g_dumpFrames,
+                     hl_game::g_gsDumpDir.c_str(), g_vifDumpFrames, hl_game::g_vifDumpDir.c_str(), g_dumpDevice.c_str());
     }
 
     // The Ougi detector (the one of the special button, ougiOnScreen) by who does it: 1 a human fighter, 2 the CPU.
@@ -608,6 +622,14 @@ namespace
             {
                 std::fprintf(stderr, "[gsdump] v%llu %s skipped: overlay %d, not %d (another route?)\n", static_cast<unsigned long long>(tick), w.scene.name, mode,
                              w.scene.overlayNeeded);
+                continue;
+            }
+            if (w.vif)
+            {
+                const std::string base = hl_game::g_vifDumpDir + "/" + g_dumpDevice + "_" + w.scene.name;
+                std::fprintf(stderr, "[vifdump] v%llu %s (%s) overlay %d scene %d -> %s.vif/.gif, %d vsyncs\n", static_cast<unsigned long long>(tick),
+                             w.scene.name, w.scene.by == DumpBy::Vsync ? "route vsync" : "detector", mode, hl_game::scene(), base.c_str(), g_vifDumpFrames);
+                hl_vifdump::start(base.c_str(), w.scene.name, g_dumpDevice.c_str(), tick, g_vifDumpFrames);
                 continue;
             }
             const std::string base = hl_game::g_gsDumpDir + "/" + g_dumpDevice + "_" + w.scene.name;

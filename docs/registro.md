@@ -36,8 +36,57 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 | Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `12fb79b` (APK de teste de 11-04 05:45, não instalado agora) | Odin 3 (16:9 e 20:9), Cube; RP5 só com o Turnip | rotas v3 e de campanha gravadas a 1x, 2x, 4x e 6x, `HL_PERF`, memória da GPU, giro e 30 fps pelo painel | RP5 com o driver do sistema: `DEVICE_LOST` no mesmo ponto (rastro anotado); com o Turnip roda. Pré-rotação achata a imagem a 90/270 (certa com `NOMINUM_VK_PRETRANSFORM=0`). Cube roda sem `dualSrcBlend`, mas Ougi a 9,5 fps. Odin: Ougi 30,4 (era 21,5). Detalhe em 11-04 07:50 |
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
+| Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 08:25, `HL_VIF_DUMP`: o VIF1 e o GIF das 13 cenas para a Fase 3 do Nominum (prontos em `~/Downloads/vifdumps/`)
+
+**O pedido colado às 07:45 (três partes: o urgente dos filmes e do Ougi, a Fase 2E e a Fase 3)** é quase todo código do Nominum: o upload em anel, o autoteste de GPU, o `nominum_submit_vif1` e o recompilador da VU1. Esta sessão só lê o repositório do Nominum. O próprio pedido trata a sessão do Hidden Leaf na terceira pessoa ("gravados pela sessão do Hidden Leaf", "leia o registro do Hidden Leaf"). Na dúvida, fiz o mais seguro, como o pedido manda, e anoto aqui:
+- **Feito aqui:** o que o pedido dá ao Hidden Leaf, os dumps do item 3.2, e o diagnóstico daqui para o item 1.4.
+- **Não mexi** no Nominum, nem nas partes 1, 2 e nos itens 3.1 e 3.3–3.6. Ficam para a sessão do Nominum.
+
+**Para a sessão do Nominum, item 1.4 (o diagnóstico do Hidden Leaf):** as travas de filme, Ougi e vitória com o backend próprio são esperas da thread do GS, não CPU nem VU1. O rastro não estava ligado nessas rodadas, só na `n2_rp5_lost`. Pelo `HL_PERF` da rodada 2 (`rec/n2_*`), "GS ocupado" é a CPU da thread do backend sobre o tempo do vsync, e `waitGS` é o jogo esperando o anel do GS, em ms por vsync:
+
+| Aparelho, trecho (backend próprio, 1x) | fps | ms por vsync | GS ocupado | `waitGS` | VU1 |
+|---|---|---|---|---|---|
+| Cube, filme de abertura | 23,2 | 43,2 | 12,0 ms (28%) | 41,9 | 4,2 |
+| Cube, Ougi | 9,5 | 105,3 | 19,3 ms (18%) | 112,8 | 11,1 |
+| Cube, vitória | 23,7 | 42,1 | 12,1 ms (29%) | 55,0 | 5,6 |
+| RP5 (Turnip), Ougi | 30,7 | 32,5 | 7,5 ms (23%) | 28,2 | 9,1 |
+| RP5 (Turnip), vitória | 38,3 | 26,1 | 9,2 ms (35%) | 17,7 | 6,2 |
+| Odin, filme | 46,3 | 21,6 | 6,6 ms (30%) | 19,1 | 1,6 |
+| Odin, Ougi | 30,4 | 32,8 | 10,1 ms (31%) | 30,7 | 4,5 |
+| RP5 (Turnip), campanha, vila | 29,8 | 33,5 | 26,4 ms (79%) | 19,6 | 20,8 |
+| Cube, ARMSX2, Ougi (referência) | 50,0 | 20,0 | 7,7 ms (39%) | 0,0 | 8,3 |
+
+- **No filme, no Ougi e na vitória**, o jogo espera o GS quase o vsync inteiro, e a thread do backend fica 70–80% do tempo parada, sem CPU. Isso bate com a suspeita da parte 1: uma espera da GPU por transferência IMAGE ou por ReadFIFO2. Os filmes são só PATH2 IMAGE: nos dumps, `filme` tem 540 891 pacotes PATH2, ~1 MB por vsync, sem VU1. O Ougi tem 296 741 pacotes (209 030 do PATH1), nenhum de PATH3.
+- **A exceção é a campanha no RP5:** ali a thread do GS fica 79% ocupada, então é CPU.
+- **O RP5 com o driver do sistema** cai antes disso (`DEVICE_LOST`, entrada de 07:50, item 1).
+
+**Correção da entrada de 07:50:** lá eu disse que, no Cube, "o limite é a CPU (GS 19 ms por vsync)". Está errado. O `HL_PERF` dá CPU por vsync, e a 9,5 fps cada vsync leva 105 ms: a thread do GS fica ocupada 18% e espera o resto (tabela acima). O 30 fps não ajuda no Cube porque a espera é por transferência, não por present.
+
+**Os dumps (item 3.2 do pedido):** são 13 pares `odin3_<cena>.vif.zst` e `.gif.zst`, 1,3 GB comprimidos, em `~/Downloads/vifdumps/`, fora do git.
+- **Gravação:** gravados no Odin 3 em 16:9 com a build de 07:47, pelas rotas `hl_env_vif_v3.txt`, `hl_env_vif_cpu2.txt` (`ougi_cpu`, v6619) e `hl_env_vif_camp.txt`, com os mesmos gatilhos e vsyncs dos dumps do GS. Cada um tem 300 vsyncs.
+- **Conferência:** o `tools/vifdump.py info` lê todos sem erro. As sequências crescem, não há número nos dois arquivos, e cada par tem um `STAT` e o fim. O resumo está em `build/lab/vifdump_info.txt`.
+- **O que eles mostram:**
+  - Logos e filme são só DIRECT/DIRECTHL (PATH2) e MPG, sem MSCAL.
+  - As outras cenas: o jogo manda uma transferência VIF1 por par de vsyncs (~149 em 300), de 0,3 a 2,9 MB por vsync crus. Por exemplo, a `campanha_vila` tem 113 042 MSCAL, 311 324 MSCNT, 1 935 181 UNPACK, 586 035 STMASK e 170 662 DIRECT.
+  - Nenhum PATH3, nenhum MSCALF, e nenhum PATH1/2 fora de uma transferência VIF1: a VU1 só é ligada pelo VIF1.
+  - **Os microprogramas:** o jogo os reenvia por MPG o tempo todo, milhares de vezes por dump, mas nas 13 cenas só há **24 pedaços distintos** (tamanho e CRC32). O CRC da micro memória muda de 0 a 10 vezes por dump, entre os vsyncs.
+- **Só no 16:9:** a câmera larga muda os números que vão à VU1 na luta e na campanha (x 0,75). Um 4:3 (Cube, ou `HL_ASPECT=1333`) sairia diferente.
+- **Custo:** gravando, o jogo fica mais lento, mas a rota é por vsync e as cenas caem nos mesmos pontos dos dumps do GS.
+
+**Código (Hidden Leaf):**
+- `recomp/patches/0058-vif1-gif-dump.patch`: o `runtime/hl_vif_dump.{h,cpp}` novo e os ganchos no `processVIF1Data`, no `submitGifPacket`, no `writeRegister` e no `vsyncCommit` do `hl_gs_live`, mais o `bind` no `PS2Runtime`. Ele entra no `CMakeLists.txt` do runtime do PC e no `recomp/android/CMakeLists.txt`. A série inteira (0001–0058) aplica numa árvore limpa do `e563698` e dá os mesmos arquivos da build. No PC, só passou por `g++ -fsyntax-only`; o runtime do PC não foi recompilado.
+- `hl_game.cpp`: o `HL_VIF_DUMP` (e o `HL_VIF_DUMP_FRAMES`) usa a lista de cenas do `HL_GS_DUMP`. `un5_main.cpp`: a pasta `vifdumps/`.
+- `tools/vifdump.py`: `info`, o leitor e conferidor. `docs/vifdump.md`: o formato.
+- Desligado, cada gancho custa uma leitura atômica.
+- No laboratório: `build/lab/vifdrun.sh` puxa cada dump quando termina e o apaga do aparelho, porque o Odin tem 12–19 GB livres e um dump cru tem até 1,8 GB.
+
+**Aparelhos:** o APK com este `libun5.so` e o `libbt4gsx.so` do Hidden Leaf (`bb0ee18`) está nos três, sem `hl_env.txt`. A cópia do `libun5.so` anterior está em `build/lab/libun5_7973998.so`.
+
+**Não feito:** as partes 1 e 2 e os itens 3.1 e 3.3–3.6, que são código do Nominum (acima). Também ficaram de fora os dumps em 4:3 e em outros aparelhos, e a recompilação do runtime do PC.
 
 ### 2026-11-04 07:50, teste do backend próprio do Nominum no aparelho, rodada 2 (Nominum `12fb79b`, para a sessão do Nominum)
 

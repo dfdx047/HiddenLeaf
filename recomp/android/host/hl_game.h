@@ -22,4 +22,6 @@ namespace hl_game
     // HL_GS_DUMP: libbt4gsx's Bt4Gsx_GsDump (a PCSX2 GS dump of the next vsyncs into <base>.gs.zst) and the folder
     extern void (*g_gsDump)(const char *base, int frames);
     extern std::string g_gsDumpDir;
+    // HL_VIF_DUMP: the same scenes, the VIF1 stream and the GIF out of the VIF1/VU1 interpreters (runtime/hl_vif_dump.h), here
+    extern std::string g_vifDumpDir;
 }

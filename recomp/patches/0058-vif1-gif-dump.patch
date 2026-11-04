@@ -1,0 +1,471 @@
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index 550d449..24a8734 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -389,6 +389,7 @@ add_library(ps2_runtime STATIC
+     src/lib/ps2_rom_device.cpp
+     src/lib/ps2_vfs.cpp
+     src/lib/hl_perf.cpp
++    src/lib/hl_vif_dump.cpp
+     src/lib/vu/ps2_vu_fast.cpp
+     src/lib/ps2_runtime.cpp
+     src/lib/ps2_vif1_interpreter.cpp
+diff --git a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+index b402cc4..8394c6c 100644
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -1,5 +1,6 @@
+ #include "runtime/hl_vu_worker.h"
+ #include "runtime/hl_perf.h"
++#include "runtime/hl_vif_dump.h"
+ // Hidden Leaf: the live GS stream (see runtime/gs/hl_gs_live.h). The protocol is BT3-Recomp's ps2_gs_live.cpp (GPLv3), in turn
+ // from PS2Recomp's gs_dump_writer.cpp, reduced to what one process needs: the ring is plain memory.
+ #include "runtime/gs/hl_gs_live.h"
+@@ -413,6 +414,8 @@ namespace hl_gslive
+             hl_vuworker::postCall([reg, value] { writeRegister(reg, value); }, false);
+             return;
+         }
++        if (hl_vifdump::active())
++            hl_vifdump::privileged(reg, value);
+         uint64_t packet[4];
+         packet[0] = 1ull | (1ull << 15) | (1ull << 60); // NLOOP 1, EOP, PACKED, one register
+         packet[1] = 0xEull;                             // A+D
+@@ -474,6 +477,8 @@ namespace hl_gslive
+ 
+     static void vsyncCommit(const std::vector<uint8_t> &regsCopy)
+     {
++        if (hl_vifdump::active())
++            hl_vifdump::vsync(regsCopy.data(), static_cast<uint32_t>(regsCopy.size()));
+         ps2live::RingHeader *h = nullptr;
+         int64_t target = -1;
+         {
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 2a1a628..040f432 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -5,6 +5,7 @@
+ #define HL_VU_SYNC() ((void)0)
+ #endif
+ #include "runtime/ps2_memory.h"
++#include "runtime/hl_vif_dump.h"
+ #include "runtime/ps2_address.h"
+ #include "runtime/gs/gs_frontend.h"
+ #include "ps2_log.h"
+@@ -2060,6 +2061,8 @@ void PS2Memory::submitGifPacket(GifPathId pathId, const uint8_t *data, uint32_t
+     HL_VU_SYNC();
+     if (!data || sizeBytes < 16)
+         return;
++    if (hl_vifdump::active())
++        hl_vifdump::gif(static_cast<int>(pathId), data, sizeBytes, path2DirectHl);
+ 
+     // Hidden Leaf: HL_GIF_LOG=N prints the first N packets (path, size, PATH3 mask, first GIFtag);
+     // HL_GIF_LOG=N@S starts S seconds after the first packet and also writes the packets whole to hl_gif.bin
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 642a08f..17d3ea3 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,5 +1,6 @@
+ #if defined(PS2X_HEADLESS_HOST)
+ #include "runtime/hl_vu_worker.h"
++#include "runtime/hl_vif_dump.h"
+ #endif
+ #include "runtime/hl_perf.h"
+ #include "runtime/hl_image.h"
+@@ -836,6 +837,7 @@ bool PS2Runtime::syncCoreSubsystems()
+     resetIop();
+     m_vu0.reset();
+     m_vu1.reset();
++    hl_vifdump::bind(&m_memory, &m_vu1.state());
+ 
+     m_boundRdram = rdram;
+     m_boundGSVram = gsVram;
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index e226bd4..f690f96 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -3,6 +3,7 @@
+ #include "runtime/hl_vu_worker.h"
+ #endif
+ #include "runtime/ps2_memory.h"
++#include "runtime/hl_vif_dump.h"
+ #include <chrono>
+ #include <cstdlib>
+ #include <cstring>
+@@ -308,6 +309,18 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ #endif
+     if (sizeBytes == 0u)
+         return;
++    // Hidden Leaf: HL_VIF_DUMP records the transfer whole, and what the GIF gets until it returns is marked as coming from it
++    struct VifDumpScope
++    {
++        bool on;
++        ~VifDumpScope()
++        {
++            if (on)
++                hl_vifdump::vif1End();
++        }
++    } vifDump{hl_vifdump::active()};
++    if (vifDump.on)
++        hl_vifdump::vif1Begin(data, sizeBytes);
+ 
+     // DIRECT payload goes to PATH2. An IMAGE GIFtag can owe more data than its DIRECT carries: the GIF keeps waiting
+     // for it, and the next DIRECT payloads (after their VIFcodes) supply it
+diff --git a/ps2xRuntime/include/runtime/hl_vif_dump.h b/ps2xRuntime/include/runtime/hl_vif_dump.h
+new file mode 100644
+index 0000000..ea14619
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/hl_vif_dump.h
+@@ -0,0 +1,30 @@
++// Hidden Leaf: HL_VIF_DUMP, the VIF1 stream and the GIF that the VIF1/VU1 interpreters make of it, for N vsyncs from a scene
++// (src/lib/hl_vif_dump.cpp; the format is in Hidden Leaf's docs/vifdump.md). Off unless start() is called.
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++
++class PS2Memory;
++struct VU1State;
++
++namespace hl_vifdump
++{
++    // what the start snapshot reads (PS2Runtime, once its VU1 is made)
++    void bind(PS2Memory *memory, VU1State *vu1);
++
++    // two files, <base>.vif and <base>.gif, from the next command on the VIF1/GIF thread, for `frames` vsyncs; several at once
++    // is fine. From the game thread.
++    void start(const char *base, const char *scene, const char *device, uint64_t tick, int frames);
++
++    extern std::atomic<int> g_active; // (sessions open: the hooks below cost one load when it is 0)
++
++    // the hooks, wherever the runtime does each thing
++    void vif1Begin(const uint8_t *data, uint32_t size); // PS2Memory::processVIF1Data, before the codes
++    void vif1End();
++    void gif(int path, const uint8_t *data, uint32_t size, bool directHl); // PS2Memory::submitGifPacket
++    void privileged(uint32_t reg, uint64_t value);                      // a GS privileged register write (hl_gs_live)
++    void vsync(const uint8_t *privRegs, uint32_t size);                 // hl_gs_live's vsync, in the stream's order
++
++    inline bool active() { return g_active.load(std::memory_order_relaxed) != 0; }
++}
+diff --git a/ps2xRuntime/src/lib/hl_vif_dump.cpp b/ps2xRuntime/src/lib/hl_vif_dump.cpp
+new file mode 100644
+index 0000000..5dc837a
+--- /dev/null
++++ b/ps2xRuntime/src/lib/hl_vif_dump.cpp
+@@ -0,0 +1,317 @@
++// Hidden Leaf: HL_VIF_DUMP (runtime/hl_vif_dump.h). Two files per scene, written on the thread that runs the VIF1 and the GIF
++// (the VU worker on Android), so what they hold is in the order the interpreters saw it:
++//   <base>.vif  the start snapshot (VU1 micro and data memory, VU1 registers, VIF1 registers and what a DIRECT left owed), every
++//               PS2Memory::processVIF1Data transfer whole, and a mark per vsync with the CRC32 of the VU1 memories and the VIF1
++//               registers (so a write that did not come through the VIF1 shows up)
++//   <base>.gif  every GIF packet PS2Memory::submitGifPacket took (PATH1 from XGKICK, PATH2 from DIRECT/DIRECTHL, PATH3 from the
++//               GIF channel), with the VIF1 transfer it came out of; the GS privileged register writes; a mark per vsync with
++//               the privileged registers the vsync showed
++// Every record of both files takes the next number of one counter: merged by it, the two are the order of the stream.
++// Layout: Hidden Leaf's docs/vifdump.md. Little endian.
++#include "runtime/hl_vif_dump.h"
++#include "runtime/ps2_memory.h"
++#include "runtime/ps2_vu1.h"
++#if defined(PS2X_HEADLESS_HOST)
++#include "runtime/hl_vu_worker.h"
++#endif
++
++#include <cstdio>
++#include <cstring>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <vector>
++
++namespace hl_vifdump
++{
++    std::atomic<int> g_active{0};
++
++    namespace
++    {
++        constexpr uint32_t kVersion = 1;
++        enum : uint32_t
++        {
++            kRecState = 0x54415453u, // 'STAT'
++            kRecVif1 = 1u,
++            kRecVsync = 2u,
++            kRecPacket = 1u,
++            kRecPrivileged = 3u,
++            kRecEnd = 0xFFu,
++        };
++
++        struct Session
++        {
++            std::string base, scene, device;
++            uint64_t tick = 0;
++            int frames = 0, left = 0;
++            FILE *vif = nullptr, *gif = nullptr;
++            uint64_t vsyncs = 0, vifRecords = 0, vifBytes = 0, gifRecords = 0, gifBytes = 0, path1 = 0, path2 = 0, path3 = 0, outsideVif = 0;
++        };
++
++        std::mutex s_mutex;
++        std::vector<std::unique_ptr<Session>> s_open;
++        PS2Memory *s_memory = nullptr;
++        VU1State *s_vu1 = nullptr;
++        uint64_t s_seq = 0;
++        uint64_t s_vifSeq = 0;
++        bool s_inVif = false;
++
++        uint32_t crc32(const void *p, size_t n)
++        {
++            static uint32_t table[256];
++            static bool made = false;
++            if (!made)
++            {
++                for (uint32_t i = 0; i < 256; ++i)
++                {
++                    uint32_t c = i;
++                    for (int k = 0; k < 8; ++k)
++                        c = (c & 1u) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
++                    table[i] = c;
++                }
++                made = true;
++            }
++            uint32_t c = 0xFFFFFFFFu;
++            const uint8_t *b = static_cast<const uint8_t *>(p);
++            for (size_t i = 0; i < n; ++i)
++                c = table[(c ^ b[i]) & 0xFFu] ^ (c >> 8);
++            return c ^ 0xFFFFFFFFu;
++        }
++
++        void put(std::vector<uint8_t> &v, const void *p, size_t n)
++        {
++            const uint8_t *b = static_cast<const uint8_t *>(p);
++            v.insert(v.end(), b, b + n);
++        }
++        template <typename T> void put(std::vector<uint8_t> &v, T x) { put(v, &x, sizeof(x)); }
++
++        // a record: u32 type, u32 size of what follows the 16 bytes, u64 sequence number, the payload (two pieces, either empty)
++        void record(FILE *f, uint32_t type, uint64_t seq, const void *a, uint32_t an, const void *b = nullptr, uint32_t bn = 0)
++        {
++            const uint32_t size = an + bn;
++            std::fwrite(&type, 4, 1, f);
++            std::fwrite(&size, 4, 1, f);
++            std::fwrite(&seq, 8, 1, f);
++            if (an)
++                std::fwrite(a, 1, an, f);
++            if (bn)
++                std::fwrite(b, 1, bn, f);
++        }
++
++        // the file header: magic (8), u32 version, u32 header size, scene and device (32 each, zero padded), u64 the route's
++        // vsync at the start, u32 vsyncs asked, u32 0
++        void header(FILE *f, const char *magic, const Session &s)
++        {
++            std::vector<uint8_t> h;
++            put(h, magic, 8);
++            put(h, kVersion);
++            put(h, static_cast<uint32_t>(8 + 4 + 4 + 32 + 32 + 8 + 4 + 4));
++            char name[32] = {};
++            std::strncpy(name, s.scene.c_str(), sizeof(name) - 1);
++            put(h, name, sizeof(name));
++            char dev[32] = {};
++            std::strncpy(dev, s.device.c_str(), sizeof(dev) - 1);
++            put(h, dev, sizeof(dev));
++            put(h, s.tick);
++            put(h, static_cast<uint32_t>(s.frames));
++            put(h, static_cast<uint32_t>(0));
++            std::fwrite(h.data(), 1, h.size(), f);
++        }
++
++        std::vector<uint8_t> snapshot()
++        {
++            std::vector<uint8_t> v;
++            PS2Memory &m = *s_memory;
++            put(v, PS2_VU1_CODE_SIZE);
++            put(v, PS2_VU1_DATA_SIZE);
++            put(v, m.getVU1Code(), PS2_VU1_CODE_SIZE);
++            put(v, m.getVU1Data(), PS2_VU1_DATA_SIZE);
++            put(v, &m.vif1_regs, sizeof(m.vif1_regs)); // 23 u32: stat fbrst err mark cycle mode num mask code itops base ofst tops itop top row[4] col[4]
++            put(v, m.m_vif1PendingDirectQwc);
++            put(v, m.m_vif1PendingPath2ImageQwc);
++            put(v, static_cast<uint32_t>(m.m_vif1PendingPath2DirectHl ? 1u : 0u));
++            put(v, static_cast<uint32_t>(m.m_path3Masked ? 1u : 0u));
++            const VU1State &u = *s_vu1;
++            put(v, u.vf, sizeof(u.vf));
++            put(v, u.vi, sizeof(u.vi));
++            put(v, u.acc, sizeof(u.acc));
++            put(v, u.q);
++            put(v, u.p);
++            put(v, u.i);
++            put(v, u.r);
++            put(v, u.pc);
++            put(v, u.mac);
++            put(v, u.clip);
++            put(v, u.status);
++            put(v, u.top);
++            put(v, u.itop);
++            put(v, static_cast<uint8_t>(u.ebit));
++            put(v, static_cast<uint8_t>(u.dBitEnabled));
++            put(v, static_cast<uint8_t>(u.tBitEnabled));
++            put(v, static_cast<uint8_t>(0));
++            return v;
++        }
++
++        // on the VIF1/GIF thread, between two of its commands
++        void begin(Session *raw)
++        {
++            std::unique_ptr<Session> s(raw);
++            std::lock_guard<std::mutex> lock(s_mutex);
++            if (!s_memory || !s_vu1)
++            {
++                std::fprintf(stderr, "[vifdump] %s: the runtime did not bind its VU1, nothing recorded\n", s->scene.c_str());
++                return;
++            }
++            s->vif = std::fopen((s->base + ".vif").c_str(), "wb");
++            s->gif = std::fopen((s->base + ".gif").c_str(), "wb");
++            if (!s->vif || !s->gif)
++            {
++                std::fprintf(stderr, "[vifdump] %s: cannot write %s.vif/.gif\n", s->scene.c_str(), s->base.c_str());
++                if (s->vif)
++                    std::fclose(s->vif);
++                if (s->gif)
++                    std::fclose(s->gif);
++                return;
++            }
++            std::setvbuf(s->vif, nullptr, _IOFBF, 8u << 20);
++            std::setvbuf(s->gif, nullptr, _IOFBF, 8u << 20);
++            header(s->vif, "HLVIF1\0\0", *s);
++            header(s->gif, "HLGIF1\0\0", *s);
++            const std::vector<uint8_t> st = snapshot();
++            record(s->vif, kRecState, ++s_seq, st.data(), static_cast<uint32_t>(st.size()));
++            std::fprintf(stderr, "[vifdump] %s: recording %d vsyncs into %s.vif/.gif (VU1 pc 0x%x, code crc %08x)\n", s->scene.c_str(), s->frames,
++                         s->base.c_str(), s_vu1->pc, crc32(s_memory->getVU1Code(), PS2_VU1_CODE_SIZE));
++            s_open.push_back(std::move(s));
++            g_active.fetch_add(1, std::memory_order_relaxed);
++        }
++
++        void finish(Session &s)
++        {
++            const uint64_t seq = ++s_seq;
++            record(s.vif, kRecEnd, seq, nullptr, 0);
++            record(s.gif, kRecEnd, seq, nullptr, 0);
++            std::fclose(s.vif);
++            std::fclose(s.gif);
++            std::fprintf(stderr,
++                         "[vifdump] %s: done, %llu vsyncs; .vif %llu transfers, %llu bytes; .gif %llu packets (PATH1 %llu, PATH2 %llu, PATH3 %llu; "
++                         "%llu PATH1/2 outside a VIF1 transfer), %llu bytes\n",
++                         s.scene.c_str(), static_cast<unsigned long long>(s.vsyncs), static_cast<unsigned long long>(s.vifRecords),
++                         static_cast<unsigned long long>(s.vifBytes), static_cast<unsigned long long>(s.gifRecords), static_cast<unsigned long long>(s.path1),
++                         static_cast<unsigned long long>(s.path2), static_cast<unsigned long long>(s.path3), static_cast<unsigned long long>(s.outsideVif),
++                         static_cast<unsigned long long>(s.gifBytes));
++        }
++    }
++
++    void bind(PS2Memory *memory, VU1State *vu1)
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        s_memory = memory;
++        s_vu1 = vu1;
++    }
++
++    void start(const char *base, const char *scene, const char *device, uint64_t tick, int frames)
++    {
++        Session *s = new Session;
++        s->base = base;
++        s->scene = scene;
++        s->device = device;
++        s->tick = tick;
++        s->frames = s->left = frames < 1 ? 1 : frames;
++#if defined(PS2X_HEADLESS_HOST)
++        if (hl_vuworker::enabled() && !hl_vuworker::onWorker())
++        {
++            hl_vuworker::postCall([s] { begin(s); }, false);
++            return;
++        }
++#endif
++        begin(s);
++    }
++
++    void vif1Begin(const uint8_t *data, uint32_t size)
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        const uint64_t seq = ++s_seq;
++        s_vifSeq = seq;
++        s_inVif = true;
++        for (auto &s : s_open)
++        {
++            record(s->vif, kRecVif1, seq, data, size);
++            ++s->vifRecords;
++            s->vifBytes += size;
++        }
++    }
++
++    void vif1End()
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        s_inVif = false;
++    }
++
++    // payload: u8 path (1-3), u8 DIRECTHL, u8 inside a VIF1 transfer, u8 0, u32 0, u64 that transfer's number (0 if outside), the packet
++    void gif(int path, const uint8_t *data, uint32_t size, bool directHl)
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        if (s_open.empty())
++            return;
++        const uint64_t seq = ++s_seq;
++        uint8_t h[16] = {};
++        h[0] = static_cast<uint8_t>(path);
++        h[1] = directHl ? 1u : 0u;
++        h[2] = s_inVif ? 1u : 0u;
++        const uint64_t vifSeq = s_inVif ? s_vifSeq : 0u;
++        std::memcpy(h + 8, &vifSeq, 8);
++        for (auto &s : s_open)
++        {
++            record(s->gif, kRecPacket, seq, h, sizeof(h), data, size);
++            ++s->gifRecords;
++            s->gifBytes += size;
++            (path == 1 ? s->path1 : path == 2 ? s->path2 : s->path3)++;
++            if (path != 3 && !s_inVif)
++                ++s->outsideVif;
++        }
++    }
++
++    // payload: u32 register (the offset in the privileged block, as hl_gs_live takes it), u32 0, u64 value
++    void privileged(uint32_t reg, uint64_t value)
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        if (s_open.empty())
++            return;
++        const uint64_t seq = ++s_seq;
++        uint8_t p[16] = {};
++        std::memcpy(p, &reg, 4);
++        std::memcpy(p + 8, &value, 8);
++        for (auto &s : s_open)
++            record(s->gif, kRecPrivileged, seq, p, sizeof(p));
++    }
++
++    // .vif payload: u64 the vsync's number in this dump (from 1), u32 CRC32 of VU1 micro memory, of VU1 data memory, of the VIF1
++    // registers, u32 0. .gif payload: the same u64, then the privileged registers as hl_gs_live sends them at a vsync
++    void vsync(const uint8_t *privRegs, uint32_t size)
++    {
++        std::lock_guard<std::mutex> lock(s_mutex);
++        if (s_open.empty())
++            return;
++        const uint64_t seq = ++s_seq;
++        const uint32_t crcs[4] = {crc32(s_memory->getVU1Code(), PS2_VU1_CODE_SIZE), crc32(s_memory->getVU1Data(), PS2_VU1_DATA_SIZE),
++                                  crc32(&s_memory->vif1_regs, sizeof(s_memory->vif1_regs)), 0u};
++        for (size_t i = 0; i < s_open.size();)
++        {
++            Session &s = *s_open[i];
++            const uint64_t n = ++s.vsyncs;
++            uint8_t v[24];
++            std::memcpy(v, &n, 8);
++            std::memcpy(v + 8, crcs, 16);
++            record(s.vif, kRecVsync, seq, v, sizeof(v));
++            record(s.gif, kRecVsync, seq, &n, 8, privRegs, size);
++            if (--s.left <= 0)
++            {
++                finish(s);
++                s_open.erase(s_open.begin() + static_cast<long>(i));
++                g_active.fetch_sub(1, std::memory_order_relaxed);
++                continue;
++            }
++            ++i;
++        }
++    }
++}

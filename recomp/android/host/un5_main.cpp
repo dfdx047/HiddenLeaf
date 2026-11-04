@@ -378,6 +378,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     hl_game::g_gsDumpDir = root + "/gsdumps";
     if (std::getenv("HL_GS_DUMP"))
         mkdir(hl_game::g_gsDumpDir.c_str(), 0775);
+    hl_game::g_vifDumpDir = root + "/vifdumps";
+    if (std::getenv("HL_VIF_DUMP"))
+        mkdir(hl_game::g_vifDumpDir.c_str(), 0775);
     loadSettings(root + "/un5_settings.txt");
     setenv("HL_METER", "1", 0);
     if (iso.empty())
