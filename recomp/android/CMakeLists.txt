@@ -19,6 +19,11 @@ set(UN5_ARCH -march=armv8.2-a)
 set(UN5_NUMERIC -fno-strict-aliasing -fwrapv -ffp-contract=off)
 add_compile_options(${UN5_ARCH} ${UN5_NUMERIC})
 add_compile_definitions(PS2X_HEADLESS_HOST=1 USE_SSE2NEON)
+# HL_WATCH_BUILD=ON (lab only, HL_WATCH_BUILD=1 build.sh, in build/android_watch): the write watch of host/hl_watch.cpp
+option(HL_WATCH_BUILD "lab build: HL_WATCH=<address> logs the guest writes there" OFF)
+if(HL_WATCH_BUILD)
+    add_compile_definitions(HL_WATCH_BUILD=1)
+endif()
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET TRUE)
@@ -95,13 +100,13 @@ set_source_files_properties("${HL_NOMINUM_DIR}/core/vu1/vu_fast.cpp" PROPERTIES 
 file(GLOB RUNNER_SRC CONFIGURE_DEPENDS "${RT}/src/runner/*.cpp")
 list(REMOVE_ITEM RUNNER_SRC "${RT}/src/runner/main.cpp")
 add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp"
-    "${HOST}/hl_nominum_vu1.cpp")
+    "${HOST}/hl_nominum_vu1.cpp" "${HOST}/hl_watch.cpp")
 set_target_properties(un5 PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
 # HL_PACK_ID=<mod>: a mod's code pack (recomp/android/build.sh --mod <mod>), libun5_<mod>.so, which runs the mod's program
 if(HL_PACK_ID)
     set_source_files_properties("${HOST}/un5_main.cpp" PROPERTIES COMPILE_DEFINITIONS "HL_PACK_ID=\"${HL_PACK_ID}\"")
 endif()
-set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" "${HOST}/hl_nominum_vu1.cpp"
+set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" "${HOST}/hl_nominum_vu1.cpp" "${HOST}/hl_watch.cpp"
     PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 set_source_files_properties("${RT}/src/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=ps2x_runtime_main")
 # the function tables are long and plain: optimizing them only costs time

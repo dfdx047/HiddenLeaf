@@ -22,7 +22,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
 | Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: a cortina de transição não cobre a largura (~1 s por troca); menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
-| Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5 | rota fixa, log `[sp]` | responde sozinho em segundo plano (não é o que se quer). Um toque dá o Ougi; uma etapa mostrou "ERROR"; △△, disputa e multiplicador não vistos |
+| Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5, Odin 3, Cube | rota v3 gravada, log `[sp]`, 1x e 2x no Cube (11-04 15:25) | o jogo mostra o pedido e o toque responde; "ERROR" era da COM; 2x dobra as respostas; △△ à mão e disputa não vistos |
 | Painel de pausa | funciona | `9c6c786` | RP5 | prints (11-02) | não reconferido depois de 11-02 |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
 | 60/120 interpolados | não testado | | | | 120 só aparece em tela ≥ 100 Hz (`34467f3`); Odin 3 travado à noite |
@@ -40,6 +40,52 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 15:25, itens 8 e 9: a libsdr corrompe uma lista livre do heap no tempo dos filmes; o Ougi de um botão é mostrado pelo jogo
+
+**Item 8, som dos logos e filmes (em andamento, sem correção):**
+
+- **Build de laboratório:** `HL_SDR=1` (a libsdr do EE recompilada), em `build/lab/app_sdr.apk` (`libun5_sdr.so`).
+  Rodou na rota v3 com o GS do ARMSX2 e `HL_RPC_LOG=80000701` (patch `0060`). O travamento de 11-03 volta igual nos
+  dois aparelhos (`rec/sdr_rp5_v3`, `rec/sdr_odin209_v3`): o som existe até ~v10300 e zera, e há um `missing-target
+  0xbd9c90` com `sp 0x20821380`.
+- **O que o `sdrdrv` responde** (1403 chamadas):
+  - Início: `0x8000` (init), `0x8050`, `0x8130`/`0x8131` e `0x8070`.
+  - Depois, por filme: `0x80e0` (BlockTrans, inicia com 0x3000), `0x8010` (o volume, `0xf80`/`0x1080`) e `0x80d0`
+    (VoiceTrans de 0x800). No meio, 1356 vezes, `0x8100`, que é o BlockTransStatus.
+  - O status só volta dois valores, `0x00170fc0` e `0x01173fc0`: o início de cada metade de um anel de 0x6000. A conta do
+    jogo sobre ele (`0x100ae0`) fica dentro do anel.
+  - **Depois do último filme (v2662) não há mais nenhuma chamada ao `sdrdrv`.** O estrago é feito até ali e fica
+    dormente até a próxima alocação passar pelo lugar.
+- **Threads (`HL_THREAD_LOG`, `rec/sdr_odin209_v3t`):** cada filme tem um par de threads de áudio (33/34, 35/36, 37/38:
+  `0x104020` e `0x101c00`), que a thread 8 termina depois do BlockTrans de parada. De v8035 a v10254 nada é criado. Em
+  v10254 as tarefas 132–135 recebem a pilha `0x20820011`.
+- **RAM no momento da falha (`HL_MISS_DUMP=1`, `rec/sdr_odin209_v3m/ram_miss.bin`):**
+  - O heap do jogo tem as listas livres por tamanho em `0x618250` (pares next/prev; vazia aponta para si mesma).
+  - A lista em **`0x618a50` contém `80852021 f9990000` em vez de `00618a50 00618a50`**. O mesmo `0x852021` está no `a2`
+    da falha e em `0xb6fcc0`.
+  - As 4 tarefas (`0xbd8de0`, `0xbd9b70`…, função em +0xc e tamanho em +0x18) têm `0x20820011` como pilha em +0x1c,
+    que é o que o alocador `0x117c70` devolveu.
+- **Próximo passo, em andamento:** quem escreve em `0x618a50`. Build de laboratório com vigia de escrita:
+  - patch `0061` (o `ps2TraceGuestWrite`, que o runtime já chama em toda escrita do jogo, nos `memcpy`/`memset` e nas
+    cópias do IOP, ganha um corpo atrás de `-DHL_WATCH_BUILD`);
+  - `host/hl_watch.cpp`, ativado com `HL_WATCH=618a50`;
+  - `HL_WATCH_BUILD=1 recomp/android/build.sh`, em `build/android_watch`.
+
+  A build normal não muda.
+
+**Item 9, Ougi com um botão (sem código novo):**
+
+- Pela gravação `rec/n3_odin_v3_c`, o próprio jogo mostra o Ougi: "Press!" com a barra entre 1P e COM, a coluna de
+  botões de cada lado com a contagem, e no fim **"OK" para o 1P e "ERROR" para a COM**. O "ERROR" anotado em 11-03 é a
+  COM perdendo, não o botão único falhando. A tela de estado dizia "responde sozinho em segundo plano". Hoje só há
+  resposta quando o botão especial é tocado (`g_padSpecialDown`), e o jogo mostra o pedido.
+- **Multiplicador (`mash_percent`, Cube, `rec/sp_cube_x1` e `sp_cube_x2`):** a mesma rota, com o ○ a cada 12 vsyncs,
+  dá 88 respostas a 1x e 176 a 2x (cada toque vale duas). O Ougi termina nos dois.
+- **Não visto:** o Ougi pela sequência longa feita à mão (△△ e ○ com a opção ligada) e a disputa de dois Ougis ao mesmo
+  tempo (`+0xB00`).
+
+
 
 ### 2026-11-04 15:00, rodada 3 do Nominum (`b2ff28b`), itens 1.2–1.7: a VU1 do Nominum dá 50 fps na campanha do RP5 em sd480p
 

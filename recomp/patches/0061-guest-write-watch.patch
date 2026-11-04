@@ -1,0 +1,44 @@
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 2f4b095..8e6a786 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -238,6 +238,13 @@ inline uint8_t ps2PathWatchExtractByteFromWrite(uint32_t writeAddr, uint32_t wat
+     return static_cast<uint8_t>((valueHi >> ((byteIndex - 8u) * 8u)) & 0xFFu);
+ }
+ 
++#if defined(HL_WATCH_BUILD)
++namespace hl_watch
++{
++    extern uint32_t g_addr; // 0xFFFFFFF0 when HL_WATCH is not set
++    void hit(uint32_t addr, uint32_t size, uint64_t lo, uint64_t hi, const char *op, uint32_t pc, uint32_t ra);
++}
++#endif
+ inline void ps2TraceGuestWrite(uint8_t *rdram,
+                                uint32_t guestAddr,
+                                uint32_t size,
+@@ -253,6 +260,13 @@ inline void ps2TraceGuestWrite(uint8_t *rdram,
+     (void)valueHi;
+     (void)op;
+     (void)ctx;
++#if defined(HL_WATCH_BUILD)
++    // Hidden Leaf (lab builds only, -DHL_WATCH_BUILD): HL_WATCH=<hex address> logs every guest write that touches the 8 bytes
++    // there, with the writer's pc and ra (the first 400)
++    if (guestAddr < hl_watch::g_addr + 8u && guestAddr + size > hl_watch::g_addr)
++        hl_watch::hit(guestAddr, size, valueLo, valueHi, op, ctx != nullptr ? ctx->pc : 0u,
++                      ctx != nullptr ? static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31])) : 0u);
++#endif
+     // TODO we dont need this anymore so on next release it will be deleted
+ }
+ 
+@@ -267,6 +281,11 @@ inline void ps2TraceGuestRangeWrite(uint8_t *rdram,
+     (void)size;
+     (void)op;
+     (void)ctx;
++#if defined(HL_WATCH_BUILD)
++    if (guestAddr < hl_watch::g_addr + 8u && guestAddr + size > hl_watch::g_addr)
++        hl_watch::hit(guestAddr, size, 0u, 0u, op, ctx != nullptr ? ctx->pc : 0u,
++                      ctx != nullptr ? static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31])) : 0u);
++#endif
+     // TODO we dont need this anymore so on next release it will be deleted
+ }
+ 

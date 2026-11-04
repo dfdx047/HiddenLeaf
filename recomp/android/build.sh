@@ -16,6 +16,8 @@ mod=""
 DR=${DR:-$HOME/AndroidStudioProjects/DragonRage}
 NDK=${NDK:-$HOME/Android/Sdk/ndk/29.0.14206865}
 out="$B/android"
+# HL_WATCH_BUILD=1: the lab build with the write watch (host/hl_watch.cpp), in its own folder
+watch=OFF; [ "${HL_WATCH_BUILD:-0}" = 1 ] && { watch=ON; out="$B/android_watch"; }
 ps2r="$B/PS2Recomp"
 lib=libun5.so
 pack=()
@@ -46,7 +48,7 @@ if [ ! -e "$nominum/core/vif1.cpp" ]; then
 fi
 [ -d "$nominum/build/vu1rec" ] || echo "note: no $nominum/build/vu1rec: Nominum's VU1 without recompiled blocks (docs/registro.md, 2026-11-04 14:20)" >&2
 
-cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHL_NOMINUM_DIR="$nominum" \
+cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHL_NOMINUM_DIR="$nominum" -DHL_WATCH_BUILD=$watch \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
     -DANDROID_STL=c++_static -DPS2R="$ps2r" "${pack[@]}" -DSDL3="$SDL3" -DFFMPEG="$FFMPEG" -DARMSX2="$DR/port/build/bt4/ARMSX2"
 cmake --build "$out" --target un5 -j"${JOBS:-$(nproc)}"
