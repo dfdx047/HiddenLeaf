@@ -30,6 +30,10 @@
 #include <thread>
 
 int ps2x_runtime_main(int argc, char *argv[]); // the runtime's main() (src/main.cpp, renamed by the build)
+namespace hl_nominum_vu1
+{
+    void setup(); // NOMINUM_VU1=1: Nominum's VIF1 and VU1 (hl_nominum_vu1.cpp)
+}
 void hl_spu2_install();                        // the sound (recomp/android/spu2/hl_spu2.cpp)
 void hl_spu2_pause(bool paused);
 
@@ -382,6 +386,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     if (std::getenv("HL_VIF_DUMP"))
         mkdir(hl_game::g_vifDumpDir.c_str(), 0775);
     loadSettings(root + "/un5_settings.txt");
+    hl_nominum_vu1::setup();
     setenv("HL_METER", "1", 0);
     if (iso.empty())
     {

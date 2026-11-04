@@ -69,16 +69,40 @@ target_compile_options(ps2_runtime PRIVATE -O3)
 set_source_files_properties(${L}/vu/ps2_vu_fast.cpp PROPERTIES COMPILE_FLAGS "-mllvm -tail-dup-pred-size=4096 -mllvm -tail-dup-succ-size=4096")
 target_link_libraries(ps2_runtime PUBLIC ffmpeg ps2_iop)
 
+# NOMINUM_VU1=1 (host/hl_nominum_vu1.cpp): Nominum Render's VIF1 and VU1, from an export of its repository (git archive of the
+# commit, recomp/android/build.sh does it) and the recompiled VU1 blocks nominum-vurec made from the VIF dumps (game code: build/)
+set(HL_NOMINUM_DIR "" CACHE PATH "Nominum Render's source (an export of one commit)")
+if(NOT HL_NOMINUM_DIR OR NOT EXISTS "${HL_NOMINUM_DIR}/core/vif1.cpp")
+    message(FATAL_ERROR "HL_NOMINUM_DIR: no Nominum Render source at '${HL_NOMINUM_DIR}'")
+endif()
+add_library(nominum_vu1 STATIC "${HL_NOMINUM_DIR}/core/vif1.cpp" "${HL_NOMINUM_DIR}/core/vu1/vu1_core.cpp"
+    "${HL_NOMINUM_DIR}/core/vu1/vu1_upper.cpp" "${HL_NOMINUM_DIR}/core/vu1/vu1_lower.cpp" "${HL_NOMINUM_DIR}/core/vu1/vu_fast.cpp")
+file(GLOB HL_NOMINUM_REC "${HL_NOMINUM_DIR}/build/vu1rec/*.cpp")
+if(HL_NOMINUM_REC)
+    target_sources(nominum_vu1 PRIVATE ${HL_NOMINUM_REC})
+    list(LENGTH HL_NOMINUM_REC _n)
+    message(STATUS "Nominum VU1: ${_n} files of recompiled blocks")
+else()
+    target_sources(nominum_vu1 PRIVATE "${HL_NOMINUM_DIR}/core/vu1/rec_none.cpp")
+    message(STATUS "Nominum VU1: no recompiled blocks (no ${HL_NOMINUM_DIR}/build/vu1rec)")
+endif()
+target_include_directories(nominum_vu1 PUBLIC "${HL_NOMINUM_DIR}")
+target_compile_options(nominum_vu1 PRIVATE -O2 -Wno-unused-parameter -Wno-unused-variable -Wno-unused-label
+    -Wno-unused-but-set-variable -Wno-deprecated-enum-enum-conversion)
+set_source_files_properties("${HL_NOMINUM_DIR}/core/vu1/vu_fast.cpp" PROPERTIES COMPILE_FLAGS "-mllvm -tail-dup-pred-size=4096 -mllvm -tail-dup-succ-size=4096")
+
 # The generated game code: one translation unit per 32 functions, or the build takes hours.
 file(GLOB RUNNER_SRC CONFIGURE_DEPENDS "${RT}/src/runner/*.cpp")
 list(REMOVE_ITEM RUNNER_SRC "${RT}/src/runner/main.cpp")
-add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp")
+add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp"
+    "${HOST}/hl_nominum_vu1.cpp")
 set_target_properties(un5 PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
 # HL_PACK_ID=<mod>: a mod's code pack (recomp/android/build.sh --mod <mod>), libun5_<mod>.so, which runs the mod's program
 if(HL_PACK_ID)
     set_source_files_properties("${HOST}/un5_main.cpp" PROPERTIES COMPILE_DEFINITIONS "HL_PACK_ID=\"${HL_PACK_ID}\"")
 endif()
-set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" "${HOST}/hl_nominum_vu1.cpp"
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 set_source_files_properties("${RT}/src/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=ps2x_runtime_main")
 # the function tables are long and plain: optimizing them only costs time
 file(GLOB UN5_TABLES CONFIGURE_DEPENDS "${RT}/src/runner/register_functions.cpp" "${RT}/src/runner/*overlays*.cpp" "${RT}/src/runner/*_register.cpp")
@@ -86,5 +110,5 @@ set_source_files_properties(${UN5_TABLES} PROPERTIES COMPILE_OPTIONS "-O0" SKIP_
 set(UN5_RUNNER_OPT "-O2" CACHE STRING "Optimisation of the generated game code")
 target_compile_options(un5 PRIVATE ${UN5_RUNNER_OPT})
 target_include_directories(un5 PRIVATE "${RT}/include" "${L}" "${L}/Kernel" "${SDL3}/include")
-target_link_libraries(un5 PRIVATE ps2_runtime hl_spu2 "${SDL3}/lib/libSDL3.so" android log z m dl)
+target_link_libraries(un5 PRIVATE ps2_runtime hl_spu2 nominum_vu1 "${SDL3}/lib/libSDL3.so" android log z m dl)
 target_link_options(un5 PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,-Bsymbolic-functions -flto=thin -static-libstdc++)

@@ -40,6 +40,42 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-04 14:20, modo contínuo, item 1.1: `NOMINUM_VU1=1`, o VIF1 e a VU1 do Nominum `b2ff28b` no lugar dos do runtime
+
+**O pedido das 13:47 (modo contínuo, 16 itens em três frentes):** a rodada 3 do Nominum (itens 1–7), a Frente A (8–12) e
+o EE (13–16), em ordem, sem parar para perguntar, com relatório às 13:00 e às 19:00. O de 13:00 já tinha passado quando
+o pedido chegou; o primeiro será o de 19:00.
+
+- **Decisão (o mais seguro, sem mudar o Nominum):** o `docs/integracao.md` do Nominum manda o VIF1 para o
+  `nominum_submit_vif1` dentro da `libbt4gsx.so` por um tipo novo de pacote no anel, "a definir junto". Esse tipo não
+  existe nos dois lados, e o cabeçalho do anel tem de ser igual nos dois. Por isso o Hidden Leaf compila o **mesmo código
+  do Nominum** (`core/vif1.cpp`, a VU1 em `core/vu1/` e o catálogo de blocos recompilados do `nominum-vurec`) e o roda
+  na `VuWorker`, onde rodava o `processVIF1Data` do runtime. Os pacotes GIF que ele solta (PATH1 e PATH2) vão ao anel
+  como antes, e a `libbt4gsx.so` não muda. Quando o tipo do anel existir, é trocar o gancho.
+- **Código:**
+  - `recomp/patches/0059-nominum-vu1-hook.patch`: `runtime/hl_nominum_vu1.h` (um ponteiro de função) e o desvio no
+    começo do `processVIF1Data`, depois do gancho do `HL_VIF_DUMP`. Desligado, custa um teste de ponteiro. A série
+    inteira (0001–0059) aplica limpa sobre o `e563698`.
+  - `recomp/android/host/hl_nominum_vu1.cpp`: o `Vif1` do Nominum. Antes de cada transferência entram a micro memória
+    (só se mudou), os dados, os 23 registradores do VIF1, a dívida de DIRECT/IMAGE e a máscara do PATH3. Depois da
+    transferência, tudo volta. O custo é de ~32 KB de cópia por transferência (~0,5 transferência por vsync).
+  - `recomp/android/CMakeLists.txt` e `build.sh`: a biblioteca `nominum_vu1` vem de `build/nominum-<commit>`, um
+    `git archive` do repositório do Nominum, com `NOMINUM_COMMIT=b2ff28b` por padrão. O catálogo vem de
+    `build/nominum-<commit>/build/vu1rec`: o `nominum-vurec` gerou-o sobre `~/Downloads/vifdumps`, com 53 imagens de
+    código, 1196 blocos e 296 diferentes. É código do jogo e fica fora do git. Sem ele, a VU1 do Nominum roda
+    interpretada.
+  - No PC, `nominum-vifreplay luta_inicio` deu "igual bit a bit" com 2,475 ms de VU1 por vsync recompilado, contra
+    4,133 do caminho rápido.
+- **Limites:** os registradores da VU1 (vf/vi/acc) não são espelhados entre as duas VU1. Só importam se o EE ler um
+  registrador da VU1 (pelo que se vê, o UN5 não faz isso). O Nominum também não
+  reproduz o pipeline de XGKICK pela metade entre duas transferências. Os dois ficam anotados aqui.
+- **APK:** `libun5.so` com o gancho e a `libbt4gsx.so` do Nominum `b2ff28b` (`build/lab/gsx_b2ff28b/`, sha1
+  `0451129d…`; a do HL de antes em `build/lab/libbt4gsx_hl_bb0ee18.so`). Ela foi instalada nos três aparelhos.
+- **Primeiro teste (Odin 3, `n3_odin_v3_cb`, GS do ARMSX2 com `NOMINUM_VU1=1`):** o log mostra `[nvu1] Nominum's VIF1
+  and VU1 (core/vif1, recompiled blocks where the catalog has them)`, e até v12800 a contagem sobe sem travar (9000
+  transferências, 5,4 milhões de kicks, 12,3 s de VU1). A luta ficou a **50 fps**, com VU1 4,5 ms e idle 13,5 ms no
+  `HL_PERF`. Faltam a imagem (gravação a conferir) e a matriz completa (itens 1.2–1.4, em andamento nos três aparelhos).
+
 ### 2026-11-04 08:25, `HL_VIF_DUMP`: o VIF1 e o GIF das 13 cenas para a Fase 3 do Nominum (prontos em `~/Downloads/vifdumps/`)
 
 **O pedido colado às 07:45 (três partes: o urgente dos filmes e do Ougi, a Fase 2E e a Fase 3)** é quase todo código do Nominum: o upload em anel, o autoteste de GPU, o `nominum_submit_vif1` e o recompilador da VU1. Esta sessão só lê o repositório do Nominum. O próprio pedido trata a sessão do Hidden Leaf na terceira pessoa ("gravados pela sessão do Hidden Leaf", "leia o registro do Hidden Leaf"). Na dúvida, fiz o mais seguro, como o pedido manda, e anoto aqui:

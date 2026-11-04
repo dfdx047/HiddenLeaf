@@ -34,7 +34,19 @@ for need in "$SDL3/lib/libSDL3.so" "$FFMPEG/lib/libavcodec.a" "$DR/android/app/s
     [ -e "$need" ] || { echo "missing $need: build Dragon Rage's Android parts first (port/tools/android.py, port/bt4/build_bt4.py --armsx2)" >&2; exit 1; }
 done
 
-cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+# Nominum Render's VIF1 and VU1 (NOMINUM_VU1=1, host/hl_nominum_vu1.cpp): an export of one commit of its repository (read
+# only; this tree never writes there), and its recompiled VU1 blocks in build/nominum-<commit>/build/vu1rec (made on the PC by
+# nominum-vurec from ~/Downloads/vifdumps; game code, so build/ only). Without them, its VU1 runs the fast path only.
+NOMINUM_REPO="${NOMINUM_REPO:-$HOME/AndroidStudioProjects/Nominum-Render}"
+NOMINUM_COMMIT="${NOMINUM_COMMIT:-b2ff28b}"
+nominum="$B/nominum-$NOMINUM_COMMIT"
+if [ ! -e "$nominum/core/vif1.cpp" ]; then
+    mkdir -p "$nominum"
+    git -C "$NOMINUM_REPO" archive "$NOMINUM_COMMIT" | tar -x -C "$nominum"
+fi
+[ -d "$nominum/build/vu1rec" ] || echo "note: no $nominum/build/vu1rec: Nominum's VU1 without recompiled blocks (docs/registro.md, 2026-11-04 14:20)" >&2
+
+cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHL_NOMINUM_DIR="$nominum" \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
     -DANDROID_STL=c++_static -DPS2R="$ps2r" "${pack[@]}" -DSDL3="$SDL3" -DFFMPEG="$FFMPEG" -DARMSX2="$DR/port/build/bt4/ARMSX2"
 cmake --build "$out" --target un5 -j"${JOBS:-$(nproc)}"

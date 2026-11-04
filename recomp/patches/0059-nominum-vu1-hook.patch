@@ -1,0 +1,89 @@
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index f690f96..e0fe2ef 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -4,6 +4,7 @@
+ #endif
+ #include "runtime/ps2_memory.h"
+ #include "runtime/hl_vif_dump.h"
++#include "runtime/hl_nominum_vu1.h"
+ #include <chrono>
+ #include <cstdlib>
+ #include <cstring>
+@@ -302,6 +303,8 @@ void PS2Memory::processVIF1Data(uint32_t srcPhys, uint32_t sizeBytes)
+     processVIF1Data(m_rdram + srcPhys, sizeBytes);
+ }
+ 
++hl_nvu1::TransferFn hl_nvu1::g_transfer = nullptr;
++
+ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ {
+ #if defined(PS2X_HEADLESS_HOST)
+@@ -322,6 +325,32 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+     if (vifDump.on)
+         hl_vifdump::vif1Begin(data, sizeBytes);
+ 
++    // Hidden Leaf: NOMINUM_VU1=1, Nominum's VIF1 and VU1 instead of the code below (runtime/hl_nominum_vu1.h)
++    if (hl_nvu1::g_transfer != nullptr)
++    {
++        static_assert(sizeof(VIFRegisters) == 23u * 4u, "Nominum's VIF1 takes the 23 words");
++        const hl_nvu1::Shared shared{m_vu1Code, m_vu1Data, reinterpret_cast<uint32_t *>(&vif1_regs), &m_vif1PendingDirectQwc,
++                                     &m_vif1PendingPath2ImageQwc, &m_vif1PendingPath2DirectHl, &m_path3Masked};
++        const bool codeChanged = hl_nvu1::g_transfer(
++            shared, data, sizeBytes,
++            [](void *ctx, int path, const uint8_t *packet, uint32_t size, bool directHl)
++            {
++                static_cast<PS2Memory *>(ctx)->submitGifPacket(path == 1 ? GifPathId::Path1 : GifPathId::Path2, packet, size, true, directHl);
++            },
++            [](void *ctx, bool masked)
++            {
++                PS2Memory *const memory = static_cast<PS2Memory *>(ctx);
++                const bool wasMasked = memory->m_path3Masked;
++                memory->m_path3Masked = masked;
++                if (wasMasked && !masked)
++                    memory->flushMaskedPath3Packets();
++            },
++            this);
++        if (codeChanged)
++            m_vu1CodeGeneration.fetch_add(1u, std::memory_order_relaxed);
++        return;
++    }
++
+     // DIRECT payload goes to PATH2. An IMAGE GIFtag can owe more data than its DIRECT carries: the GIF keeps waiting
+     // for it, and the next DIRECT payloads (after their VIFcodes) supply it
+     auto feedPath2 = [&](const uint8_t *payload, uint32_t qwCount, bool directHl)
+diff --git a/ps2xRuntime/include/runtime/hl_nominum_vu1.h b/ps2xRuntime/include/runtime/hl_nominum_vu1.h
+new file mode 100644
+index 0000000..41c408f
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/hl_nominum_vu1.h
+@@ -0,0 +1,29 @@
++// Hidden Leaf: NOMINUM_VU1=1, the VIF1 and the VU1 of Nominum Render (its core/vif1 with the recompiled VU1 blocks) in place
++// of this runtime's processVIF1Data and VU1Interpreter, on the same thread (the VuWorker on Android), in the same order.
++// The runtime keeps its own copies of what the game sees (vif1_regs, the VU1 memories, what a DIRECT left owed, the PATH3
++// mask): they go into Nominum's VIF1 before each transfer and come back after it. The host sets g_transfer (Android:
++// recomp/android/host/hl_nominum_vu1.cpp); null, the runtime's own VIF1 runs, as before.
++#pragma once
++
++#include <cstdint>
++
++namespace hl_nvu1
++{
++    struct Shared
++    {
++        uint8_t *code;              // 16 KB, the VU1's micro memory
++        uint8_t *data;              // 16 KB, its data memory
++        uint32_t *regs;             // the 23 words of VIFRegisters
++        uint32_t *pendingDirectQwc; // what a DIRECT left owed
++        uint32_t *pendingImageQwc;
++        bool *pendingImageDirectHl;
++        bool *path3Masked;
++    };
++    // path 1 (XGKICK) or 2 (DIRECT/DIRECTHL)
++    using GifFn = void (*)(void *ctx, int path, const uint8_t *data, uint32_t size, bool directHl);
++    using MaskFn = void (*)(void *ctx, bool masked); // MSKPATH3 changed
++    // returns true when the transfer changed the micro memory (MPG)
++    using TransferFn = bool (*)(const Shared &shared, const uint8_t *data, uint32_t size, GifFn gif, MaskFn mask, void *ctx);
++
++    extern TransferFn g_transfer;
++}
