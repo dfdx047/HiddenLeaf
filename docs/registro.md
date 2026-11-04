@@ -84,8 +84,16 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 - **Decisão (a mais segura):** a libsdr **continua opcional** (`HL_SDR=1 recomp/build.sh`). Não liguei por padrão, por
   causa da falha do RP5 em v16860 e dos filmes escuros. O próximo passo é a vigia de `free` (`HL_FREECHECK=1`) e a lista
   (`HL_LISTCHECK=2`) na rota `hl_env_hp_v3.txt` até v17500, no RP5.
-- **Ainda falta para o item 8:** o callback do `sdrdrv` (o pedido do item), os picos acima de 1,0 vistos em 11-03, e a
-  rota completa nos 3 aparelhos e no 20:9.
+- **Rodada com a vigia (18:47, RP5, `app_sdrwatch10.apk`, `libun5_sdrwatch10.so`, a mesma rota com `HL_FREECHECK=1`
+  e `HL_LISTCHECK=2`, `rec/w10_rp5_v3`):**
+  - até v17764: 0 `missing-target`, 0 `free` ruins, 0 listas quebradas;
+  - a CPU foi achada em `0xd7ba20` nas duas lutas;
+  - som em toda a rota (rms 0,52 e 0,44 nos filmes).
+
+  O salto de v16860 da `sdr9` **não se repetiu: é intermitente**. Ainda não tem causa.
+- **Ainda falta para o item 8:** repetir a `sdr9` algumas vezes no RP5 para pegar o salto de v16860, conferir os filmes
+  escuros, o callback do `sdrdrv` (o pedido do item) e os picos acima de 1,0 vistos em 11-03, e fazer a rota completa
+  nos 3 aparelhos e no 20:9.
 
 ### 2026-11-04 18:00, itens 8 e 11: quem libera os ponteiros ruins; câmera larga só volta em câmera viva
 
