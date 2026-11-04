@@ -526,6 +526,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     std::fprintf(stderr, "un5: PCSX2's GS, %s, %gx, window %dx%d\n", a.renderer, static_cast<double>(upscale), width, height);
     std::atomic<bool> ended{false};
     std::thread gs([&] {
+        // (ARMSX2's VMManager names this thread "CPU Thread" itself; Nominum's own backend runs the stream here without it,
+        // and HL_PERF counts the GS by that name)
+        pthread_setname_np(pthread_self(), "CPU Thread");
         const int code = gsxRun(&a);
         std::fprintf(stderr, "un5: the GS ended (%d)\n", code);
         ended = true;

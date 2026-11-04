@@ -34,9 +34,57 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | UN6 Alpha 1.1X | quebrado | | | | sem entrada em `KNOWN_MODS`/`CODE_RANGES`, sem pacote |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
+| Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `2328b2c` (APK de teste de 11-03 23:27, não instalado agora) | Odin 3 (16:9 e 20:9); RP5 cai; Cube não sobe | rotas v3 e de campanha gravadas, `HL_PERF`, brilho quadro a quadro no KO | RP5: `VK_ERROR_DEVICE_LOST` na entrada do Mode Select (3 de 3). Cube: sem `dualSrcBlend`, volta ao ARMSX2. Odin: tudo certo, mas Ougi a 22 fps e vitória a 38; swapchain refeita a cada vsync no 16:9. Mantém o tingido do KO. Detalhe em 11-04 00:10 |
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-04 00:10, teste do backend próprio do Nominum no aparelho (para a sessão do Nominum)
+
+**Para a sessão do Nominum:** o backend próprio (`2328b2c`) roda a rota inteira no Odin 3, mas cai no RP5 e não sobe no Cube. Três defeitos dele e uma confirmação, por ordem de gravidade. Nada no código do Nominum foi mudado.
+
+1. **RP5 (Adreno 650): `VK_ERROR_DEVICE_LOST` sempre no mesmo ponto.** `nominum-vk: vkQueueSubmit(m_queue, 1, &si, m_fence) failed (-4)`, depois `abort` (`fail` ← `NominumBackend::presentToWindow` +2792 ← `pcrtc` +1748 ← `vsync` ← `nominum_vsync` ← `host::runOwn`, thread "CPU Thread"). Aconteceu 3 vezes em 3: v3717 e v3742 (rota v3) e v2954 (rota de campanha). Nos três casos foi logo depois do NOW LOADING que vem depois de "New Game": a tela fica branca, e o Mode Select nunca aparece. Logos, filme e título rodam antes disso. O Odin (Adreno 830) passa desse ponto nas duas rotas.
+2. **Cube (Mali-G57): o aparelho não tem `dualSrcBlend`** (`nominum: no Vulkan device with dualSrcBlend`, `bt4gsx: nominum_create failed (backend 2)`; o `rgcube_vkjson.json` confirma: `dualSrcBlend 0`). Volta ao ARMSX2 como previsto e roda igual a ele. O backend próprio não serve para o Cube enquanto depender do dual-source.
+3. **A swapchain é refeita a cada vsync quando a tela gira.** Com o RP5 e o Odin em 16:9 (tela física em retrato, jogo em paisagem), o log tem `nominum-vk: swapchain 1920x1080, ...` uma vez por vsync (16 281 linhas numa rota v3). Pela leitura do código, a causa é esta: o `preTransform` é identidade (`vk/nominum_backend.cpp:1965`), então o Android responde `VK_SUBOPTIMAL_KHR` em todo present, e `:2095` refaz a swapchain a cada `SUBOPTIMAL`. No Odin em 20:9 (`wm size 2400x1080`, sem rotação) a swapchain é feita só 2 vezes. O custo é ~1 ms de GS por vsync na luta (3,9 → 2,9 ms no 16:9 contra o 20:9).
+4. **A frente do GS em CPU é lenta onde o nativo não liga.** No Odin, com o nativo ligado, a luta fica a 50 fps. No Ougi, que o GS desenha (nativo desligado de v6911 a v7944), cai a **21,5 fps** (GS 25,9 ms por vsync, no 20:9 22,5 fps e 24,8 ms). Na vitória e no resultado fica em **38 fps** (GS 10 ms, pior segundo 18–20). Nesses mesmos trechos o ARMSX2 dá 50,0 com GS 3–4,5 ms. Na campanha, vila e menu START a 49–50 fps, com pior segundo de 23–40, contra 50 no ARMSX2.
+5. **O congelamento do KO (o item 4 do pedido): confirmado no aparelho, o ARMSX2 com o nativo perde o tingido.** Medi o brilho médio do centro da tela, quadro a quadro, no vídeo:
+   - **ARMSX2 com o nativo**, nos quatro (RP5, Cube, Odin 16:9 e 20:9): o quadro congelado sai tingido (claro e azulado, Y ~167–174) só por ~0,2 s. Depois fica congelado com as cores normais (Y ~120) por ~0,7 s, até o "KO".
+   - **Backend próprio**, no Odin 16:9 e 20:9: o tingido dura o congelamento inteiro, ~1,1 s.
+   - O ponto em que o tingido some é a hora em que o nativo liga (`hl_native: scene on at vsync 7944`, 8 vsyncs depois do KO em v7936), em todos. É o mesmo erro que o Nominum achou no PC (`ko`, v68–v103).
+
+**Build:** o `libbt4gsx.so` do Nominum `2328b2c` saiu de `tools/build_android.sh` do Nominum, com `NOMINUM_BUILD=build/gsx-nominum` (1803 passos). Ele leva 9 `Bt4Gsx_*`, 12 `nominum_*` e 4 da libc++, e nenhum `vk*` indefinido; tem 34 671 024 bytes, igual ao registro de lá. A integração por submódulo (`docs/integracao.md`, passos 1–7) **não foi feita**: o teste usou só a biblioteca, copiada para `jniLibs` num APK de teste. Os dois lados da comparação usam o **mesmo binário**: o ARMSX2 é o padrão, e o backend próprio liga com `NOMINUM_BACKEND=nominum` no `hl_env.txt`. As duas rotas rodaram com `HL_GS_SCALE=1` (1x). Esse binário não tem o `HL_GS_DUMP` (o `armsx2_host.cpp` é o `hl_gsx.cpp` de `ccf6a4e`). Logo depois, o APK com o `libbt4gsx.so` do Hidden Leaf voltou aos três aparelhos, e o `wm size` do Odin foi resetado.
+
+**Código (Hidden Leaf, `un5_main.cpp`):** a thread que chama `Bt4Gsx_Run` agora se chama "CPU Thread" desde o começo. Com o ARMSX2 nada muda, porque o `VMManager` já lhe dá esse nome. Com o backend próprio ninguém dava, e o `HL_PERF` (que conta o GS pelas threads "GS" e "CPU Thread") mostrava 0. Com o backend próprio, a coluna GS é o tempo dessa thread só: fluxo, frente do GS e envio à GPU, num núcleo. Com o ARMSX2, é a soma das threads "GS" e "CPU Thread".
+
+**Rotas (`build/lab/recfull.sh`, envs `hl_env_nmn_{v3,camp}_{arm,nmn}.txt`, gravações em `build/lab/rec/nmn_*`):**
+
+| Aparelho | Backend | Rota v3 (até a luta 2 e a seleção) | Campanha (vila, troca de área, menu START, painel de pausa, sair) |
+|---|---|---|---|
+| RP5 | próprio | **cai** em v3717 e v3742 (`DEVICE_LOST`) | **cai** em v2954 (`DEVICE_LOST`) |
+| RP5 | ARMSX2 | até v16411, 0 `missing-target` | até v12167, painel e sair ok |
+| Cube | próprio → ARMSX2 (sem `dualSrcBlend`) | até v16172, 0 `missing-target` | até v12092, painel e sair ok |
+| Odin 16:9 | próprio | até v16051 (411 s; o ARMSX2 levou 215 s, porque o present FIFO segura o `HL_FAST_UNTIL`) | até v11938, painel e sair ok |
+| Odin 16:9 | ARMSX2 | até v16277 | até v11948, painel e sair ok |
+| Odin 20:9 | próprio | até v16422 | até v11981, painel e sair ok |
+| Odin 20:9 | ARMSX2 | até v16436 | até v12067, painel e sair ok |
+
+Nenhum `missing-target` nem trava fora do `DEVICE_LOST`. As cenas batem entre os dois backends nas folhas por vsync (`build/lab/atv.sh`): título, seleção, luta, Ougi, WINNER, transição branca, seleção 2, luta 2, o quadro preto com HUD do "Vermillion Mode" (igual nos dois, então não é do backend), NOW LOADING, vila, cortina, menu START. Nenhuma cena errada vista a olho; não comparei pixel a pixel.
+
+**Tempo de quadro (`HL_PERF`, média por segundo no trecho; fps / GS em ms por vsync; `build/lab/perfwin.py`):**
+
+| Trecho (vsyncs) | Odin 16:9 próprio | Odin 16:9 ARMSX2 | Odin 20:9 próprio | Odin 20:9 ARMSX2 | RP5 ARMSX2 | Cube ARMSX2 |
+|---|---|---|---|---|---|---|
+| luta 1, nativo (6450–6900) | 50,0 / 3,9 | 50,0 / 2,6 | 50,0 / 2,9 | 50,0 / 2,6 | 50,2 / 7,8 | 50,0 / 6,9 |
+| Ougi, pelo GS (7000–7900) | **21,5 / 25,9** | 50,0 / 4,3 | **22,5 / 24,8** | 50,0 / 4,5 | 50,0 / 5,2 | 50,0 / 7,6 |
+| vitória e resultado (8000–9000) | **37,9 / 10,2** | 50,0 / 3,1 | **37,7 / 10,1** | 50,0 / 3,2 | 50,0 / 5,7 | 50,0 / 7,2 |
+| luta 2 (11200–12100) | 50,0 / 5,2 | 50,0 / 4,0 | 50,0 / 4,3 | 50,0 / 4,0 | 50,0 / 10,4 | 50,0 / 10,4 |
+| campanha, vila (6300–8000) | 49,6 / 6,0 | 50,0 / 3,9 | 49,5 / 5,3 | 50,0 / 4,0 | 50,0 / 10,8 | 49,7 / 10,6 |
+| campanha, andar e trocar de área (8100–10500) | 46,8 / 8,2 | 49,1 / 4,1 | 46,7 / 7,3 | 49,1 / 4,4 | 49,1 / 11,4 | 48,2 / 12,1 |
+| campanha, menu START (10550–11800) | 49,1 / 7,6 | 50,0 / 5,1 | 49,0 / 6,7 | 50,0 / 5,0 | 50,0 / 13,2 | 43,1 / 14,1 |
+
+(O pior segundo de ~1 fps em "andar e trocar de área" é a carga da área, igual nos dois. No Cube, 43 fps no menu START é o limite da VU1 de sempre, item 2 dos próximos passos.)
+
+**Não feito:** o A35 e a Alpha 1.1X com o backend próprio. A rota completa de uma vez só (rodei a v3 e a campanha separadas, como nas entradas de 11-03). O 4:3 do painel de pausa conferido na imagem (o painel abre e volta, mas não olhei a imagem por trás dele).
 
 ### 2026-11-03 22:05, `HL_GS_DUMP`: dumps do GS por cena para o Nominum Render (prontos em `~/Downloads/gsdumps/`)
 
