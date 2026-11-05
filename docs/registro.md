@@ -11,21 +11,21 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 | Função | Estado | Último build verificado | Aparelhos | Como foi verificado | Observações |
 |---|---|---|---|---|---|
-| Boot e logos (imagem) | funciona | `2fee126` (libun5 de 11-03 03:31) | RP5, Cube | rota fixa, prints | |
-| Som dos logos e da abertura (filme) | funciona | `app_sdr19.apk` (lab, patch `0068`; libsdr padrão desde 11-05 02:55) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada, `[snd]`, `[snd-on]`/`[mpeg-pic]` | logo, `NARUTO10` e abertura com som; o salto da 3ª luta era o despacho (2026-11-05 02:40). Mudos só a escolha de idioma e os logos parados; fila do som segurada perto de 80 ms (`HL_SPU2_DRIFT`) |
+| Boot e logos (imagem) | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de filmes gravada (`f1_*_film`), `[mpeg-pic]` | 50 fps também no fim de cada filme (antes, 6 fps no Cube por ~12 s; patch `0069`) |
+| Som dos logos e da abertura (filme) | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | `f1_*_film`: `[snd]`, `[snd-on]`, `[mpeg-pic]` | começos de som e quadros nos mesmos vsyncs nos 4; fila de 77 ms (mín. 45); pico 0,98; `NARUTO10` (44,1 kHz) com o som 170 ms antes do arquivo, a conferir no PCSX2 |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
-| Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
+| Luta | parcial | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada (`f1_*_v3`), contact sheet, trechos pretos medidos | 50 fps; 3 lutas sem salto (`0068`); Ougi do GS com SCANMSK sai escuro e listrado (não visto nesta noite); quadros pretos com HUD de 1–5 s (Ougi "Linked" da CPU, cargas), na mesma quantidade de antes |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
-| Campanha (Master Mode) | parcial | `a6c40f5` | RP5, Cube, Odin 3 (20:9) | rota de campanha gravada (`*_camp*`) | anda, troca de área e menu START: RP5 50 fps, Odin 50, Cube 40–55 (VU1). Em 20:9, a cortina de transição não cobre a largura (~1 s por troca) |
+| Campanha (Master Mode) | parcial | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de campanha gravada (`f1_*_camp`), pausa e saída | Odin 50; Cube 49,6/50/42,2; RP5 43,7/46,4/36,7 (VU1). Abaixo de 50 fps o som seca (fila até 0,1 ms no RP5 e no Cube): o jogo produz menos som que o tempo real |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
 | Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: a cortina de transição não cobre a largura (~1 s por troca); menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
 | Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5, Odin 3, Cube | rota v3 gravada, log `[sp]`, 1x e 2x no Cube (11-04 15:25) | o jogo mostra o pedido e o toque responde; "ERROR" era da COM; 2x dobra as respostas; △△ à mão e disputa não vistos |
-| Painel de pausa | funciona | `9c6c786` | RP5 | prints (11-02) | não reconferido depois de 11-02 |
+| Painel de pausa | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de campanha (`PAUSE_AT`, `QUIT_AT`): 4:3, tela cheia, continuar, sair | "Sair do jogo" volta ao launcher nos 4 |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
-| 60/120 interpolados | não testado | | | | 120 só aparece em tela ≥ 100 Hz (`34467f3`); Odin 3 travado à noite |
+| 60/120 interpolados | parcial | `app_sdr19.apk` (lab) | Odin 3 | `[interp]` na 2ª luta (`n5_odin_c60`, `n5_odin_c120`) | 53–60 e 101–120 apresentações por segundo; qualidade da imagem não conferida |
 | Resolução 1x–4x | não testado | | | | |
 | Save manager (.ps2 in/out) | funciona | `1e8d294` | RP5 | teste de unidade `Ps2CardTest`, import/export à mão | |
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
@@ -40,6 +40,65 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 04:50, noite, item 6: fechamento, `good-20261105-1`
+
+**APK final:**
+- Refeita da árvore commitada (`6b420e6` no código; depois só o registro), em `build/lab/app_final2.apk`. Copiada para
+  `~/Downloads/HiddenLeaf-builds/HiddenLeaf-20261105-<commit da tag>.apk`.
+- As bibliotecas têm o mesmo md5 das da `app_a35s.apk` testada:
+
+  | biblioteca | md5 (início) | o quê |
+  |---|---|---|
+  | `libun5.so` | `e710273f153b` | patches `0001`–`0069`, libsdr padrão, fila do som em 80 ms |
+  | `libun5_un6_a35.so` | `b9b209886475` | pacote do A35 |
+  | `libbt4gsx.so` | `149baf699bbe` | ARMSX2 com o Nominum `b2ff28b` |
+
+- Launcher com o `ModSaves`. Instalada nos 3 aparelhos às 04:18–04:20.
+
+**Rota completa final** (`build/lab/q_f1_*.out`, `fsum.sh`):
+
+| rodada | fim | resultado |
+|---|---|---|
+| `f1_rp5_v3` | v18057 | 2ª luta 49,8, 3ª 50,0; fila mediana 94,7 ms, mín. 9,1 |
+| `f1_cube_v3` | v18065 | 49,9 / 50,0; fila 87,9, mín. 26,8 |
+| `f1_odin_v3` | v18040 | 50,0 / 50,0; fila 87,1, mín. 60,4 |
+| `f1_odin209_v3` (2400x1080) | v18005 | 50,0 / 50,0; fila 86,8, mín. 60,1 |
+| `f1_rp5_camp` | v11948 | 43,7 / 46,4 / 36,7; pausa em v10250; saída em v11912 |
+| `f1_cube_camp` | v12256 | 49,6 / 50,0 / 42,2; pausa em v10106; saída em v12256 |
+| `f1_odin_camp` | v12071 | 50 / 50 / 50; pausa em v10408; saída em v12071 |
+| `f1_odin209_camp` | v11881 | 50 / 50 / 50; pausa em v10302; saída em v11881 |
+| `f1_rp5_film`, `f1_cube_film`, `f1_odin_film`, `f1_odin209_film` | v7266–7471 | logos, abertura e os dois fins a 50 fps nos 4 |
+
+- **Em todas as rodadas:** nenhum `missing-target`, nenhum "GAME DIED" e pico do som de 0,98.
+- **Painel de pausa:** 4:3, tela cheia e continuar funcionaram. "Sair do jogo" fecha o processo do jogo e volta à
+  `MainActivity`.
+- **Filmes:** nos 4, o quadro 0 cai em v1446 e o 2400 em v6287; os começos de som em v1449, 1647, 1856–1882, 1904 e 6394.
+  A fila fica em 77 ms (mín. 45–59).
+- **Imagem (amostra de 25 em 25 s, RP5 e Odin 20:9):** seleção, lutas, WINNER "Naruto Uzumaki", resultado
+  ("Outstanding!", 726 Ryo), Mode Select. Os trechos pretos de 1–5 s (`scratchpad/blackc.sh`, centro < 20 de luma) são
+  tantos quanto nas rodadas de antes da noite (`n33`, `n37`, `n42`).
+- **A35 e Alpha 1.1X** com esta APK: entradas de 04:00, 04:10 e 04:12.
+
+**Som abaixo de 50 fps (achado, sem correção):**
+- Na campanha do RP5 (37–46 fps) e do Cube (48–49 fps em trechos, 41–44 no menu START), o jogo produz menos som que o
+  tempo real.
+- A correção de deriva só ajusta ±1%, então a fila seca: 49 de 247 s abaixo de 10 ms no RP5 (`n53`), e no Cube trechos de
+  0–15 ms (v4900–6200, v9800–9920, v10700–12100).
+- Volta a encher quando o jogo passa de 50.
+- Não é regressão: a rodada 3 (`n3_rp5_camp_c`, fila antiga de até 200 ms) também chegava a 0,0.
+- **Pedido:** esticar o som no tempo quando o jogo fica abaixo de 50, como o PCSX2 faz com o SoundTouch. Alargar o ±1%
+  muda o tom; não fiz, porque não dá para ouvir aqui. A outra saída é o desempenho da VU1 (passo 2 do `CLAUDE.md`).
+
+**Aparelhos ao fim:**
+- **RP5:** `un5_settings.txt` de volta ao `un5_settings.dev-0003.txt` (`aspect_milli=1333`).
+  `tools/device-profile.sh -s 192.168.1.89:5555 restore` rodou (`vendor.perfservice` e `perf-hal` de volta). Driver do
+  sistema.
+- **Odin 3:** `wm size` em 1080x1920 (o físico), e `fps_mode=50`. O `un5_mods.txt`, que eu tinha renomeado para
+  `un5_mods.dev.txt` para as rodadas, voltou: a Alpha 1.1X fica ligada como o desenvolvedor deixou.
+- **Cube:** sem `un5_mods.txt` (o `un5_mods.a35` e o `modlib/mods.txt` com `1|un6-a35` são de antes da noite: o launcher
+  mostra o A35 ligado, mas o motor roda a base até o mod ser religado na tela de mods).
+- **RP5 e Odin** ficaram com `modlib/un6-a35` (1 GB) e o save `BASLUS-55606NARUTO6`, copiados do Cube.
 
 ### 2026-11-05 04:12, noite, item 5: a Alpha 1.1X no RP5, no Odin e no 20:9
 
