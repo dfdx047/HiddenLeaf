@@ -12,7 +12,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Função | Estado | Último build verificado | Aparelhos | Como foi verificado | Observações |
 |---|---|---|---|---|---|
 | Boot e logos (imagem) | funciona | `2fee126` (libun5 de 11-03 03:31) | RP5, Cube | rota fixa, prints | |
-| Som dos logos e da abertura (filme) | em andamento | `app_sdr9.apk` (lab) | Cube, RP5 | `HL_MPEG_LOG`, `HL_RPC_LOG`, `[snd]` | com `HL_SDR=1`, som do logo ao fim; o travamento de ~v10000 era o `POKE` da rota (2026-11-04 18:40). Falta: `missing-target` no RP5 em v16860 (3ª luta), filmes escuros na gravação, Odin e 20:9 |
+| Som dos logos e da abertura (filme) | funciona | `app_sdr19.apk` (lab, patch `0068`; libsdr padrão desde 11-05 02:55) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada, `[snd]`, `[snd-on]`/`[mpeg-pic]` | logo, `NARUTO10` e abertura com som; o salto da 3ª luta era o despacho (2026-11-05 02:40). Mudos só a escolha de idioma e os logos parados; fila do som segurada perto de 80 ms (`HL_SPU2_DRIFT`) |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | build de 11-03 12:00 | RP5, Cube, Odin 3 | rota v3 gravada, `ana.py` | 50 fps; piscadas: só falsos positivos (golpes); Ougi do GS com SCANMSK sai escuro e listrado; quadro preto com HUD no Cube depois do Ougi "Linked" da CPU |
 | Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
@@ -40,6 +40,29 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 02:55, noite, itens 2a e 2e: o salto da 3ª luta corrigido; a libsdr vira o padrão
+
+**Item 2a: corrigido.** Rodadas com a `app_sdr19.apk` (patch `0068`, libsdr, rota `hl_env_hp_v3` até v17300; as do RP5
+e do Cube com `HL_MISS_DUMP`):
+
+| aparelho | rodadas | resultado |
+|---|---|---|
+| RP5 16:9 | `n32`–`n35_rp5_fix` | 4 de 4 até o fim (v17564–18303); antes, 4 falhas em 7 |
+| Cube | `n36`–`n38_cube_fix` | 3 de 3 (v17989–17990) |
+| Odin 16:9 | `n39_odin_fix`, `n42_odin_fix` | 2 de 2 (v17650, v17701) |
+| Odin 20:9 | `n40`, `n41_odin209_fix` | 2 de 2 (v17760) |
+
+- Nenhum `missing-target` e nenhum `[ee-dump] thread`.
+- O desempenho não mudou. Nos 5 trechos, RP5 (`n33` contra `n20`) e Cube (`n37` contra `n10`) ficam a menos de 0,3 ms de
+  EE e VU1.
+- Som em todas: pico máximo de 0,98, nenhuma janela acima de 1, rms médio de 0,206 a 0,258.
+
+**Item 2e: feito.** O `tools/un5.py` passa a recompilar a libsdr por padrão (`sceSdRemoteInit`, `sceSdRemote`,
+`sceSdTransToIOP`). `HL_SDR=0` deixa os três como stubs, como antes.
+- É o mesmo código gerado do `build/lab/runner_sdr`, que já está no `src/runner` do runtime.
+- Foram mais de 2 passagens seguidas nos 3 aparelhos e no 20:9 (tabela acima).
+- **Falta:** a execução no PC com a libsdr não foi feita.
 
 ### 2026-11-05 02:40, noite, itens 2a, 3c e 4: a causa do salto da 3ª luta (checkpoint na mesma função mais fundo); fila do som
 

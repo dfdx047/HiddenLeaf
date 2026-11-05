@@ -665,9 +665,11 @@ STUB_AT = {
 # (sceSdTransToIOP, then BlockTrans to the SPU2) goes nowhere and the logos and films play silent. Recompiled, they
 # bind Sony's sdrdrv (sid 0x80000701, run for real on the IOP) and the films have sound, but the EE later jumps into
 # data (missing-target 0xbd9c90, v10300-11700) on the RP5 and the Odin: docs/registro.md, 2026-11-03 11:30.)
+# (Since 2026-11-05 libsdr is recompiled by default. The jump into data was the dispatch taking a checkpoint below a call to
+# the same target for a return, patch 0068, not libsdr: docs/registro.md, 2026-11-05 02:40.)
 UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin")
-# HL_SDR=1 at build time recompiles the three libsdr calls too (the lab build for the films' sound)
-if os.environ.get("HL_SDR"):
+# HL_SDR=0 at build time leaves the three libsdr calls as stubs (no sound in the logos and films)
+if os.environ.get("HL_SDR", "1") != "0":
     UNSTUB = re.compile(UNSTUB.pattern + r"|sceSdRemoteInit|sceSdRemote|sceSdTransToIOP")
 
 
