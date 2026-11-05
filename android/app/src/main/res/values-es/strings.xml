@@ -421,7 +421,7 @@
     <string name="mod_delete_text">Sus archivos se borran de la app. El juego base y la ISO del mod se quedan como están.</string>
     <string name="mod_kind_code">Cambia el código</string>
     <string name="mod_kind_data">Solo datos</string>
-    <string name="mod_no_pack">Esta versión del motor aún no tiene el paquete de código de este mod: el juego arranca como la base hasta que lo tenga.</string>
+    <string name="mod_no_pack">Sin paquete de código propio: funciona con el código del juego base y los datos de este mod. Lo que el mod cambia en el código no se aplica.</string>
     <string name="pad_attack">Ataque</string>
     <string name="pad_jump">Saltar</string>
     <string name="pad_chakra">Chakra</string>

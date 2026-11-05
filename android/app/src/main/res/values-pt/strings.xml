@@ -421,7 +421,7 @@
     <string name="mod_delete_text">Os arquivos dele são apagados do app. O jogo base e a ISO do mod ficam como estão.</string>
     <string name="mod_kind_code">Muda o código</string>
     <string name="mod_kind_data">Só dados</string>
-    <string name="mod_no_pack">Esta versão do motor ainda não tem o pacote de código deste mod: o jogo abre como a base até ter.</string>
+    <string name="mod_no_pack">Sem pacote de código próprio: roda com o código do jogo base e os dados deste mod. O que o mod muda no código não vale.</string>
     <string name="pad_attack">Ataque</string>
     <string name="pad_jump">Pular</string>
     <string name="pad_chakra">Chakra</string>

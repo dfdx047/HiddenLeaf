@@ -524,6 +524,7 @@ struct Bt4GsxArgs
 };
 
 __attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
+__attribute__((visibility("default"))) void Bt4Gsx_LiveFight(bool live) { hl_native::liveFight(live); }
 __attribute__((visibility("default"))) int Bt4Gsx_PresentRate() { return hl_native::presentRate(); }
 
 __attribute__((visibility("default"))) void Bt4Gsx_SetVideo(const void* video)

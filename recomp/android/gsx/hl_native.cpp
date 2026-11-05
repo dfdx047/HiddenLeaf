@@ -174,6 +174,17 @@ namespace
 	std::atomic<bool> s_presentsHere{false};
 	std::atomic<int> s_presentRate{0};
 	std::atomic<bool> s_sceneOnShared{false};
+	// A fight the detector does not know: after some Ougi (a clash the CPU wins; the Alpha 1.1X's second Linked Ougi) the game
+	// stays with the Ougi's targets (the 0x1C0 and 0x1E0 blocks swapped, or no shadows at all) and its last copy goes to page
+	// 0 instead of 0x70, so what the display reads keeps only the HUD: the GS draws that black, and the detector, which waits
+	// for the Z copy in 0x1E0, never takes the fight back (docs/registro.md, 2026-11-05 14:00). The host says each vsync if
+	// the fighters read their input with no Ougi on the screen; that for kLiveToHold vsyncs with the scene off (an Ougi's run
+	// in and a missed Ougi last up to ~200) and the scene is taken as a fight, and held while it lasts, the swapped blocks
+	// followed. An Ougi on the screen lets it go, and the GS draws the Ougi as before.
+	std::atomic<bool> s_liveShared{false};
+	uint32_t s_offLive = 0u;
+	bool s_held = false;
+	constexpr uint32_t kLiveToHold = 300u;
 	// widescreen: the picture's shape while drawing here (0 stretched to the screen), and the HUD's own squeeze: the 3D is wider
 	// because the game's camera sees more, but the HUD is flat and would be stretched with the rest.
 	float s_shape = 4.0f / 3.0f, s_hudScale = 1.0f;
@@ -196,11 +207,11 @@ namespace
 	// HL_FRAME_LOG=1: every 50 vsyncs, the draw targets (FRAME) the game's GIF tags went to, with the scene on or off (for a
 	// fight the detector stops seeing: the black with the HUD after an Ougi clash, docs/registro.md 2026-11-05)
 	const bool s_frameLog = std::getenv("HL_FRAME_LOG") != nullptr;
-	uint64_t s_frameSeen[12] = {};
-	uint32_t s_frameTags[12] = {};
+	uint64_t s_frameSeen[16] = {};
+	uint32_t s_frameTags[16] = {};
 	inline void noteFrameTag(uint64_t frame)
 	{
-		for (uint32_t i = 0; i < 12u; ++i)
+		for (uint32_t i = 0; i < 16u; ++i)
 			if (s_frameTags[i] == 0u || s_frameSeen[i] == frame)
 			{
 				s_frameSeen[i] = frame;
@@ -1067,7 +1078,7 @@ namespace
 			std::fprintf(stderr, "hl_native: v%llu game SCANMSK %llu (scene %d)\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(value & 3u), s_sceneOn ? 1 : 0);
 		s_regs[r & 255u] = value;
 		s_seen[r & 255u] = true;
-		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame && (s_swapOn || (value & 0x20u)))
+		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame && (s_swapOn || s_held || (value & 0x20u)))
 		{
 			s_fightSeen = true;
 			const uint32_t swap = (value & 0x20u) ? 0u : 0x20u;
@@ -1078,6 +1089,13 @@ namespace
 		}
 		if (r == R_TRXDIR && (value & 3u) == 0u)
 			beginTransfer();
+		// in the frame log, a copy inside the GS's memory as d<DBP><SBP> and a read back as e<SBP> (hex, 4 digits each)
+		if (s_frameLog && r == R_TRXDIR && (value & 3u) != 0u)
+		{
+			const uint64_t bb = s_regs[R_BITBLTBUF];
+			noteFrameTag((value & 3u) == 2u ? (0xD0000000ull << 32) | (((bb >> 32) & 0x3FFFu) << 16) | (bb & 0x3FFFu)
+			                                : (0xE0000000ull << 32) | (bb & 0x3FFFu));
+		}
 		s_gsInSync = false;
 	}
 
@@ -2363,6 +2381,11 @@ int presentRate()
 	return s_presentRate.load(std::memory_order_relaxed);
 }
 
+void liveFight(bool live)
+{
+	s_liveShared.store(live, std::memory_order_relaxed);
+}
+
 bool sceneOn()
 {
 	return s_sceneOnShared.load(std::memory_order_relaxed);
@@ -2450,6 +2473,23 @@ void vsync()
 		std::fflush(s_cap);
 	}
 	++s_vsync;
+	{
+		const bool live = s_liveShared.load(std::memory_order_relaxed);
+		s_offLive = (!s_sceneOn && live) ? s_offLive + 1u : 0u;
+		if (!s_held && s_offLive >= kLiveToHold)
+		{
+			s_held = true;
+			std::fprintf(stderr, "hl_native: v%llu (%lld ms) a fight with the scene off for %u vsyncs: taken as a fight\n", static_cast<unsigned long long>(s_vsync), wallMs(), s_offLive);
+		}
+		else if (s_held && !live)
+		{
+			s_held = false;
+			s_swap = 0u;
+			std::fprintf(stderr, "hl_native: v%llu (%lld ms) the held fight is over (an Ougi or the end)\n", static_cast<unsigned long long>(s_vsync), wallMs());
+		}
+		if (s_held)
+			s_fightSeen = true;
+	}
 	if (s_fightSeen)
 	{
 		s_fightSeen = false;
@@ -2498,7 +2538,7 @@ void vsync()
 	{
 		char line[640];
 		int n = std::snprintf(line, sizeof(line), "hl_native: v%llu (%lld ms) scene %d, since fight %u, frames", static_cast<unsigned long long>(s_vsync), wallMs(), s_sceneOn ? 1 : 0, s_vsyncsSinceFight);
-		for (uint32_t i = 0; i < 12u && s_frameTags[i] != 0u && n < 600; ++i)
+		for (uint32_t i = 0; i < 16u && s_frameTags[i] != 0u && n < 600; ++i)
 			n += std::snprintf(line + n, sizeof(line) - n, " %llx:%u", static_cast<unsigned long long>(s_frameSeen[i]), s_frameTags[i]);
 		std::fprintf(stderr, "%s\n", line);
 		std::memset(s_frameTags, 0, sizeof(s_frameTags));

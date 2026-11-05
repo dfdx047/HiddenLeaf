@@ -553,6 +553,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     g_gsxSetVideo = reinterpret_cast<void (*)(const GsxVideo *)>(dlsym(gsx, "Bt4Gsx_SetVideo"));
     g_gsxPresentRate = reinterpret_cast<int (*)()>(dlsym(gsx, "Bt4Gsx_PresentRate"));
     hl_game::g_nativeOn = reinterpret_cast<bool (*)()>(dlsym(gsx, "Bt4Gsx_NativeOn"));
+    hl_game::g_liveFight = reinterpret_cast<void (*)(bool)>(dlsym(gsx, "Bt4Gsx_LiveFight"));
     hl_game::g_gsDump = reinterpret_cast<void (*)(const char *, int)>(dlsym(gsx, "Bt4Gsx_GsDump"));
     g_windowW = width;
     g_windowH = height;

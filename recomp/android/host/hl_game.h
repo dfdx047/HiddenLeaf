@@ -10,7 +10,8 @@ namespace hl_game
     extern std::atomic<float> g_cameraXScale;  // the 3D's horizontal scale for a wider screen, 1 = the game's 4:3
     extern std::atomic<uint32_t> g_vsync;      // the vsync now (for other threads' logs: the SPU2's HL_SND_ONSET)
 
-    extern bool (*g_nativeOn)();               // libbt4gsx: its native renderer is drawing (a fight or the campaign)
+    extern bool (*g_nativeOn)();
+    extern void (*g_liveFight)(bool live);       // libbt4gsx: the fighters read their input and no Ougi is on the screen               // libbt4gsx: its native renderer is drawing (a fight or the campaign)
     int divider();                             // vsyncs a game frame takes (the game's own: 2)
 
     int scene();                               // what the game shows: 0 unknown, 1 menu, 2 fight, 3 campaign

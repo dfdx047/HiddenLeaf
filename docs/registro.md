@@ -41,6 +41,55 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 14:35, dia (plano de lançamento): proteção do 3D preto, texto da Alpha, "Esticar", ruído no som do boot (achado)
+
+**3D preto depois de um Ougi (Alpha e choque): proteção instalada; o caso exato não se repetiu.**
+- O que o jogo faz no estado preso (`x1_cube_a11x`, `HL_FRAME_LOG`): a última passada, que na luta normal escreve na página
+  0x70 (FRAME `ff00000000080070`), sai com FRAME `ff00000000080000` (página 0, como no Ougi). A tela lê 0x70 o tempo todo
+  (`HL_PRIV_LOG`: `dispfb1 1070` sem mudar, `rec/v3_odin_clash` e `x2`), então fica só o HUD. O GS só reproduz isso, por isso
+  "mandar tudo pelo GS" não resolve: no estado preso o nativo já estava desligado e tudo já ia pelo GS. O jogo não faz
+  cópia local (`TRXDIR`) nem leitura de volta em lugar nenhum: o `HL_FRAME_LOG` agora conta `d<DBP><SBP>` e `e<SBP>`, e
+  deu 0 em todo o boot, nos menus e na luta.
+- Como distinguir o preso de um Ougi de verdade (`[sp] ages`): no Ougi os lutadores param de ler a entrada (a idade
+  `fighter` cresce) e `on screen` = 1. No preso, `fighter 2` e `on screen 0` até o fim do round. Nas rodadas boas (x1 antes
+  do preso, x3, x3b), "luta viva com o nativo desligado" dura no máximo ~200 vsyncs: a corrida do Ougi e o Ougi que erra.
+- **Proteção** (`hl_native.cpp` `s_held`, `hl_game.cpp` → `Bt4Gsx_LiveFight`): o host diz a cada vsync se há luta viva sem
+  Ougi na tela. Com 300 vsyncs seguidos assim e o nativo desligado, o nativo toma a cena como luta e a mantém, seguindo
+  também os blocos trocados. Ele apresenta a própria imagem da cena, que não depende da cópia para 0x70. Solta quando
+  aparece um Ougi na tela. Log: `a fight with the scene off for 300 vsyncs: taken as a fight` / `the held fight is over`.
+- **Teste** (Cube, Alpha, `app_d14`): `rec/x4_cube_a11x_hold`, duas lutas, 8 Ougi (dois em seguida, 432 vsyncs entre um
+  e outro), tudo voltou ao 3D sozinho e nenhuma retenção falsa (0 linhas `taken as`). Antes, sem a proteção:
+  `x3_cube_a11x_dbg` (debug: Ougi seguidos, `fight.ougi` a cada 1,3 s), 3 lutas, também sem preso. O preso aconteceu 1 vez em
+  ~12 Ougi completos da Alpha hoje.
+- **Falta:** ver a proteção agindo no caso real, e se o nativo desenha certo a luta presa (no choque, com os blocos
+  trocados). Até lá não está dado como corrigido.
+
+**A35 no fim da luta:** confirmado nos dois (entrada de 13:20: `m2_odin_a35fix`, `m3_cube_a35fix`).
+
+**Texto da Alpha na tela de Mods (corrigido):** `mod_no_pack` em pt, en e es: "Sem pacote de código próprio: roda com o
+código do jogo base e os dados deste mod. O que o mod muda no código não vale."
+
+**Menus "Esticar":** não há opção separada. Com a proporção padrão "Tela" (`ASPECT_DEFAULT = 0`), menus e filmes são
+esticados para a forma da tela (plano, 11-03). No Odin (16:9), as capturas de hoje (`134_q5`, `134_q6`: Modo, seleção)
+preenchem a tela. "Desenhar em 16:9" fica para depois.
+
+**Som do boot: ruído branco em escala total no filme e nos logos (achado; a correção segue depois do 1b).**
+- O boot europeu para na escolha de idioma, que é muda. `s1_cube_boot` ficou só nela; `s2_cube_boot` tem o idioma
+  escolhido por toque e 100 s sem tocar.
+- Referência: o som dos filmes está dentro do PSS (private stream 1, `SShd` tipo 1, PCM de 16 bits entrelaçado em 512 B):
+  `LOGO_C` 48 kHz 3,5 s, `NARUTO10` **44,1 kHz** 5,0 s, `OPENING` 48 kHz 88,9 s (extrator em
+  `scratchpad/snd/pssaudio.py`; o FFmpeg não lê esse som). Não há faixa equivalente no `STREAM.AFS`.
+- Índice de ruído (|diferença| / |amostra| a cada 100 ms): a referência do `OPENING` não passa de 0,9 em nenhum trecho dos
+  primeiros 30 s. No nosso, trechos de 0,5–1 s com RMS 0,556–0,563 alternam com som certo durante todo o filme (39,6–128 s
+  do `snd.raw`). Esse RMS é o de ruído uniforme em escala total (1/√3 = 0,577): bytes quaisquer tocados como PCM, que é o
+  "chiado". No `LOGO_C` também (31–33 s).
+- **Hipótese:** o demux do `MPEG.cpp` enfileira o evento PCM com o *endereço* do pacote no buffer circular do jogo
+  (`pssGuestAddrs`), e o jogo copia dali quando o evento é despachado. Se a leitura do CD reescreve aquele trecho do anel
+  antes disso, o jogo copia vídeo como som, em blocos do tamanho do anel. Próximo passo: comparar uma soma dos bytes no
+  enfileiramento e no despacho (`HL_MPEG_LOG`).
+- Ainda não vistos: o salto na primeira amostra em 40,17 s (1,89 de 2), possível estalo na entrada do `OPENING`, e os
+  logos mudos.
+
 ### 2026-11-05 13:20, dia, item 4: o A35 morria no fim da luta (corrigido); a Alpha 1.1X fica preta depois de um Ougi (aberto)
 
 **A35: `missing-target 0x9ee41c` no fim da luta (corrigido em `tools/un5.py`).**

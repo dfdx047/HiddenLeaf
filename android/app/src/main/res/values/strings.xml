@@ -422,7 +422,7 @@
     <string name="mod_delete_text">Its files are deleted from the app. The base game and the mod\'s ISO stay as they are.</string>
     <string name="mod_kind_code">Changes the code</string>
     <string name="mod_kind_data">Data only</string>
-    <string name="mod_no_pack">This build of the engine does not have this mod\'s code pack yet: the game starts as the base until it does.</string>
+    <string name="mod_no_pack">No code pack of its own: it runs with the base game\'s code and this mod\'s data. What the mod changes in the code does not apply.</string>
     <string name="pad_attack">Attack</string>
     <string name="pad_jump">Jump</string>
     <string name="pad_chakra">Chakra</string>

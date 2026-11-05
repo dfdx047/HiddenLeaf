@@ -16,6 +16,7 @@ namespace hl_native
 	void flushAll();
 	// The native renderer is drawing (a fight, the campaign).
 	bool sceneOn();
+	void liveFight(bool live); // the host: fighters read their input and no Ougi is on the screen, this vsync
 	// The picture while it draws (width/height, 0 stretched to the screen) and what undoes the stretch on the HUD.
 	void setShape(float aspect, float hudScale);
 	// 50 the game's own; 60 and 120 pictures a second drawn in between (see execute). Then the frames present themselves, and

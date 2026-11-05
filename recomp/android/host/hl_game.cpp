@@ -36,6 +36,7 @@ namespace hl_game
     std::atomic<uint32_t> g_specialMask{0x20u};
     std::atomic<int> g_mashPercent{100};
     bool (*g_nativeOn)() = nullptr;
+    void (*g_liveFight)(bool) = nullptr;
     void (*g_gsDump)(const char *, int) = nullptr;
     std::string g_gsDumpDir;
     std::string g_vifDumpDir;
@@ -929,6 +930,9 @@ namespace
         }
         if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
             unlockEverything();
+        // (for the native renderer's fight held without its detector: hl_native.cpp, s_held)
+        if (hl_game::g_liveFight != nullptr)
+            hl_game::g_liveFight(hl_game::overlay() == 1 && g_fighterTick != 0u && tick - g_fighterTick <= 10u && !ougiOnScreen());
         static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;
         if (s_spLog && tick % 50u == 0u && hl_game::overlay() == 1)
             std::fprintf(stderr, "[sp] v%llu ages: fighter %lld ougi %lld, on screen %d, scene %d\n", static_cast<unsigned long long>(tick),
