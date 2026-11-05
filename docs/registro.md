@@ -41,6 +41,28 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 12:35, dia, item 3: listras depois da vitória, Odin (Qualcomm e Turnip) e Cube: não aparecem
+
+`app_d10` (o d6 com `HL_FRAME_LOG`), 120 no Odin, 60 no Cube, jogado por toque, filmes pulados com START (jogador).
+- **Como ganhar sem atalho:** contra a CPU perdi 4 lutas seguidas (Normal e Simple, com e sem Handicap 9:1). A vitória
+  veio pelo modo do próprio jogo "1P vs. 2P" (△ na seleção): sem controle 2, o 2P fica parado. Battle Settings com o chakra
+  "Unlimited", para o Ougi estar sempre disponível, e o Ougi pelo botão Ougi da tela (`aggro.py ... btn`): o △△○ do script
+  não pegava contra o 2P parado. Sem POKE, sem `HL_CPU_HP`. As lutas foram ao tempo ("Time Over") com o 1P na frente.
+- **Odin, driver da Qualcomm** (`files/drivers/selected` tirado, log sem `adrenotools`):
+  - `rec/v6_odin_qc`: 2 vitórias sem Ougi. WINNER, "Ninja Song" (87/227/314 e 79/192/271) e a seleção, limpos.
+  - `rec/v8_odin_qc_win/hlseg_12.mp4` 60–170 s: 16 pedidos de Ougi respondidos, dois "PRESS!" (None x None) com a luta
+    seguindo em 3D, Time Over, WINNER, resultado (73/1312/1385) e a seleção, sem listras.
+- **Odin, Turnip** (`selected` de volta): `rec/v7_odin_turnip_win`, dois Ougi de Naruto com Sakura (17 pedidos),
+  Time Over, WINNER, resultado (59/793/852) e a seleção, limpos. O fim do Ougi passa por um quadro escuro, como já anotado.
+- **Cube:** `rec/v9_cube_win/hlseg_13.mp4` 84–143 s, 29 pedidos, Time Over, WINNER (o Kyubi), resultado (36/1028/1064)
+  e a seleção, limpos.
+- Nenhuma linha `SCANMSK 1/2` do jogo nessas lutas: o Ougi do Kyubi (o que escrevia SCANMSK 2) não saiu de novo. A correção
+  de 11-03 (`fight over with SCANMSK`) segue no código; o caso exato do relato de 11-03 (Kyubi antes do KO) não foi refeito.
+- **Visto de passagem:** na WINNER logo depois da luta os controles da tela ainda são os da luta por ~2 s (o `scene()` espera
+  2 s); não atrapalha.
+- **Estado do Odin agora:** driver do sistema (para refazer os itens 1 e 2 com ele). `files/drivers/selected.turnip-0741`
+  guarda a escolha original; restaurar no fim.
+
 ### 2026-11-05 11:40, dia: correção de horas, o Odin com o Turnip, o preto depois do choque de Ougi (aberto)
 
 **Horas erradas:** as duas entradas anteriores, "11:20" e "12:20", foram escritas às ~10:00 e ~10:40 (o relógio do
