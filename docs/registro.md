@@ -31,7 +31,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
 | Mods de dados | parcial | `264b764` | Cube | A35 com `HL_MODS` | só testado junto com o A35 |
 | UN6 A35 (pacote de código) | parcial | `d5fc08b` (`libun5_un6_a35.so` de 11-05 03:37, regerado com `recomp/build.sh --mod` do zero) | Cube, RP5, Odin 3 (16:9 e 20:9) | rota `hl_env_a35f` gravada (11-05 03:40–03:54) | luta Naruto x Naruto e volta à seleção nos 4, com som, sem `missing-target`; o launcher cria o save do mod a partir do do UN5 (`ModSaves`, 11-05 04:10); o Cube e o RP5 não seguram 60 fps (NTSC) em toda a luta |
-| UN6 Alpha 1.1X | parcial | (este commit; `libun5_a11x.so` de 11-04 15:59) | Cube | rota v3 gravada (11-04 16:10) | só dados mudam: a base roda o programa da mod; luta, Ougi, WINNER e resultado vistos; faltam RP5, Odin e 20:9 |
+| UN6 Alpha 1.1X | parcial | `6b420e6` (`app_a35s.apk`, sem pacote: a base roda o programa da mod) | Cube, RP5, Odin 3 (16:9 e 20:9) | rota v3 até v9000 gravada (11-05 04:00–04:09) | luta, imagem e 50 fps nos 4, sem `missing-target`; falta a rota inteira (WINNER e resultado só vistos no Cube em 11-04) |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
 | Backend próprio do Nominum (`NOMINUM_BACKEND=nominum`, teste) | quebrado | Nominum `12fb79b` (APK de teste de 11-04 05:45, não instalado agora) | Odin 3 (16:9 e 20:9), Cube; RP5 só com o Turnip | rotas v3 e de campanha gravadas a 1x, 2x, 4x e 6x, `HL_PERF`, memória da GPU, giro e 30 fps pelo painel | RP5 com o driver do sistema: `DEVICE_LOST` no mesmo ponto (rastro anotado); com o Turnip roda. Pré-rotação achata a imagem a 90/270 (certa com `NOMINUM_VK_PRETRANSFORM=0`). Cube roda sem `dualSrcBlend`, mas Ougi a 9,5 fps. Odin: Ougi 30,4 (era 21,5). Detalhe em 11-04 07:50 |
@@ -40,6 +40,26 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 04:12, noite, item 5: a Alpha 1.1X no RP5, no Odin e no 20:9
+
+- **APK e jeito de ligar:** a `app_a35s.apk` (`6b420e6`), com só o `un5_mods.txt` = `modlib/un6-a11x/disc` (`build/lab/a11xq2.sh`).
+  Não há pacote de código: o log mostra `un5: mod program …`, e a base roda o programa da mod.
+- **Rota:** `hl_env_n3_v3_c` até v9000.
+
+  | rodada | fim | cenas nativas | fps em v6450–8900 (pior) |
+  |---|---|---|---|
+  | `n70_cube_a11x` | v9320 | 6022, 6359, 6986, 7686, 8035 | 50,0 (49,6) |
+  | `n67_rp5_a11x` | v9415 | 6022, 7493, 8526 | 50,0 (45,0) |
+  | `n68_odin_a11x` | v9591 | 6022, 6359, 6986, 7686, 8035 | 50,0 (49,8) |
+  | `n69_odin209_a11x` (2400x1080) | v9288 | os mesmos | 50,0 (49,9) |
+
+  - Comparação: `a11x_cube_v3` e `a11x_rp5_v3`, de 11-04, deram 50,0 e 50,0.
+  - Nenhum `missing-target`.
+  - Imagem da luta conferida no RP5 e no Odin 20:9 ("15 Chakra Recovery", "2 hits").
+  - O `un5_mods.txt` foi apagado no fim, e o Odin voltou ao `wm size reset`.
+- **Falta:** a rota inteira (WINNER, resultado, pausa e sair) com a mod. O `KNOWN_MODS` e o `CODE_RANGES` do `un5.py`
+  (passo 3 do `CLAUDE.md`) não entraram: a mod roda sem pacote.
 
 ### 2026-11-05 04:10, noite, item 5: o launcher cria o save do A35
 
