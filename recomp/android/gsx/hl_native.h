@@ -9,7 +9,7 @@ namespace hl_native
 
 	// A GS packet of the stream. true: this module took it, and what the GS must still see comes out of next().
 	// false: it goes on to the GS as it is.
-	bool transfer(uint8_t path, const uint8_t* data, uint32_t size);
+	bool transfer(uint8_t path, uint8_t* data, uint32_t size); // (data: the caller's own copy; SCANMSK is zeroed in it)
 	// A vsync of the stream: what was collected of the frame goes to the GS thread.
 	void vsync();
 	// Something else needs the GS to be up to date (a read back): everything collected goes out now.

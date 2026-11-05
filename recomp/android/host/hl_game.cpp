@@ -83,6 +83,7 @@ namespace
 
     uint64_t g_tick = 0u;          // vsyncs
     uint64_t g_fighterTick = 0u;   // the last vsync a fighter read its input (0x21E660): a fight is going on
+    uint64_t g_ougiTick = 0u;      // the last vsync an Ougi's sequence or prompt read the pad (0x36E690, 0x6C99B0)
 
     // The wide projection is for the 3D of a fight (while the fighters read their input, and an Ougi's film) and of the
     // campaign. Everything else drawn through a camera (the result screen's picture, menus) is 2D made for 4:3: squeezed, it
@@ -388,10 +389,16 @@ namespace
 
     inline bool humanFighter(uint32_t f) { return ((read16(f + kFighterKind) >> 5) & 0xFu) == 0u; }
 
-    // An Ougi on the screen, or a dispute: from then on the taps answer the game's prompts.
+    // An Ougi on the screen, or a dispute: from then on the taps answer the game's prompts. Only while the fight lives (a
+    // fighter read its input or an Ougi's prompt read the pad in the last 5 s): after the fight BTL.BIN stays in memory
+    // under the character select, and the fighters left there (one in an Ougi or a dispute when it ended) kept the
+    // fight's controls, the wide camera and the answers on the menus (docs/registro.md, 2026-11-05).
     bool ougiOnScreen()
     {
         if (hl_game::overlay() != 1)
+            return false;
+        const uint64_t live = g_fighterTick > g_ougiTick ? g_fighterTick : g_ougiTick;
+        if (live == 0u || g_tick - live > 250u)
             return false;
         for (int i = 0; i < 4; ++i)
         {
@@ -423,6 +430,7 @@ namespace
         static constexpr uint32_t kBits[8] = {0x10u, 0x40u, 0x20u, 0x80u, 0x1000u, 0x4000u, 0x2000u, 0x8000u};
         const uint32_t obj = GPR_U32(ctx, 4);
         const uint32_t gfx = read32(kGfxPointer);
+        g_ougiTick = g_tick;
         uint32_t saved[2] = {};
         const bool on = hl_game::g_specialOn.load(std::memory_order_relaxed);
         for (uint32_t p = 0; on && p < 2u; ++p)
@@ -448,6 +456,7 @@ namespace
     void promptPressed(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t obj = GPR_U32(ctx, 4);
+        g_ougiTick = g_tick;
         g_promptOriginal(rdram, ctx, runtime);
         const uint32_t pad = read16(obj + 0x28u);
         if (GPR_U32(ctx, 2) == 0u && pad < 2u && g_padSpecialDown[pad] != 0u && rdram[(obj + 0x2Eu) & 0x1FFFFFFu] != 1u && hl_game::g_specialOn.load(std::memory_order_relaxed))
@@ -905,6 +914,11 @@ namespace
         }
         if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
             unlockEverything();
+        static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;
+        if (s_spLog && tick % 50u == 0u && hl_game::overlay() == 1)
+            std::fprintf(stderr, "[sp] v%llu ages: fighter %lld ougi %lld, on screen %d, scene %d\n", static_cast<unsigned long long>(tick),
+                         g_fighterTick ? static_cast<long long>(tick - g_fighterTick) : -1ll, g_ougiTick ? static_cast<long long>(tick - g_ougiTick) : -1ll,
+                         ougiOnScreen() ? 1 : 0, hl_game::scene());
         const uint32_t gfx = read32(kGfxPointer);
         if (gfx != 0u)
         {
@@ -944,6 +958,11 @@ int hl_game::divider()
 // A fight and the campaign are what the native renderer recognizes in the GS stream (the copy of the scene's Z); which of the
 // two by the mode's code in memory. Anything else (title, menus, films, loading screens) is a menu. An Ougi's film and the
 // loading of an area go through the GS for a few seconds in the middle of play: those seconds stay in the scene they are in.
+// A fight is also what the game itself says: the fighters reading their input, or an Ougi's sequence or prompt reading the
+// pad, in the last 3 s (150 vsyncs). That holds the fight's controls while the renderer has let go: an Ougi drawn by the GS
+// went on longer than 8 s and its buttons became the menu's in the middle of the sequence (docs/registro.md, 2026-11-05).
+// With that, a fight's controls go 2 s after the last of these (the character select after a fight kept them 10 s); the
+// campaign keeps 8 s for the loading of an area.
 int hl_game::scene()
 {
     if (g_rdram == nullptr)
@@ -952,14 +971,19 @@ int hl_game::scene()
     static uint64_t s_lastOn = 0;
     const uint64_t now = SDL_GetTicks();
     const int mode = overlay();
-    if (s_scene == 2 && mode == 1 && ougiOnScreen())
-        s_lastOn = now; // (an Ougi's film may take longer than the wait below)
-    if (g_nativeOn != nullptr && g_nativeOn() && (mode == 1 || mode == 2))
+    const uint64_t tick = g_tick;
+    const bool fighting = mode == 1 && ((g_fighterTick != 0u && tick - g_fighterTick < 150u) || (g_ougiTick != 0u && tick - g_ougiTick < 150u) || ougiOnScreen());
+    if (fighting)
+    {
+        s_scene = 2;
+        s_lastOn = now;
+    }
+    else if (g_nativeOn != nullptr && g_nativeOn() && (mode == 1 || mode == 2))
     {
         s_scene = mode == 1 ? 2 : 3;
         s_lastOn = now;
     }
-    else if (s_scene != 1 && (now - s_lastOn > 8000u || (s_scene == 2 ? mode != 1 : mode != 2)))
+    else if (s_scene != 1 && (now - s_lastOn > (s_scene == 2 ? 2000u : 8000u) || (s_scene == 2 ? mode != 1 : mode != 2)))
         s_scene = 1;
     return s_scene;
 }

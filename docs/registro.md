@@ -41,6 +41,60 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 09:00, dia, item 1 (Ougi do jogador): congelamento, SCANMSK e controles; método novo
+
+**Método (pedido do desenvolvedor, vale para toda a lista e a rota final):** teste como jogador, em tempo real, por
+toque na camada da tela (`input swipe` de 90–300 ms, pausas de 0,3–1 s): boot sem pular, menus de verdade, luta
+inteira com Jutsu e Ougi feitos à mão. **Proibido para chamar de testado:** modo rápido (`HL_FAST_UNTIL`), pular
+filme, POKE, `HL_CPU_HP`, vitória forçada, Ougi automático (`HL_SP_TAP`/`HL_SP_CPU`), `HL_PADROUTE` nos menus. Esses só
+para chegar a um ponto de depuração (as rodadas `d*_odin_ougi*` abaixo usam a rota v3 até a luta e são só de depuração).
+Ferramentas novas em `build/lab`: `play.py` (toques pelo layout de `TouchConfig.kt`, gravação em segmentos de 170 s
+com o relógio do aparelho, som do motor por baixo), `fightplay.py` (uma luta de jogador: andar, combo, pulo, defesa,
+item, chakra, Jutsu △○ e Ougi △△○ à mão, respostas ao pedido), `tapdrv.sh`. Som: `HL_SPU2_REC=<arquivo>`
+(`hl_spu2.cpp`), s16 estéreo 48 kHz contínuo, com zeros quando a fila do SDL seca, para casar com o vídeo. Aparelhos de
+hoje: só Odin 3 e Cube (o RP5 é da sessão do Dragon Ball).
+
+**Libs:** o APK de hoje leva o nosso `libbt4gsx` (`recomp/android/build_gsx.sh`, `hl_gsx.cpp` + `hl_native.cpp`), não
+o do Nominum `b2ff28b` (cópia em `build/lab/libbt4gsx_b2ff28b.so`). Motivo: o defeito do congelamento está nos dois
+(o HEAD do Nominum, `9940425`, tem o mesmo `presentsHere`). Perde-se a Fase 2D do Nominum até ele receber as correções
+abaixo (pedido no fim desta entrada).
+
+1. **Congelamento a 60/120 no Ougi (corrigido em `hl_native.cpp`, falta a regra C):** `presentsHere` ficava verdadeiro
+   depois que a cena nativa desligava ou parava de apresentar, e o `hl_gsx` pulava as apresentações do GS: a tela
+   parava numa imagem (o corte do Ougi), sem os botões da sequência, até a luta voltar ao nativo. Agora só vale com a
+   cena ligada e uma apresentação nos últimos 100 ms; ao desligar a cena, `s_presentsHere` e `s_presentRate` zeram.
+   Antes: `n5_odin_c60` (noite), 10,4 s parado na arte do Ougi, "FPS: N/A". Depois: `d1_odin_ougi60_macro` (Ougi pelo
+   botão em v6900 e v7770, sem parada, pedidos visíveis).
+2. **Ougi do GS escuro e listrado (corrigido em `hl_native.cpp`):** o jogo escreve `SCANMSK 2` (só linhas pares) uma
+   vez no Ougi do Naruto (Kyubi). O nativo ignora SCANMSK e desenha inteiro; o GS desenhava linha sim, linha não por
+   cima do que o nativo deixou: escuro, listrado, sem os pedidos, ~20 s (`d3_odin_ougi50_43`, 79–98 s do vídeo,
+   `game SCANMSK 2` em v8967). Agora o GS recebe sempre `SCANMSK 0`: o valor é zerado no pacote (cópia do `hl_gsx`)
+   quando a cena está desligada e no `emitRegisters` quando está ligada. `HL_SCANMSK_KEEP=1` devolve o de antes.
+   Depois: `p2_cube` (Cube, jogado por toque, Naruto x Sai), Ougi do Kyubi em 149–164 s de `play_14.mp4`: cena inteira,
+   sem listras, só o desfoque do próprio golpe. Falta no Odin com o mesmo Ougi.
+3. **Botões da sequência viravam os do menu (corrigido em `hl_game.cpp`):** com o nativo desligado mais de 8 s (Ougi
+   pelo GS), `scene()` passava ao layout do menu no meio da sequência. Agora a luta é também o que o jogo diz: um
+   lutador leu a entrada (`0x21E660`) ou a sequência/pedido do Ougi leu o pad (`0x36E690`, `0x6C99B0`, novo
+   `g_ougiTick`) nos últimos 3 s. Fora disso, os controles da luta saem 2 s depois (antes 8 s; a campanha fica em 8 s).
+4. **Lutadores velhos depois da luta (corrigido em `hl_game.cpp`):** o `BTL.BIN` fica na memória sob a seleção de
+   personagem, e os lutadores que acabaram a luta num Ougi ou numa disputa faziam `ougiOnScreen()` responder "sim":
+   controles da luta por mais de 40 s na seleção (`p2_cube`, `[sp] pad answer` até v47980 com a cena desligada desde
+   v44126), câmera larga e respostas do especial nos menus. Agora só vale com a luta viva (lutador ou pedido nos últimos
+   5 s). `HL_SP_LOG=1` mostra uma vez por segundo `[sp] v.. ages: fighter .. ougi .., on screen .., scene ..`.
+
+**Visto e ainda aberto:**
+- Começo da disputa/Ougi pelo GS: 0,5–1 s de branco e um quadro com lixo de memória (blocos coloridos), no Cube
+  (`p1_cube_boot` 76,0 s; `p2_cube` 148,5–149 s de `play_14`) e no Odin (`d3_odin_ougi50_43` 74,4 s). O GS começa da
+  memória que o nativo nunca escreveu. Falta escrever no GS a última imagem do nativo ao desligar a cena.
+- Faixa de ruído colorido na água do lago do Hidden Leaf no Cube (nativo, `p1_cube_boot`, 89,6 s).
+- Som: os logos Bandai Namco, Bandai e CRIWARE saem mudos (`p1_cube_boot`, som zero até o logo do CC2); o filme bate no
+  teto (pico 32112, 0,5–0,8% das amostras). Item 5.
+- A vitória da CPU volta direto à seleção sem resultado (as duas derrotas de `p1_cube_boot` e `p2_cube`); não conferido
+  no PCSX2 (`build/pcsx2.AppImage`).
+
+**Pedido ao Nominum (não mexi no código dele):** levar para `vk/armsx2_host.cpp`/`core/stream.cpp` as correções 1 e 2
+(`presentsHere` só com a cena ligada e uma apresentação recente; SCANMSK 0 ao GS).
+
 ### 2026-11-05 04:50, noite, item 6: fechamento, `good-20261105-1`
 
 **APK final:**

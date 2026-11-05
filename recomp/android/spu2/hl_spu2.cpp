@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 HlPsxRegs psxRegs;
 HlPsxCounter psxCounters[8];
@@ -101,6 +102,46 @@ namespace
         if (!s_stream)
             return;
         const int queued = SDL_GetAudioStreamQueued(s_stream);
+        // HL_SPU2_REC=<file>: the sound that goes to the device, as 48 kHz stereo 16-bit, on the wall clock: while the device's
+        // queue ran dry the speaker played nothing, and so many zeros go in, so the file plays as the speaker did. The log says
+        // when its first sample is ([snd-rec] start, epoch ms), for putting it under a screen recording.
+        static FILE *const s_rec = []() -> FILE * {
+            const char *path = std::getenv("HL_SPU2_REC");
+            return path ? std::fopen(path, "wb") : nullptr;
+        }();
+        if (s_rec)
+        {
+            static int64_t s_t0 = 0;
+            static uint64_t s_recFrames = 0;
+            timespec ts{};
+            clock_gettime(CLOCK_REALTIME, &ts);
+            const int64_t nowMs = static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+            if (s_t0 == 0)
+            {
+                s_t0 = nowMs;
+                std::fprintf(stderr, "[snd-rec] start %lld\n", static_cast<long long>(s_t0));
+            }
+            if (queued == 0 && queued <= kMaxBytes)
+            {
+                const int64_t due = (nowMs - s_t0) * 48;
+                static std::array<int16_t, 4096> s_zero{};
+                for (int64_t pad = due - static_cast<int64_t>(s_recFrames); pad > 0;)
+                {
+                    const size_t n = static_cast<size_t>(std::min<int64_t>(pad, static_cast<int64_t>(s_zero.size() / 2u)));
+                    std::fwrite(s_zero.data(), sizeof(int16_t) * 2u, n, s_rec);
+                    s_recFrames += n;
+                    pad -= static_cast<int64_t>(n);
+                }
+            }
+            if (queued <= kMaxBytes)
+            {
+                std::array<int16_t, kChunkFrames * 2u> pcm;
+                for (size_t i = 0; i < pcm.size(); ++i)
+                    pcm[i] = static_cast<int16_t>(std::lrint(std::clamp(s_chunk[i], -1.0f, 1.0f) * 32767.0f));
+                std::fwrite(pcm.data(), sizeof(pcm), 1, s_rec);
+                s_recFrames += kChunkFrames;
+            }
+        }
         if (queued > kMaxBytes)
             return; // (the game ran ahead of real time: HL_FAST_UNTIL)
         if (s_playing && queued == 0)

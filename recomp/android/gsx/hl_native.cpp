@@ -147,6 +147,7 @@ namespace
 	{
 		Frame* frame = nullptr;       // draw this frame on the GS thread, or
 		uint8_t path = 0;             // send these bytes to the GS
+		bool draw = false;            // (they hold a draw: the picture they are part of is not all here, see execute)
 		std::vector<uint8_t> bytes;
 	};
 
@@ -173,6 +174,11 @@ namespace
 	bool s_gsInSync = true;
 	// HL_SCANMSK_LOG=1: SCANMSK as the game writes it, as this module sends it, and as the GS holds it at each vsync
 	const bool s_scanLog = std::getenv("HL_SCANMSK_LOG") != nullptr;
+	// The GS gets SCANMSK 0 whatever the game writes (HL_SCANMSK_KEEP=1 passes it on). The game writes SCANMSK 2 (even
+	// lines only) once in an Ultimate Jutsu, the native path draws those scenes whole and they look right; drawn by the GS,
+	// line by line over what the native had drawn, the Ougi came out dark and striped for as long as it lasted, without
+	// its prompts (docs/registro.md, 2026-11-05).
+	const bool s_scanKeep = std::getenv("HL_SCANMSK_KEEP") != nullptr;
 	uint32_t s_prim = 0;
 
 	// the current vertex
@@ -393,10 +399,10 @@ namespace
 		{
 			if (!s_seen[r])
 				continue;
-			const uint64_t pair[2] = {s_regs[r], r};
+			const uint64_t pair[2] = {r == R_SCANMSK && !s_scanKeep ? 0ull : s_regs[r], r};
 			pushBytes(path, pair, sizeof(pair));
 			if (r == R_SCANMSK && s_scanLog)
-				std::fprintf(stderr, "hl_native: v%llu SCANMSK %llu to the GS\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(s_regs[r] & 3u));
+				std::fprintf(stderr, "hl_native: v%llu SCANMSK %llu to the GS\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(pair[0] & 3u));
 		}
 		// (what a vertex has now, not the last register write: most of it comes in packed form, which leaves no register here)
 		uint64_t st, rgbaq;
@@ -1049,7 +1055,7 @@ namespace
 	}
 
 	// With this module off: the stream goes on as it is, and only what it would need later is noted.
-	void observe(const uint8_t* data, uint32_t size)
+	void observe(uint8_t* data, uint32_t size)
 	{
 		uint32_t at = 0u;
 		while (at + 16u <= size)
@@ -1058,7 +1064,7 @@ namespace
 			std::memcpy(&lo, data + at, 8);
 			std::memcpy(&hi, data + at + 8, 8);
 			const uint32_t qwords = tagQwords(lo), flg = (lo >> 58) & 3u, nreg = ((lo >> 60) & 15u) ? ((lo >> 60) & 15u) : 16u;
-			const uint8_t* body = data + at + 16u;
+			uint8_t* body = data + at + 16u;
 			if ((lo >> 46) & 1u)
 				s_prim = (lo >> 47) & 0x7FFu;
 			if (flg == 0u)
@@ -1076,6 +1082,8 @@ namespace
 						std::memcpy(&c, body + (l * nreg + i) * 16u + 8u, 8);
 						if ((c & 0xFFu) != R_XYZ2 && (c & 0xFFu) != R_XYZF2 && (c & 0xFFu) != R_XYZ3 && (c & 0xFFu) != R_XYZF3)
 							writeRegister(c & 0xFFu, a);
+						if ((c & 0xFFu) == R_SCANMSK && (a & 3u) && !s_scanKeep)
+							std::memset(body + (l * nreg + i) * 16u, 0, 8);
 					}
 				}
 			}
@@ -1088,6 +1096,8 @@ namespace
 
 	void noteRoute()
 	{
+		if (!s_ops.empty() && !s_ops.back().frame)
+			s_ops.back().draw = true;
 		s_stats.routedTags++;
 		uint32_t& count = s_stats.why[s_why];
 		static std::unordered_map<const char*, uint32_t> s_shown;
@@ -1289,6 +1299,12 @@ namespace
 									if (!sent && r == R_TRXDIR && (a & 3u) != 0u)
 									{
 										// a copy inside the GS's memory or a read back: only the GS can do those
+										static int s_trxShown = 0;
+										static const bool s_trxLog = std::getenv("HL_TRX_LOG") != nullptr;
+										if (s_trxLog && s_trxShown++ < 400)
+											std::fprintf(stderr, "hl_native: v%llu %s, bitbltbuf %llx trxpos %llx trxreg %llx (scene %d)\n", static_cast<unsigned long long>(s_vsync),
+												(a & 3u) == 1u ? "read back" : "local copy", static_cast<unsigned long long>(s_regs[R_BITBLTBUF]),
+												static_cast<unsigned long long>(s_regs[R_TRXPOS]), static_cast<unsigned long long>(s_regs[R_TRXREG]), s_sceneOn ? 1 : 0);
 										const uint64_t head[2] = {1u | (1ull << 60), 0xEull};
 										s_why = "local copy";
 										++s_memoryGeneration;
@@ -1658,6 +1674,37 @@ void main()
 	};
 	template struct ExposePrivate<InitialState, &GSDeviceVK::SetInitialState>;
 
+	// The textures a frame brought, as GPU images (once per frame, the first time it is drawn)
+	void createTextures(const Frame& frame)
+	{
+		for (const NewTexture& n : frame.textures)
+		{
+			if (s_gpuTextures.size() <= static_cast<size_t>(n.id))
+				s_gpuTextures.resize(n.id + 1u);
+			GSTextureVK* t = static_cast<GSTextureVK*>(g_gs_device->CreateTexture(n.w, n.h, 1, GSTexture::Format::Color));
+			static std::vector<uint8_t> s_read;
+			if (t && n.fromMemory)
+			{
+				readFromMemory(n, s_read);
+				t->Update(GSVector4i(0, 0, n.w, n.h), s_read.data(), static_cast<u32>(n.w) * 4u);
+			}
+			else if (t)
+				t->Update(GSVector4i(0, 0, n.w, n.h), n.rgba.data(), static_cast<u32>(n.w) * 4u);
+			static const bool s_texDump = std::getenv("HL_TEX_DUMP") != nullptr;
+			if (s_texDump)
+			{
+				char name[96];
+				std::snprintf(name, sizeof(name), "hl_frames/tex_%d_%dx%d.rgba", n.id, n.w, n.h);
+				if (FILE* out = std::fopen(name, "wb"))
+				{
+					std::fwrite(n.fromMemory ? s_read.data() : n.rgba.data(), 4u, static_cast<size_t>(n.w) * static_cast<size_t>(n.h), out);
+					std::fclose(out);
+				}
+			}
+			s_gpuTextures[n.id].texture = t;
+		}
+	}
+
 	// One go through a frame's draws, with its own vertices or others in their place (fresh: the first time, its textures come in).
 	void drawFrame(Frame* f, const Vertex* vertices, bool fresh)
 	{
@@ -1669,32 +1716,7 @@ void main()
 
 			// the textures this frame brought (the replay thread counts on them from now on, whatever happens to this frame)
 			if (fresh)
-			for (const NewTexture& n : f->textures)
-			{
-				if (s_gpuTextures.size() <= static_cast<size_t>(n.id))
-					s_gpuTextures.resize(n.id + 1u);
-				GSTextureVK* t = static_cast<GSTextureVK*>(g_gs_device->CreateTexture(n.w, n.h, 1, GSTexture::Format::Color));
-				static std::vector<uint8_t> s_read;
-				if (t && n.fromMemory)
-				{
-					readFromMemory(n, s_read);
-					t->Update(GSVector4i(0, 0, n.w, n.h), s_read.data(), static_cast<u32>(n.w) * 4u);
-				}
-				else if (t)
-					t->Update(GSVector4i(0, 0, n.w, n.h), n.rgba.data(), static_cast<u32>(n.w) * 4u);
-				static const bool s_texDump = std::getenv("HL_TEX_DUMP") != nullptr;
-				if (s_texDump)
-				{
-					char name[96];
-					std::snprintf(name, sizeof(name), "hl_frames/tex_%d_%dx%d.rgba", n.id, n.w, n.h);
-					if (FILE* out = std::fopen(name, "wb"))
-					{
-						std::fwrite(n.fromMemory ? s_read.data() : n.rgba.data(), 4u, static_cast<size_t>(n.w) * static_cast<size_t>(n.h), out);
-						std::fclose(out);
-					}
-				}
-				s_gpuTextures[n.id].texture = t;
-			}
+				createTextures(*f);
 
 			GIFRegTEX0 frameTex{}, zTex{};
 			frameTex.TBP0 = kSceneFbp * 32u;
@@ -1963,20 +1985,50 @@ void main()
 	}
 
 	// ---- more pictures than the game makes (60 and 120). The game's logic works in fixed steps per frame, so running it faster
-	// changes its speed: these are pictures drawn in between. A frame B that arrives is held back and shown as it comes out of
-	// the frame before it, A: draws of the same kind and size, in the same order, are the same things, and their vertices move
-	// from where they were in A to where they are in B. That is one picture late, 40 ms. What has no match shows as in B.
+	// changes its speed: these are pictures drawn in between. A picture B that arrives is held back and shown as it comes out of
+	// the picture before it, A: draws of the same kind and size, in the same order, are the same things, and their vertices move
+	// from where they were in A to where they are in B. That is one picture late, 40 ms.
+	// A picture is every frame of this module since the last copy to the display, the one with the copy included (a texture read
+	// from the GS's memory, or a draw for the GS, cuts it in frames). An in-between picture is all of them drawn again, from the
+	// start: drawing again only the last one put it over what was already there (doubled characters, the shadows' counts added
+	// twice: black, the blended effects twice). When a draw of the picture went to PCSX2's GS, it cannot be drawn again here: that
+	// picture is shown as it is, more than once (docs/registro.md, 2026-11-05, item 2). So is one with too little in common with
+	// the one before (a cut), or whose shadows do not all match (their volumes would fall away from what casts them).
 	struct VRange
 	{
 		uint32_t first, count;
 	};
-	Frame* s_prev = nullptr;
+	Frame s_pictures[2];            // the last two whole pictures (geometry only), as drawn
+	Frame* s_prevPicture = nullptr; // (one of them: A)
+	int s_curPicture = 0;
+	Frame s_parts;                  // the frames of the picture in the making, before its copy to the display
+	bool s_gsDrewInPicture = false; // (GS thread: a draw went to PCSX2's GS since the last picture)
 	std::vector<Vertex> s_lerp;
 	std::vector<VRange> s_rangesA, s_rangesB;
 	std::chrono::steady_clock::time_point s_intervalEnd{}, s_nextPresent{};
 	uint32_t s_presents = 0;
 	std::chrono::steady_clock::time_point s_presentsFrom{};
 	uint32_t s_field = 0;
+	// HL_INTERP_LOG=1: once a second, how many pictures were drawn in between, shown again as they were, and why
+	struct InterpStats
+	{
+		uint32_t lerped = 0, gsDrew = 0, cut = 0, shadows = 0, first = 0;
+	} s_istats;
+
+	void appendFrame(Frame& to, const Frame& from)
+	{
+		const uint32_t vbase = static_cast<uint32_t>(to.vertices.size()), ibase = static_cast<uint32_t>(to.indices.size());
+		to.vertices.insert(to.vertices.end(), from.vertices.begin(), from.vertices.end());
+		to.indices.reserve(to.indices.size() + from.indices.size());
+		for (const uint32_t i : from.indices)
+			to.indices.push_back(i + vbase);
+		to.draws.reserve(to.draws.size() + from.draws.size());
+		for (Draw d : from.draws)
+		{
+			d.first += ibase;
+			to.draws.push_back(d);
+		}
+	}
 
 	void vertexRanges(const Frame& f, std::vector<VRange>& out)
 	{
@@ -1995,7 +2047,8 @@ void main()
 		}
 	}
 
-	// What of B comes from what of A. false: too little in common, a cut of the camera or a new screen.
+	// What of B comes from what of A. false: too little in common (a cut of the camera or a new screen), or a shadow volume
+	// of B with no match in A.
 	bool matchFrames(const Frame& a, const Frame& b)
 	{
 		vertexRanges(a, s_rangesA);
@@ -2003,6 +2056,7 @@ void main()
 		s_matches.clear();
 		size_t j = 0;
 		uint64_t matched = 0, total = 0;
+		uint32_t shadowsMissed = 0;
 		constexpr size_t kWindow = 24;
 		constexpr float kMaxMove = 96.0f; // (pixels of 512x448 in 40 ms: further than this is a jump, not a movement)
 		for (size_t i = 0; i < b.draws.size(); ++i)
@@ -2011,6 +2065,7 @@ void main()
 			const VRange rb = s_rangesB[i];
 			if (db.key.target == kTScene || db.key.target == kTShadow)
 				total += rb.count;
+			bool found = false;
 			for (size_t k = j; k < a.draws.size() && k < j + kWindow; ++k)
 			{
 				const Draw& da = a.draws[k];
@@ -2033,6 +2088,7 @@ void main()
 				}
 				if (near)
 				{
+					found = true;
 					if (db.key.target == kTScene || db.key.target == kTShadow)
 						matched += rb.count;
 					if (!same)
@@ -2040,8 +2096,20 @@ void main()
 				}
 				break;
 			}
+			if (!found && db.key.target == kTShadow && rb.count != 0u)
+				++shadowsMissed;
 		}
-		return total > 0u && matched * 10u >= total * 6u;
+		if (total == 0u || matched * 10u < total * 6u)
+		{
+			++s_istats.cut;
+			return false;
+		}
+		if (shadowsMissed != 0u)
+		{
+			++s_istats.shadows;
+			return false;
+		}
+		return true;
 	}
 
 	void buildBetween(const Frame& a, const Frame& b, float alpha)
@@ -2066,6 +2134,9 @@ void main()
 		}
 	}
 
+	// When this module last presented (steady clock, ns): the stream's own vsyncs are left out only while it does
+	std::atomic<int64_t> s_lastPresentNs{0};
+
 	void presentNow()
 	{
 		// (the stream's own vsyncs are not presented meanwhile: hl_gsx.cpp asks presentsHere)
@@ -2073,6 +2144,7 @@ void main()
 		GSvsync(s_field, false);
 		++s_presents;
 		const auto now = std::chrono::steady_clock::now();
+		s_lastPresentNs.store(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count(), std::memory_order_relaxed);
 		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_presentsFrom).count();
 		if (ms >= 1000)
 		{
@@ -2104,6 +2176,13 @@ void main()
 		}
 	}
 
+	void resetPictures()
+	{
+		s_prevPicture = nullptr;
+		s_parts.clear();
+		s_gsDrewInPicture = false;
+	}
+
 	void execute(Frame* f)
 	{
 		const int rate = s_rate.load(std::memory_order_relaxed);
@@ -2114,25 +2193,42 @@ void main()
 		{
 			s_presentsHere.store(false, std::memory_order_relaxed);
 			s_presentRate.store(0, std::memory_order_relaxed);
-			if (s_prev)
-			{
-				toPool(s_prev);
-				s_prev = nullptr;
-			}
+			resetPictures();
 			drawFrame(f, nullptr, true);
 			toPool(f);
 			s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
 			return;
 		}
 		s_presentsHere.store(true, std::memory_order_relaxed);
+		// (B as the game made it, part by part: what PCSX2's GS draws in between counts on it)
+		drawFrame(f, nullptr, true);
 		if (!picture)
 		{
-			// (part of a picture: it goes as it is, and the picture comes with the rest)
-			drawFrame(f, nullptr, true);
+			appendFrame(s_parts, *f);
 			toPool(f);
 			s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
 			return;
 		}
+		Frame& cur = s_pictures[s_curPicture];
+		cur.clear();
+		cur.vertices.swap(s_parts.vertices);
+		cur.indices.swap(s_parts.indices);
+		cur.draws.swap(s_parts.draws);
+		s_parts.clear();
+		appendFrame(cur, *f);
+		toPool(f);
+		const bool gsDrew = s_gsDrewInPicture;
+		s_gsDrewInPicture = false;
+		bool between = false;
+		if (gsDrew)
+			++s_istats.gsDrew;
+		else if (!s_prevPicture)
+			++s_istats.first;
+		else
+			between = matchFrames(*s_prevPicture, cur);
+		if (between)
+			++s_istats.lerped;
+
 		using Clock = std::chrono::steady_clock;
 		// the time of a picture of the game, a little less if pictures are piling up behind this one
 		const auto period = std::chrono::microseconds(s_inFlight.load(std::memory_order_relaxed) >= 3 ? 30000 : 40000);
@@ -2143,8 +2239,7 @@ void main()
 		s_intervalEnd = end;
 		if (s_nextPresent < now || s_nextPresent > now + step * 2)
 			s_nextPresent = now;
-		const bool between = s_prev && matchFrames(*s_prev, *f);
-		bool fresh = true;
+		bool lerpedLast = false;
 		while (s_nextPresent < end)
 		{
 			const auto wait = s_nextPresent - Clock::now();
@@ -2152,13 +2247,19 @@ void main()
 				std::this_thread::sleep_for(wait);
 			if (between)
 			{
-				const float alpha = std::chrono::duration<float>(s_nextPresent - start).count() / std::chrono::duration<float>(period).count();
-				buildBetween(*s_prev, *f, std::min(alpha, 1.0f));
-				drawFrame(f, s_lerp.data(), fresh);
+				const float alpha = std::min(std::chrono::duration<float>(s_nextPresent - start).count() / std::chrono::duration<float>(period).count(), 1.0f);
+				if (alpha < 0.999f)
+				{
+					buildBetween(*s_prevPicture, cur, alpha);
+					drawFrame(&cur, s_lerp.data(), false);
+					lerpedLast = true;
+				}
+				else if (lerpedLast)
+				{
+					drawFrame(&cur, nullptr, false);
+					lerpedLast = false;
+				}
 			}
-			else
-				drawFrame(f, nullptr, fresh);
-			fresh = false;
 			presentNow();
 			s_nextPresent += step;
 			// (behind the clock: the pictures that cannot be made are not made)
@@ -2166,12 +2267,21 @@ void main()
 			if (s_nextPresent < after)
 				s_nextPresent = after;
 		}
-		if (fresh)
-			drawFrame(f, nullptr, true); // (no present fell in this time: its textures still come in)
-		if (s_prev)
-			toPool(s_prev);
-		s_prev = f;
+		// (B in the targets when this is over: what comes next reads them)
+		if (lerpedLast)
+			drawFrame(&cur, nullptr, false);
+		s_prevPicture = &cur;
+		s_curPicture ^= 1;
 		s_inFlight.fetch_sub(1, std::memory_order_acq_rel);
+		static const bool s_ilog = std::getenv("HL_INTERP_LOG") != nullptr;
+		static auto s_ilogAt = Clock::now();
+		if (s_ilog && Clock::now() - s_ilogAt >= std::chrono::seconds(1))
+		{
+			s_ilogAt = Clock::now();
+			std::fprintf(stderr, "[interp] v%llu pictures: %u in between, shown as they are: %u with a GS draw, %u cut, %u shadows, %u first\n", static_cast<unsigned long long>(s_vsync),
+				s_istats.lerped, s_istats.gsDrew, s_istats.cut, s_istats.shadows, s_istats.first);
+			s_istats = InterpStats{};
+		}
 	}
 
 	void logStats()
@@ -2198,9 +2308,16 @@ void setRate(int rate)
 	s_rate.store(rate, std::memory_order_relaxed);
 }
 
+// The stream's own vsyncs go to the screen unless this module is presenting (60 and 120) right now. The flag alone stayed true
+// when the fight's scene ended, or when an Ougi's film went to the GS with the scene still on: nothing presented after that,
+// and the screen kept the last picture until the next fight (docs/registro.md, 2026-11-05 08:40). So: the scene on, the flag,
+// and a present of this module in the last 100 ms (two and a half of the game's pictures).
 bool presentsHere()
 {
-	return s_presentsHere.load(std::memory_order_relaxed);
+	if (!s_presentsHere.load(std::memory_order_relaxed) || !s_sceneOnShared.load(std::memory_order_relaxed))
+		return false;
+	const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	return now - s_lastPresentNs.load(std::memory_order_relaxed) < 100000000;
 }
 
 int presentRate()
@@ -2235,7 +2352,7 @@ void setShape(float aspect, float hudScale)
 	applyAspect();
 }
 
-bool transfer(uint8_t path, const uint8_t* data, uint32_t size)
+bool transfer(uint8_t path, uint8_t* data, uint32_t size)
 {
 	static const bool once = [] {
 		const char* on = std::getenv("HL_NATIVE");
@@ -2330,6 +2447,8 @@ void vsync()
 		MTGS::RunOnGSThread([]() { dropTallSceneTarget(); });
 		s_sceneOn = false;
 		s_sceneOnShared.store(false, std::memory_order_relaxed);
+		s_presentsHere.store(false, std::memory_order_relaxed);
+		s_presentRate.store(0, std::memory_order_relaxed);
 		applyAspect();
 		s_fightFrames = 0u;
 		toAllCores();
@@ -2365,6 +2484,8 @@ bool next(uint8_t* path, const uint8_t** data, uint32_t* size)
 			MTGS::RunOnGSThread([f]() { execute(f); });
 			continue;
 		}
+		if (op.draw)
+			MTGS::RunOnGSThread([]() { s_gsDrewInPicture = true; });
 		s_outBytes.swap(op.bytes);
 		if (s_cap && s_vsync >= s_capFrom && s_vsync < s_capUntil)
 		{
