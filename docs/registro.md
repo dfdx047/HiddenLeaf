@@ -41,6 +41,48 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 03:35, noite: regressão da `yld1` passou; PC com os 69 patches e a libsdr; sincronia nos `.PSS`
+
+**Regressão da `app_yld1.apk`** (patches `0062`–`0069`, libsdr, fila do som em 80 ms, Nominum padrão `b2ff28b`):
+
+| aparelho | rodadas | resultado |
+|---|---|---|
+| RP5 16:9 | `n51`, `n52_rp5_v3yld`, `n53_rp5_campyld` | v3 até v17657 e v17810; campanha até v12324 |
+| Odin 16:9 | `n50`, `n54_odin_v3yld`, `n57_odin_campyld` | v3 até v17784 e v17893; campanha até v12719 |
+| Odin 20:9 | `n55`, `n56_odin209_v3yld` | até v17573 e v17695 |
+| Cube | `n47`, `n58_cube_v3yld`, `n48_cube_campyld`, `n46_cube_filmyld` | v3 até v17657 e v17503; campanha até v12194; filmes |
+
+- Nenhum `missing-target`.
+- As cenas do renderizador nativo caem nos mesmos vsyncs das rodadas de antes (v3: 6022, 6359, 10829, 12078, 14280; no RP5:
+  7075, 10529, 13292, 14880; campanha: 4559 … 10615). A única exceção é a `n50` no Odin, que a `n54` não repetiu:
+  foi variação de rodada.
+- O desempenho é o mesmo:
+  - campanha: RP5 43,8 / 44,8 / 36,8 (rodada 3: 43,9 / 44,6 / 36,6); Odin 50 / 50 / 50; Cube 49,7 / 49,0 / 42,8 (rodada 3:
+    49,5 / 49,2 / 42,9);
+  - v3: a menos de 0,5 ms de EE e VU1 por trecho.
+- **Com isto, a `0069` entra na APK final.**
+
+**PC:**
+- `recomp/build.sh` do zero com o ISO europeu (`build/lab/pcbuild.out`): os 69 patches se aplicam, o recompilador dá 0
+  erros, e o `ps2EntryRunner` linka.
+- O código gerado com a libsdr padrão é idêntico ao `build/lab/runner_sdr`.
+- Rodou 100 s com o som do PC mudo (`build/lab/pcrun.log`): o IOP carrega o "SDR driver version 4.0.1", e não há queda
+  nem `missing-target`. A imagem não foi conferida.
+- O ISO não está no caminho do `CLAUDE.md`: está em `~/Downloads/Naruto UN5/`.
+
+**Sincronia dentro dos `.PSS`** (leitor novo, `scratchpad/pssaudio.py`: primeiro PTS do vídeo `0xE0` e do áudio `0xBD`,
+cabeçalho `SShd`, início do som com rms > 0,02 em janelas de 10 ms):
+
+| filme | áudio | som depois do 1º quadro, no arquivo | medido |
+|---|---|---|---|
+| `LOGO_C` | PCM16, 48 kHz | +60 ms | +60 ms |
+| `NARUTO10` | PCM16, **44,1 kHz** | +590 ms | +420 ms |
+| `OPENING` | PCM16, 48 kHz | +290 ms | +340 ms (quadro 0 estimado, ±1 quadro) |
+
+- O `LOGO_C` e a abertura batem com o arquivo.
+- O `NARUTO10` é o único a 44,1 kHz, e o som chega 170 ms antes do que está no arquivo. A entrada de stream do SPU2 é de
+  48 kHz, então isso é comportamento do hardware emulado. Fica "a conferir no PCSX2".
+
 ### 2026-11-05 03:15, noite, itens 3c, 4 e 5: o fim dos filmes a 6 fps; fila do som em 80 ms; Turnip; 60 e 120
 
 **Item 3c, o fim de cada filme:**
