@@ -41,6 +41,23 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 17:05, dia: som dos filmes, o que fica descartado (para a próxima sessão)
+
+O callback de som do jogo é o `pcmCallback` do exemplo `ezmovie` da Sony (`0x1046A0`, registrado em `0x105d9c` pelo
+`0x1021D0` → `sceMpegAddStrCallback`, tipo 2 = PCM da libmpeg; o de vídeo é `0x104800`, tipo 0):
+- `data = cbstr->data + 4`, `len = cbstr->len - 4` (pula os 4 bytes do sub-stream, como o `scratchpad/snd/pssaudio.py`);
+- o anel é a própria estrutura do argumento (`a2`), 0x60000 bytes, com o tamanho em `+0x60008`; trata a volta (`data >= fim`
+  → `data -= tamanho`; o resto vem do início);
+- `0x100FE0` (`audioDecBeginPut`) e `0x1044F0` copiam **na hora** para o buffer de áudio, e `0x100EF0` fecha.
+Logo, com os bytes certos no anel no momento do callback (`s4_cube_boot`: callbacks síncronos, igual), **o demux não é a
+causa**. Também conferidos: o fim do pacote vem do campo de tamanho do PES (não da busca de start code), o cabeçalho PES é
+lido como no extrator, e a volta do anel em `appendGuestRingBytes` recomeça os endereços em `ringBaseAddr`.
+**Falta olhar** (próxima sessão): o envio do buffer de áudio do EE ao IOP (`audioDecSendToIOP`: `sceSifSetDma` para o buffer
+do IOP) e a leitura do AutoDMA no SPU2 (`hl_spu2.cpp`, `sceSdBlockTrans` em laço, a posição que o EE lê para saber qual
+metade encher). Ruído uniforme em escala total em blocos de 0,5–1 s é o buffer do IOP com bytes que não são som, ou o PCM
+deslocado por um número ímpar de bytes. Obs.: o runtime chama PCM de 1 e ADPCM de 2 (`kMpegStrPCM`), a libmpeg usa
+IPU 1, PCM 2, ADPCM 3; como o demux manda os pacotes de som para os dois tipos, o callback do jogo (tipo 2) recebe.
+
 ### 2026-11-05 16:50, dia: lutas dos mods nos 2 aparelhos (passou), retenção agindo no Ougi, som dos filmes (2 tentativas sem efeito)
 
 **APK `app_d21`** (= HEAD `75b7d23` + o `build/lab`; bibliotecas base e `libun5_un6_a35.so` recompiladas às 16:00, as duas com a
