@@ -444,6 +444,27 @@ def data_code_islands(data, o):
             before = islands[-1][1] if islands else lo_data
             start = before if v - before <= 0x1000 else max(before, v - 0x100)
             islands.append([start, v + 8, v])
+    # An island goes on to where its own branches land, a little past its last mark: MOD.BIN's 0x9ee3b0 ends with a jal
+    # into the game (0x9ee408) and then two branch targets that are j's (0x9ee41c to the mod, 0x9ee424 to BTL.BIN), not
+    # marks: cut at 0x9ee410, the A35 died after a fight with missing-target 0x9ee41c (docs/registro.md, 2026-11-05 13:00).
+    def word(v):
+        return struct.unpack_from("<I", data, v - o["addr"])[0] if lo_data <= v < hi_data else None
+    for isl in islands:
+        grown = True
+        while grown:
+            grown = False
+            for p in range(isl[0], isl[1], 4):
+                w = word(p)
+                if w is None:
+                    continue
+                op = w >> 26
+                if not (op in (1, 4, 5, 6, 7, 0x14, 0x15, 0x16, 0x17) or (op == 0x11 and (w >> 21) & 0x1F == 8)):
+                    continue
+                imm = w & 0xFFFF
+                t = p + 4 + ((imm - 0x10000 if imm & 0x8000 else imm) << 2)
+                if isl[1] <= t < min(isl[1] + 0x40, hi_data):
+                    isl[1] = min(t + 8, hi_data)
+                    grown = True
     return [(lo, hi) for lo, hi, _ in islands if hi > lo]
 
 

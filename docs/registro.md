@@ -41,6 +41,46 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 13:20, dia, item 4: o A35 morria no fim da luta (corrigido); a Alpha 1.1X fica preta depois de um Ougi (aberto)
+
+**A35: `missing-target 0x9ee41c` no fim da luta (corrigido em `tools/un5.py`).**
+- **Antes:** `app_d11` (a `libun5_un6_a35.so` regerada às 12:32 com o host de hoje, código do mod de 03:37), mod ligado pela tela
+  de Mods, save carregado, Combate Livre 1P vs 2P, 120 no Odin (`rec/m1_odin_a35`). No fim da luta ficou uma tela quase
+  preta com os controles do menu, VU1 0,0, e o log diz `[guest-branch:missing-target] ... target=0x9ee41c ra=0x7837ec`.
+- **Causa:** o `MOD.BIN` do A35 guarda o código no meio dos dados, e o `ovlelf` acha as ilhas de código por marcas
+  (prólogos, `jr ra`, `j`/`jal` para o código principal). A ilha da função `0x9ee3b0` terminava na marca da `jal 0x17cff8`
+  (`0x9ee408`, + delay = `0x9ee410`). Mas a função segue: `bne` em `0x9ee3f8` vai a `0x9ee41c` (`j 0x9f8c50`, para o próprio
+  mod), e `beqz` em `0x9ee410` vai a `0x9ee424` (`j 0x78625c`, para o BTL). Nenhum dos dois `j` é marca.
+- **Correção:** `data_code_islands` estende cada ilha até onde os desvios dela chegam, se o alvo está até 0x40 bytes depois
+  do fim. Com os argumentos do build, só o `MOD.BIN` muda (BTL, ADV, ETC e TEXTBRA saem idênticos byte a byte): `.init5`
+  +0x10 (`0x9c5258`/`0x9c5260`, dois `j 0x744ac0`), `.init8` +8 (`0x9d2d98`, `j 0x746d24`), `.init13` +0x1c (até `0x9ee42c`).
+  São três pontos com o mesmo defeito; os dois primeiros ainda não tinham sido pegos.
+- `recomp/build.sh --mod "UN6 A35.iso"` + `recomp/android/build.sh --mod un6-a35` (7 min 35 s): 0 erros no programa; `mod` com
+  os mesmos 189 erros de antes (dados lidos como código, em `sub_00940194` etc.). `libun5_un6_a35.so` sha1 `72777012`,
+  `app_d12`.
+- **Depois:**
+  - Odin a 120 (`rec/m2_odin_a35fix`): dois Ougi (o Linked em `hlseg_12` 80–104 s, o do Kyubi em `hlseg_13` 8–33 s),
+    a luta volta ao 3D depois de cada um, Time Over, "Vencedor", "Canção ninja" (48/783/831) e a seleção.
+  - Cube a 60 (`rec/m3_cube_a35fix`): luta até o Time Over (sem Ougi dessa vez), "Vencedor", resultado (89/176/265) e a
+    seleção.
+  - Nos dois, nenhum `missing-target`.
+- **De passagem:** o A35 tem "Salvar dados?" no Combate Livre (START). Um toque a mais no roteiro entrou ali; respondi
+  "Não" e o save ficou como estava.
+
+**Alpha 1.1X: o 3D fica preto depois de um Ougi (aberto; o mesmo do preto depois do choque).**
+- Cube a 60, `app_d11`, Alpha ligada pela tela de Mods (o A35 desliga sozinho; `un5_mods.txt` = `modlib/un6-a11x/disc`;
+  o log diz `mod program ... (the base's code, its own data)`), `rec/x1_cube_a11x`.
+- Primeiro Ougi Linked (Naruto e Sakura) até `hlseg_11` 143,5 s, e a luta volta ao 3D (nativo de v15902 a v16091). O
+  segundo Ougi começa em 148 s; desde o fim dele (`hlseg_12` 8,5 s) até o Time Over, o 3D fica preto e só o HUD aparece.
+  WINNER e "Ninja Song" saem normais.
+- `HL_FRAME_LOG`: depois do segundo Ougi, o jogo só escreve FRAME `80000` (cena na página 0) e a cópia
+  `ff00000000080000`. Não escreve a cópia de Z das sombras (`310401e0`) nem a cópia para 0x70, e o detector do nativo não
+  religa. No Cube, o GS desenha a luta em 3D preta (já anotado), por isso fica preto.
+- É o mesmo quadro do choque de Ougi da base (11:40): o jogo não volta ao arranjo normal da luta depois de um Ougi. Lá
+  ficava o arranjo trocado; aqui, só a página 0. Agora acontece sem choque, então não é coisa do choque.
+- **Texto errado no launcher:** na tela de Mods, a Alpha 1.1X diz "Esta versão do motor ainda não tem o pacote de código
+  deste mod: o jogo abre como a base até ter". O motor roda o programa dela desde 11-04.
+
 ### 2026-11-05 12:35, dia, item 3: listras depois da vitória, Odin (Qualcomm e Turnip) e Cube: não aparecem
 
 `app_d10` (o d6 com `HL_FRAME_LOG`), 120 no Odin, 60 no Cube, jogado por toque, filmes pulados com START (jogador).
