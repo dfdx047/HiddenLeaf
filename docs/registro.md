@@ -41,6 +41,59 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 16:30, dia, prioridade 1b (efeitos, texturas, agarrões): o GS puro apaga a luta; retenção do nativo em 25 vsyncs; aura do Vermilion falta
+
+Tudo no Odin 3 com o **driver da Qualcomm** (o dono deixou o Turnip; troquei às 14:40, a escolha dele está em
+`files/drivers/selected.turnip-1440`), 120 fps interpolado, `app_d14` a `d18`. Estado depois do uso do dono: d14, nenhum mod
+ligado, 120 fps, escala 4x.
+
+**Como jogar daqui:** o `input swipe` do Android não chega à luta (o Naruto não se mexe; nos menus chega). Toques de verdade,
+com dois dedos, por `sendevent` na tela do Odin (`/dev/input/event4`, retrato cru: `x = 1080 - y`, `y = x`):
+`build/lab/mtfight.py` (↑○ e ↓○ com o braço do D-pad segurado e o ataque por cima, depois combos). Rotas: `tosel.sh` (boot
+com os filmes inteiros até o Mode Select) e `cpustage.sh SERIAL N` (Naruto+Sakura contra a CPU, cenário N de 24).
+
+**C. Agarrões ↑○ e ↓○** (`rec/e1_odin_nat` nativo, `e3_odin_gs` GS puro, mesmo roteiro, Hidden Leaf Village, 1P vs 2P parado):
+os 8 agarrões saíram, a câmera vira para a parede e os dois sobem; quadros a 480p lado a lado iguais no nativo e no GS,
+sem textura faltando nem pose errada. Não reproduzi o erro do dono com o Naruto; falta com outros personagens.
+
+**O que o nativo descarta:** só 1 desenho por quadro (a cópia do Z para as sombras; `[native] ... 500 tags dropped` a cada
+500 vsyncs). Desenhos de alfa só (`FBMSK 00FFFFFF`) mandados ao GS (`HL_NATIVE_ALPHA=1`, `rec/e4_odin_alpha`): nenhum
+apareceu. O 1b não vem de descarte.
+
+**B. Cenário preto (Twilight Cliff, 6/24) e a luta preta no GS puro: é o mesmo preto do Ougi, e não é do nativo.**
+- `rec/t1_odin_gs` (`HL_NATIVE=0`, Twilight Cliff contra a CPU): a CPU começa um Ougi aos 16 s e o 3D fica preto, só o HUD
+  ("Great Ball Rasengan", "Vermillion Mode" por cima), até o fim da luta (62 s).
+- `rec/t4_odin_gs` (`HL_NATIVE=0`, **Hidden Leaf Village**, sem Ougi): preto a partir de 14 s, logo depois do primeiro golpe
+  em dupla, até o fim.
+- Ou seja, **na luta o GS do ARMSX2 sozinho fica preto** assim que o jogo passa ao arranjo do Ougi (última passada para a página
+  0, `ff00000000080000`, a tela lendo 0x70: `HL_PRIV_LOG` `dispfb1 1070` o tempo todo). O nativo mostra a própria imagem da
+  cena e esconde isso; quando ele desliga (o quadro de luta dele some), aparece o preto. Daí a comparação "nativo contra GS
+  puro" não vale para efeitos de luta: o GS puro não mostra a luta. No PS2 aparece, então algo antes do GS (EE, VU1 ou a
+  cópia final) difere: pedido ao Nominum abaixo.
+- `rec/k3_odin_nat` (nativo, Twilight Cliff): preto logo no começo, nativo desligado (`scene off` 100 vsyncs depois de ligar)
+  e a retenção não agiu: a idade do lutador chega a 11 e 21 com a luta viva, e o limite era 10.
+- `rec/t2_odin_nat` (nativo, retenção em 300): 4 s de preto (36–40 s, a entrada de um Ougi da CPU), voltou sozinho.
+
+**Correção (segura):** retenção em **25 vsyncs** (`hl_native.cpp` `liveToHold()`, `HL_NATIVE_HOLD=N` muda) e idade do
+lutador até **30** (`hl_game.cpp`). Esperar 300 era para deixar o GS mostrar a entrada do Ougi, mas ele mostra preto.
+`rec/t3_odin_hold` (Twilight Cliff, a CPU, 80 s, d17 com `HL_NATIVE_HOLD=25`): nenhum preto; a retenção agiu uma vez
+(`v15617 taken as a fight`, solta em `v15887`), sem falso positivo. **O A35 tem biblioteca própria:** a de 13:54 não tinha a
+chamada `g_liveFight`, recompilada agora (`build.sh --mod un6-a35`).
+
+**A. Aura vermelha do Naruto no Vermilion Mode: falta no nativo.** `rec/t3_odin_hold` 61–75 s: com a vida baixa, o Naruto do
+1P entra no "Vermillion Mode" ("Ver" no HUD), fica vermelho por um instante (62,5 s) e depois aparece normal, sem a aura
+borbulhante. Não dá para comparar com o GS puro (preto, acima). Mudar a vida não liga o modo: `HL_P1_HP` (novo, só para
+chegar ao ponto) baixa a vida, e o Despertar não pega; precisa de dano de verdade (deixar a CPU bater, ~60 s).
+
+**Pedido ao Nominum (dumps no Odin, `files/gsdumps`):** o detector `ougi_cpu` não disparou no Ougi da CPU desta tarde, então
+não há dump do caso ainda. O que preciso: (1) por que o GS sozinho mostra a luta preta no arranjo do Ougi (`t4_odin_gs`:
+preto 6 s depois do começo, cenário 1, sem Ougi) e o PS2 não; (2) o que desenha a aura do Vermilion Mode e por que o nativo
+não a mostra. Dump sugerido: `HL_GS_DUMP=luta_inicio HL_GS_DUMP_FRAMES=600` com `HL_NATIVE=0` cobre o começo da luta até o
+preto (rota `cpustage.sh SERIAL 1`).
+
+**Não feito:** ↑○/↓○ de outros personagens, 5 cenários (vi 2: Hidden Leaf Village e Twilight Cliff), Alpha, build de 11-03,
+PCSX2 (está em `~/Applications/pcsx2.AppImage`, com savestates do SLES-55605, mas só pela interface).
+
 ### 2026-11-05 14:35, dia (plano de lançamento): proteção do 3D preto, texto da Alpha, "Esticar", ruído no som do boot (achado)
 
 **3D preto depois de um Ougi (Alpha e choque): proteção instalada; o caso exato não se repetiu.**

@@ -652,6 +652,18 @@ namespace
         g_fighterTick = g_tick;
         special(f);
         cpuHealthRoute(f);
+        // HL_P1_HP=<vsync> (debug only, to reach a scene): at the first input of the human fighter on or after it, its health
+        // becomes 0.12 (Naruto's low-health state, the Kyubi aura); the first two fighters seen, so the 2P too.
+        static const uint64_t s_p1At = std::getenv("HL_P1_HP") ? std::strtoull(std::getenv("HL_P1_HP"), nullptr, 10) : 0u;
+        static uint32_t s_p1Done[4] = {};
+        if (s_p1At != 0u && g_tick >= s_p1At && s_p1Done[0] != f && s_p1Done[1] != f && s_p1Done[3] == 0u)
+        {
+            for (uint32_t &d : s_p1Done)
+                if (d == 0u) { d = f; break; }
+            const float hp = std::getenv("HL_P1_HP_VAL") ? static_cast<float>(std::atof(std::getenv("HL_P1_HP_VAL"))) : 0.12f;
+            std::memcpy(g_rdram + f + 0x6Cu, &hp, 4);
+            std::fprintf(stderr, "[route] v%llu fighter 0x%x (kind %x): health %.2f\n", static_cast<unsigned long long>(g_tick), f, read32(f + kFighterKind), hp);
+        }
         static const bool s_trace = std::getenv("HL_FTRACE") != nullptr;
         if (!s_trace)
             return;
@@ -932,7 +944,7 @@ namespace
             unlockEverything();
         // (for the native renderer's fight held without its detector: hl_native.cpp, s_held)
         if (hl_game::g_liveFight != nullptr)
-            hl_game::g_liveFight(hl_game::overlay() == 1 && g_fighterTick != 0u && tick - g_fighterTick <= 10u && !ougiOnScreen());
+            hl_game::g_liveFight(hl_game::overlay() == 1 && g_fighterTick != 0u && tick - g_fighterTick <= 30u && !ougiOnScreen()); // (30: in a live fight the age reaches 11 to 21 now and then)
         static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;
         if (s_spLog && tick % 50u == 0u && hl_game::overlay() == 1)
             std::fprintf(stderr, "[sp] v%llu ages: fighter %lld ougi %lld, on screen %d, scene %d\n", static_cast<unsigned long long>(tick),

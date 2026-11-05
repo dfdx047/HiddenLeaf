@@ -178,13 +178,15 @@ namespace
 	// stays with the Ougi's targets (the 0x1C0 and 0x1E0 blocks swapped, or no shadows at all) and its last copy goes to page
 	// 0 instead of 0x70, so what the display reads keeps only the HUD: the GS draws that black, and the detector, which waits
 	// for the Z copy in 0x1E0, never takes the fight back (docs/registro.md, 2026-11-05 14:00). The host says each vsync if
-	// the fighters read their input with no Ougi on the screen; that for kLiveToHold vsyncs with the scene off (an Ougi's run
-	// in and a missed Ougi last up to ~200) and the scene is taken as a fight, and held while it lasts, the swapped blocks
-	// followed. An Ougi on the screen lets it go, and the GS draws the Ougi as before.
+	// the fighters read their input with no Ougi on the screen; that for liveToHold() vsyncs with the scene off and the scene
+	// is taken as a fight, and held while it lasts, the swapped blocks followed. An Ougi on the screen lets it go, and the GS
+	// draws the Ougi as before. The wait was 300 (an Ougi's run in and a missed Ougi last up to ~200, with the GS showing
+	// them), now 25: the GS alone draws a fight in this layout black, the run ins too (rec/t1_odin_gs, t4_odin_gs: the pure GS
+	// black from the first linked attack or Ougi to the end of the fight), so the GS is no better there (2026-11-05 16:25).
 	std::atomic<bool> s_liveShared{false};
 	uint32_t s_offLive = 0u;
 	bool s_held = false;
-	constexpr uint32_t kLiveToHold = 300u;
+	uint32_t liveToHold() { static const uint32_t s_n = std::getenv("HL_NATIVE_HOLD") ? static_cast<uint32_t>(std::atoi(std::getenv("HL_NATIVE_HOLD"))) : 25u; return s_n; } // (HL_NATIVE_HOLD=N: another wait, in vsyncs)
 	// widescreen: the picture's shape while drawing here (0 stretched to the screen), and the HUD's own squeeze: the 3D is wider
 	// because the game's camera sees more, but the HUD is flat and would be stretched with the rest.
 	float s_shape = 4.0f / 3.0f, s_hudScale = 1.0f;
@@ -679,8 +681,13 @@ namespace
 		static const char* const s_debugKeep = std::getenv("HL_NATIVE_OFF");
 		if (fbp == halfFbp() && fbw == 4u && fpsm == 0x31u && s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneZbp * 32u && !(s_debugKeep && std::strchr(s_debugKeep, 'p')))
 			return kDrop;
+		static const bool s_alphaToGs = std::getenv("HL_NATIVE_ALPHA") != nullptr; // (a test: alpha alone to the GS, not dropped)
 		if (fbmsk == 0x00FFFFFFu)
+		{
+			if (s_alphaToGs)
+				TO_GS("alpha only");
 			return kDrop;
+		}
 		uint32_t target;
 		if (fpsm != PSM_CT32)
 			TO_GS("frame buffer");
@@ -2476,7 +2483,7 @@ void vsync()
 	{
 		const bool live = s_liveShared.load(std::memory_order_relaxed);
 		s_offLive = (!s_sceneOn && live) ? s_offLive + 1u : 0u;
-		if (!s_held && s_offLive >= kLiveToHold)
+		if (!s_held && s_offLive >= liveToHold())
 		{
 			s_held = true;
 			std::fprintf(stderr, "hl_native: v%llu (%lld ms) a fight with the scene off for %u vsyncs: taken as a fight\n", static_cast<unsigned long long>(s_vsync), wallMs(), s_offLive);
