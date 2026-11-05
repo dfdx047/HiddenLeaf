@@ -30,6 +30,7 @@ namespace hl_game
 {
     std::atomic<int> g_paused{0};
     std::atomic<float> g_cameraXScale{1.0f};
+    std::atomic<uint32_t> g_vsync{0u};
     std::atomic<bool> g_unlockAll{false};
     std::atomic<bool> g_specialOn{true};
     std::atomic<uint32_t> g_specialMask{0x20u};
@@ -884,6 +885,7 @@ namespace
                 hl_game::g_cameraXScale = static_cast<float>(std::atof(w));
         }
         g_tick = tick;
+        hl_game::g_vsync.store(static_cast<uint32_t>(tick), std::memory_order_relaxed);
         dumpTick(tick);
         // HL_PRIV_LOG=1: the GS's display registers, a line each time one changes (for screens the display reads wrong)
         static const bool s_privLog = std::getenv("HL_PRIV_LOG") != nullptr;

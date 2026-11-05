@@ -1,0 +1,116 @@
+Hidden Leaf: per thread, the last scheduler events (invocation pushed/finished, made running) with the thread's base pc/ra/sp,
+printed with the dispatches when a thread jumps into nothing (the third-fight jump, registro 2026-11-05).
+
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -34,6 +34,29 @@
+         return rings;
+     }
+ 
++    // Hidden Leaf (patch 0063): per thread, the last scheduler events and the base context (the thread's own, under any
++    // invocation) at each: 'P' an invocation pushed (kind), 'O' one finished (after its onComplete), 'R' the thread made
++    // running. Printed with the dispatches when a thread jumps into nothing.
++    struct HlEventRing
++    {
++        std::array<std::array<uint32_t, 5>, 32> ev{};
++        uint32_t next = 0u;
++    };
++
++    std::unordered_map<int, HlEventRing> &hlEventRing()
++    {
++        static std::unordered_map<int, HlEventRing> rings;
++        return rings;
++    }
++
++    void hlEvent(const GuestThread &t, char tag, uint32_t kind)
++    {
++        auto &r = hlEventRing()[t.id];
++        r.ev[r.next] = {static_cast<uint32_t>(tag) | (kind << 8u), t.context.pc, getRegU32(&t.context, 31), getRegU32(&t.context, 29),
++                        static_cast<uint32_t>(t.invocations.size())};
++        r.next = (r.next + 1u) % 32u;
++    }
++
+     constexpr int KE_OK = 0;
+     constexpr int KE_ERROR = -1;
+     constexpr int KE_ILLEGAL_PRIORITY = -403;
+@@ -282,7 +305,9 @@
+                 {
+                     SET_GPR_U32(&invocation.context, 29, invocationStackTop());
+                 }
++                const uint32_t hlKind = static_cast<uint32_t>(invocation.kind);
+                 owner->invocations.push_back(std::move(invocation));
++                hlEvent(*owner, 'P', hlKind);
+             }
+         }
+ 
+@@ -324,6 +349,8 @@
+             {
+                 GuestInvocation completed = std::move(running->invocations.back());
+                 running->invocations.pop_back();
++                const uint32_t hlKind = static_cast<uint32_t>(completed.kind);
++                GuestThread *const hlOwner = running;
+                 if (completed.onComplete)
+                 {
+                     try
+@@ -334,6 +361,7 @@
+                     {
+                     }
+                 }
++                hlEvent(*hlOwner, 'O', hlKind);
+                 continue;
+             }
+             if (running->id > 0 && std::getenv("HL_EE_DUMP") != nullptr)
+@@ -367,7 +395,9 @@
+             {
+                 SET_GPR_U32(&invocation.context, 29, invocationStackTop());
+             }
++            const uint32_t hlKind = static_cast<uint32_t>(invocation.kind);
+             running->invocations.push_back(std::move(invocation));
++            hlEvent(*running, 'P', hlKind);
+             continue;
+         }
+ 
+@@ -390,6 +420,15 @@
+                             std::cerr << " 0x" << e[0] << "(ra 0x" << e[1] << " sp 0x" << e[2] << ")";
+                     }
+                     std::cerr << std::dec << std::endl;
++                    const auto &events = hlEventRing()[running->id];
++                    std::cerr << "[ee-dump] thread " << running->id << " last scheduler events (tag/kind, base pc ra sp, invocations):" << std::hex;
++                    for (uint32_t i = 0; i < 32u; ++i)
++                    {
++                        const auto &e = events.ev[(events.next + i) % 32u];
++                        if (e[0] != 0u)
++                            std::cerr << " " << static_cast<char>(e[0] & 0xFFu) << (e[0] >> 8u) << "(0x" << e[1] << " 0x" << e[2] << " 0x" << e[3] << " " << e[4] << ")";
++                    }
++                    std::cerr << std::dec << std::endl;
+                 }
+                 m_runtime.reportMissingFunction(m_rdram,
+                                                 &context,
+@@ -1263,7 +1302,9 @@
+         SET_GPR_U32(&invocation.context, 29, invocationStackTop());
+     }
+     invocation.sequence = ++m_invocationSequence;
++    const uint32_t hlKind = static_cast<uint32_t>(invocation.kind);
+     owner->invocations.push_back(std::move(invocation));
++    hlEvent(*owner, 'P', hlKind);
+     publishSnapshot();
+     jumpToDispatcher();
+ }
+@@ -1281,7 +1322,9 @@
+             SET_GPR_U32(&it->context, 29, invocationStackTop());
+         }
+         it->sequence = ++m_invocationSequence;
++        const uint32_t hlKind = static_cast<uint32_t>(it->kind);
+         owner->invocations.push_back(std::move(*it));
++        hlEvent(*owner, 'P', hlKind);
+     }
+     publishSnapshot();
+     throw EeDispatcherTransfer{};
+@@ -1830,6 +1873,7 @@
+     item.status = EeThreadStatus::Running;
+     m_currentThreadId = item.id;
+     renewTimeSlice();
++    hlEvent(item, 'R', 0u);
+ }
+ 
+ void EeScheduler::makeDormant(GuestThread &item)

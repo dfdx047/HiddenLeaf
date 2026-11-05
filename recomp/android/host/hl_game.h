@@ -8,6 +8,7 @@ namespace hl_game
 {
     extern std::atomic<int> g_paused;          // the game frozen: EE, IOP and sound stay where they are
     extern std::atomic<float> g_cameraXScale;  // the 3D's horizontal scale for a wider screen, 1 = the game's 4:3
+    extern std::atomic<uint32_t> g_vsync;      // the vsync now (for other threads' logs: the SPU2's HL_SND_ONSET)
 
     extern bool (*g_nativeOn)();               // libbt4gsx: its native renderer is drawing (a fight or the campaign)
     int divider();                             // vsyncs a game frame takes (the game's own: 2)

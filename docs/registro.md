@@ -41,6 +41,70 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 01:40, noite, itens 2a, 2b, 2c, 2d e 3c: o sdrdrv não tem callback; som por tela; sincronia dos filmes
+
+**Item 2a:**
+- A vigia com a thread em cada linha (`app_sdrwatch12.apk`) passou 2 de 2 no RP5 em 16:9 (`rec/n11_rp5_wv`, v17423;
+  `n12_rp5_wv`, v17431), sem pegar nada. Contando com a `n6`, a build da vigia passou 3 de 3, e a build normal falhou 5
+  de 6 em 16:9. A vigia muda o tempo e esconde a falha.
+- **Ferramenta nova sem custo de tempo (patch `0063-ee-event-ring.patch`):** cada thread guarda, num anel, os últimos
+  32 eventos do escalonador: invocação empilhada (`P`), terminada (`O`, depois do `onComplete`) e thread posta para
+  rodar (`R`). Cada evento leva o `pc`, o `ra` e o `sp` do contexto base. O anel é impresso junto com os despachos
+  quando uma thread salta para o nada. Vai na `app_sdr13.apk`; 3 rodadas no RP5 em 16:9 (`n15`–`n17_rp5_ring`).
+- **Lido e descartado como causa:**
+  - o gancho da câmera troca só a entrada `0x10DD00` da tabela (`replaceFunction`), não os pontos de retomada da
+    função;
+  - as invocações de interrupção, alarme, callback do GS, SIF, RPC, `SyscallOverride` e IPU começam com `sp` 0 ou o da
+    pilha de invocação; nenhuma usa a pilha da thread;
+  - o `0x3389ac`/`0x338c30` antes da falha não é espera: é um laço de 12 entradas que chama a `0x338890`, cujos desvios
+    para `0x3389ac` passam pelo despacho.
+
+**Item 2b (callback do `sdrdrv` depois do BlockTrans), rodada `rec/n13_odin_rpc` (`HL_RPC_LOG=1`, filmes):**
+- 1906 chamadas ao `0x80000701`, todas síncronas (flags `0x2`, tratadas pelo IOP, sem `Nowait` e sem callback). O
+  `0x8100` (BlockTransStatus) foi chamado 1865 vezes, o `0x80e0` (BlockTrans) 5 vezes e o `0x8010` 26 vezes.
+- A função de fim do `sceSdRemote` vem de `*(0x410e50)`, que vale 0 na RAM (`rec/n9_rp5_tl/ram_miss.bin`). O EE não
+  registra nenhum servidor de RPC nem comando SIF para o som.
+- **Não há callback a entregar:** o jogo não chama o `sceSdRemoteCallbackInit` e acompanha a transferência pelo status.
+  Nada a corrigir.
+
+**Item 2c (som por tela), rotas sem `HL_FAST_UNTIL`:**
+- Rota de filmes (`n8_odin_film`, `n8_cube_film`) e mapa vsync→tela pelas gravações:
+  - **mudos:** a escolha de idioma e os logos parados da Bandai Namco Games e da Bandai, do boot até v1401;
+  - **com som:** o filme do logo (`LOGO_C.PSS`, v1401), o `NARUTO10.PSS`, a abertura, o título e os menus;
+  - **1 s mudo em v6309–6358:** é o fim da abertura, enquanto o logo do título se forma.
+- Rotas v3 e de campanha com o jogo base (`n10_odin_v3`, `n10_odin_camp`, `n10_cube_v3`, `n11_cube_v3`, todas até o
+  fim, 0 `missing-target`):
+  - depois de v6400 (fim do `HL_FAST_UNTIL`), só ~1 s de silêncio em cada troca: entrada da luta, entre as lutas e
+    resultado;
+  - seleção, luta, vitória, resultado e campanha têm som.
+- **Não comparado com o PCSX2:** o vídeo de referência (`Gravação_de_tela_20261031_234651.webm`) não tem faixa de som.
+  Os logos mudos ficam como "a conferir no PCSX2".
+
+**Item 2d (estouro), agora com o jogo base:**
+- Odin (`n10_odin_v3` 373 s, `n10_odin_camp` 205 s) e Cube (`n10_cube_v3`, `n11_cube_v3`, 742 s): pico máximo 0,980 e 0
+  segundos com pico acima de 1.
+- rms médio na v3: 0,197 (Odin), 0,190 e 0,198 (Cube). Antes do limitador era 0,198.
+- No RP5 a medida fica para a próxima rodada.
+
+**Item 3c (sincronia dos filmes), `HL_SND_ONSET=1` (novo: `[snd-on]`/`[snd-off]` do SPU2 em janelas de 10 ms, e
+`[mpeg-pic]`, patch `0064-film-picture-log.patch`), `rec/n14_odin_sync` e `n14_cube_sync`:**
+- Os dois aparelhos dão os mesmos vsyncs: o caminho é determinístico.
+- **Imagem presa ao vsync:** na abertura, do quadro 225 (v1937) ao 2400 (v6287), são 2175 quadros em 4350 vsyncs,
+  exatos 2 por quadro.
+- **Começo:**
+  - `LOGO_C.PSS`: primeiro quadro em v1446, o som entra em v1449 (60 ms depois);
+  - `NARUTO10.PSS`: primeiro quadro em v1626, som em v1647 (420 ms);
+  - abertura: quadro 0 em ~v1887, som forte em v1904 (340 ms). Antes, de v1856 a v1885, entram e saem trechos baixos
+    (rms 0,02).
+  - Falta saber se o atraso dos dois últimos é do próprio filme (som que começa depois da imagem): o vídeo de referência
+    não tem som.
+- **Fim:** o último quadro marcado é o 2400 (v6287), e o som sai em v6337, menos de 1 s depois.
+- **Atraso fixo do som:** a fila do SDL fica perto do teto de 200 ms (`kMaxBytes`), com mediana de 128 ms no Odin e de
+  175 ms no Cube. O som toca uns 130–175 ms atrás da imagem, fora a latência do aparelho. Quando a fila passa do teto,
+  o pedaço é descartado (`writeChunk`).
+  - **Próximo passo** (não feito à noite, por risco): teto de ~100 ms com correção de deriva (reamostrar ±0,5%) em vez
+    de descartar.
+
 ### 2026-11-05 01:15, noite, itens 2a, 2d, 3b e 3c: o quadro da `0x31b4e0` é sobrescrito; limitador; YUV em NEON
 
 **Item 2a (o salto da 3ª luta), com a `sdr11` no RP5 em 16:9:**

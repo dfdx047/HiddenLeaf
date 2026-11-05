@@ -1,0 +1,28 @@
+Hidden Leaf: HL_SND_ONSET=1 logs the vsync of a film's first picture and of every 25th ([mpeg-pic]), against the SPU2's
+[snd-on]/[snd-off] (recomp/android/spu2/hl_spu2.cpp): the films' sound against their pictures.
+
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -2524,6 +2524,22 @@
+         if (haveFrame)
+         {
+             writeDecodedFrameToGuest(rdram, imageAddr, frame);
++            // Hidden Leaf (HL_SND_ONSET=1, the films' sound against their pictures): the vsync of a film's first picture and
++            // of every 25th, with the SPU2's [snd-on]/[snd-off] lines
++            static const bool s_onset = std::getenv("HL_SND_ONSET") != nullptr;
++            if (s_onset)
++            {
++                static uint32_t s_pictures = 0u;
++                static uint64_t s_lastTick = 0u;
++                const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
++                if (tick > s_lastTick + 100u)
++                    s_pictures = 0u; // (a new film: no picture for 2 s)
++                if (s_pictures == 0u || s_pictures % 25u == 0u)
++                    std::fprintf(stderr, "[mpeg-pic] v%llu picture %u pts %lld\n", static_cast<unsigned long long>(tick), s_pictures,
++                                 static_cast<long long>(frame.pts90k));
++                ++s_pictures;
++                s_lastTick = tick;
++            }
+         }
+         else if (frameCount == 0u)
+         {

@@ -17,6 +17,7 @@
 #include "emulator/core/iop_memory.h"
 
 #include <SDL3/SDL.h>
+#include "../host/hl_game.h"
 
 #include <algorithm>
 #include <array>
@@ -340,6 +341,37 @@ void spu2Output(StereoOut32 out)
             const float gain = kCeiling / s_env;
             filtered[0] *= gain;
             filtered[1] *= gain;
+        }
+    }
+    // HL_SND_ONSET=1: where the sound starts and stops (10 ms windows, before the limiter), with the vsync, against the
+    // films' [mpeg-pic] lines
+    static const bool s_onset = std::getenv("HL_SND_ONSET") != nullptr;
+    if (s_onset)
+    {
+        static float s_sq = 0.0f;
+        static int s_n = 0, s_quiet = 0, s_logs = 0;
+        static bool s_loud = false;
+        s_sq += filtered[0] * filtered[0] + filtered[1] * filtered[1];
+        if (++s_n == 480)
+        {
+            const float rms = std::sqrt(s_sq / 960.0f);
+            s_sq = 0.0f;
+            s_n = 0;
+            if (!s_loud && rms > 0.02f)
+            {
+                s_loud = true;
+                s_quiet = 0;
+                if (s_logs++ < 400)
+                    std::fprintf(stderr, "[snd-on] v%u rms %.3f\n", hl_game::g_vsync.load(std::memory_order_relaxed), rms);
+            }
+            else if (s_loud && rms < 0.003f && ++s_quiet == 5)
+            {
+                s_loud = false;
+                if (s_logs++ < 400)
+                    std::fprintf(stderr, "[snd-off] v%u (quiet for 50 ms)\n", hl_game::g_vsync.load(std::memory_order_relaxed));
+            }
+            else if (rms >= 0.003f)
+                s_quiet = 0;
         }
     }
     s_chunk[s_chunkPos++] = filtered[0];
