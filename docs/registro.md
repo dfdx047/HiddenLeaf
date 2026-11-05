@@ -30,7 +30,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Save manager (.ps2 in/out) | funciona | `1e8d294` | RP5 | teste de unidade `Ps2CardTest`, import/export à mão | |
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
 | Mods de dados | parcial | `264b764` | Cube | A35 com `HL_MODS` | só testado junto com o A35 |
-| UN6 A35 (pacote de código) | parcial | `43b39fa` (libun5_un6_a35 de 11-03 05:27) | Cube | rota até a luta | precisa de save copiado à mão em `BASLUS-55606NARUTO6`; resultado não conferido |
+| UN6 A35 (pacote de código) | parcial | `d5fc08b` (`libun5_un6_a35.so` de 11-05 03:37, regerado com `recomp/build.sh --mod` do zero) | Cube, RP5, Odin 3 (16:9 e 20:9) | rota `hl_env_a35f` gravada (11-05 03:40–03:54) | luta Naruto x Naruto e volta à seleção nos 4, com som, sem `missing-target`; o save ainda precisa ser copiado à mão em `BASLUS-55606NARUTO6`; o Cube e o RP5 não seguram 60 fps (NTSC) em toda a luta |
 | UN6 Alpha 1.1X | parcial | (este commit; `libun5_a11x.so` de 11-04 15:59) | Cube | rota v3 gravada (11-04 16:10) | só dados mudam: a base roda o programa da mod; luta, Ougi, WINNER e resultado vistos; faltam RP5, Odin e 20:9 |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
@@ -40,6 +40,59 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 04:00, noite, item 5 e conferências: A35 nos 3 aparelhos; giro e 30 fps no Odin; imagem do PC
+
+**A35 com a build da noite:**
+- O código do mod foi regerado do zero com `recomp/build.sh --mod "UN6 A35.iso"` (`build/lab/a35gen.out`):
+  - principal: 9573 funções, 221 stubs, 0 erros;
+  - ADV: 7070; BTL: 5743.
+  - Com a libsdr padrão, a `sceSdRemote` também sai dos stubs no mod.
+- `recomp/android/build.sh --mod un6-a35` gerou a `libun5_un6_a35.so` (165 MB).
+- `build/lab/app_a35.apk` é a `yld1` com o pacote; a `libun5.so` é idêntica à da `yld1`.
+- No RP5 e no Odin, a pasta `modlib/un6-a35` (os 16 arquivos que o mod muda) e o save `BASLUS-55606NARUTO6` foram copiados
+  do Cube (`build/lab/a35q2.sh`). Ficaram lá.
+- Rota `hl_env_a35f` (a de 11-03):
+
+  | rodada | luta (cena nativa) | fps na luta (pior) | fim |
+  |---|---|---|---|
+  | `n61_cube_a35` | v5873–9604 | 59,6 (48,7) | v12046 |
+  | `n62_rp5_a35` | v5873–10622 | 57,5 (46,0) | v11680 |
+  | `n63_odin_a35` | v5871–10360 | 60,0 (59,8) | v12201 |
+  | `n64_odin209_a35` (2400x1080) | v5871–10360 | 60,0 (59,8) | v12139 |
+
+  - Comparação: `log_a35f`, de 11-03, deu 59,3 no Cube.
+  - Nenhum `missing-target`. O log mostra `mod un6-a35, program .../SLUS_556.06`.
+  - A imagem da luta aparece nos 4 (texto do mod em português: "Chakra Recuper.").
+  - Som: 162 de 197 segundos com rms > 0,01, pico 0,98.
+- **A fila do som no A35 (Cube):** mediana de 80 ms, mas 5 segundos abaixo de 25 ms (o menor, 5,5 ms). Todos caem nos
+  segundos em que a luta fica abaixo de 60 fps (56,6, 53,4, 55,6 e 48,7 em v7409–8603): o jogo fez menos som, e a fila
+  segurou sem secar. É desempenho do Cube no NTSC (16,7 ms por quadro), não defeito do som. No jogo base, `n47` e `n58`
+  não têm nenhum segundo abaixo de 25 ms.
+- **Falta:** o save do A35 ainda é cópia à mão; e a Alpha 1.1X (`KNOWN_MODS` e `CODE_RANGES`).
+
+**Odin, giro 90/270 e painel a 30 fps com a `yld1` (`n59_odin_rot_c`, GS do ARMSX2):**
+- Os dois giros caíram em v6000, na 1ª luta. É que o `recfull2.sh` só olha as ações a cada 10 s, e o modo rápido já
+  passou de v2231 e de v4847 antes disso.
+- Imagem certa nos dois, no mesmo quadro da rodada sem giro (`n54`).
+- A arena preta com o HUD nesse trecho da 1ª luta aparece igual sem giro, então não vem do giro.
+- Painel em "30": o contador mostra 25 fps (50 Hz), que é o que o modo faz (as 25 imagens do jogo, uma vez cada).
+  Depois volta a "50 (nativo)".
+- A 50 fps em todo o resto, sem erro. Cada troca no painel dá uma linha de `[perf]` com a pausa (2,2 e 0,7 fps).
+
+**PC, imagem:** 75 s com o som do PC mudo, e captura da janela pelo `spectacle`: a tela de idioma do UN5 ("ENGLISH …
+ITALIANO") desenhada certa, em 4:3. Nenhum `missing-target` (`build/lab/pcrun2.log`).
+
+**Ougi pelo GS (escuro e listrado, SCANMSK 2):** não apareceu nas rotas v3 desta noite. Nenhuma linha
+`fight over with SCANMSK` nos 5 logs (`n47`, `n51`, `n52`, `n54`, `n58`), e no RP5 (`n51`) a luta 2 não teve esse Ougi.
+Sem como reproduzir com a rota atual: fica como estava.
+
+**Menus em 16:9 ("Esticar" e "Desenhar em 16:9"):** não feito.
+- A forma da tela sai do `hl_native.cpp` (`applyAspect`), que fica na `libbt4gsx` (a mesma da APK, junto com o Nominum
+  `b2ff28b`). Trocá-la pede outra regressão inteira.
+- E "Desenhar em 16:9" não está definido: menu largo pelo jogo (patch) ou 4:3 com barras.
+- Pela regra da noite (na dúvida, o mais seguro), fica para o desenvolvedor decidir. A APK final sai com os menus
+  esticados, como hoje.
 
 ### 2026-11-05 03:35, noite: regressão da `yld1` passou; PC com os 69 patches e a libsdr; sincronia nos `.PSS`
 
