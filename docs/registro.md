@@ -41,6 +41,74 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 03:15, noite, itens 3c, 4 e 5: o fim dos filmes a 6 fps; fila do som em 80 ms; Turnip; 60 e 120
+
+**Item 3c, o fim de cada filme:**
+- **Achado:** no fim do `LOGO_C` (v1566–1640) e da abertura (v6276–6370), o jogo cai para 5,5–6 fps no Cube por uns 12 s,
+  com o EE em 165–179 ms por vsync. No Odin cai para 14–30 fps por uns 3 s, com 69 ms. Isso já estava na `n8` e na `n14`
+  (antes da noite). A medida dos filmes que eu tinha feito só olhava os quadros durante o filme.
+- **Perfil** no Odin (`prof2.sh`, 5 s a partir de v1560, `n45_odin_filmprof`):
+  - `publishSnapshot` com o sort dentro: 20%;
+  - mutex: 11%;
+  - `selectReady` e `rotateReadyQueue`: 6%;
+  - alocação: 6%.
+  - Duas ou mais threads prontas cedem a vez uma à outra (`RotateThreadReadyQueue`) durante 1,5 s do jogo. Cada volta é
+    uma transferência e conta poucos ciclos, então o relógio do EE quase não anda.
+- **Patch `0069-ee-yield-loop-skip.patch`:**
+  - depois de 32 giros seguidos com menos de 512 ciclos entre eles, o relógio avança até o próximo evento. É o que já se
+    fazia quando uma thread sozinha só cede a vez. `HL_YIELD_SKIP=0` desliga;
+  - o `publishSnapshot` monta a cópia no máximo a cada 20 ms. Só o painel de depuração do PC a lê.
+- Vai na `app_yld1.apk`, já com o Nominum padrão `b2ff28b`.
+- **Filmes** (`n46_cube_filmyld`, `n49_odin_filmyld`):
+  - 50 fps nos dois fins, com EE de 2 ms no Cube e de 1 ms no Odin;
+  - no vídeo do Cube, os dois trechos de ~10 s a 2–4 quadros por segundo sumiram;
+  - os quadros e os começos de som caem nos mesmos vsyncs de antes (quadro 0 em v1446, 75 em v1626, último, o 2400, em
+    v6287; som em v1449, v1647, v1904 e v6394).
+- **Fila do som com alvo de 80 ms (`HL_SPU2_DRIFT`):**
+
+  | rodada | mediana | menor |
+  |---|---|---|
+  | filmes, Cube (`n46`) | 77,6 ms | 46 ms |
+  | filmes, Odin (`n49`) | 76,7 ms | 59 ms |
+  | rota v3, Cube (`n44_cube_v3_80`) | 78,8 ms | 39,8 ms |
+
+  - Antes era 128 ms no Odin e 175 ms no Cube.
+  - Os buracos de ~0 ms da medida de 02:40 eram estes travamentos, não o alvo baixo.
+- **Rota v3 com a `yld1`:**
+  - Cube (`n47_cube_v3yld`, até v17657): igual vsync por vsync à de antes (cenas em 6022, 6359, 10829, 12078 e 14280), e
+    o mesmo desempenho;
+  - Odin (`n50_odin_v3yld`, até v17784): sem erro, a 50 fps, mas a 2ª luta acabou em v11856 (era v12078) e a 3ª começou
+    em v14580 (era v14280).
+  - Regressão completa em curso (`q_n51_rp5.out`, `q_n54_odin.out`, `q_n58_cube.out`).
+- **Nota sobre as janelas:** nas rotas `hl_env_hp_v3`, os nomes de janela que usei (`luta1`, `Ougi`…) vêm da rota antiga.
+  Nesta rota, a 1ª luta é em v6022–6359 (ainda no modo rápido), a 2ª em v10829–12078 e a 3ª a partir de v14280. As
+  comparações entre rodadas valem, porque usam as mesmas janelas.
+
+**Item 4, RP5 com o Turnip v26.3.0-R6 (`app_nmn4.apk`, Nominum `ff2e56d`, `rp5q4.sh`):**
+- `n4_rp5t_v3_a` e `n4_rp5t_v3_b` vão até o fim, sem `missing-target` e sem `DEVICE_LOST`.
+- Há imagem (brilho de 45 a 228 no centro).
+- fps por janela, a e b:
+  - v6450–6900: 49,9 e 50,1;
+  - v7000–7900: 42,5 e 44,3;
+  - v8000–8950: 35,9 e 35,8;
+  - v8950–9450: 50 e 50;
+  - 2ª luta: 47,4 e 44,7.
+- Campanha b (`n4_rp5t_camp_b`): 42,2 fps na vila (era 27,3 na rodada 3).
+- Linha "replay thread on the cores of capacity": 0 aqui também.
+- **A tela preta do Odin é só no Adreno 830 com o driver da Qualcomm.** No Adreno 650 com o Turnip, o mesmo backend
+  desenha.
+
+**Item 5, 60 e 120 interpolados no Odin (GS do ARMSX2, `app_sdr19.apk`, painel de 120 Hz):**
+
+| modo | rodada | apresentações por segundo na 2ª luta (`[interp]`) |
+|---|---|---|
+| 60 | `n5_odin_c60` | 53–60 |
+| 120 | `n5_odin_c120` | 101–120 |
+
+- Na 1ª luta não há medida: ela cai no `HL_FAST_UNTIL`, e o renderizador nativo desliga em v6359.
+- O jogo fica a 50 fps nas duas rodadas, sem erro.
+- O `fps_mode` voltou para 50 no fim.
+
 ### 2026-11-05 02:55, noite, itens 2a e 2e: o salto da 3ª luta corrigido; a libsdr vira o padrão
 
 **Item 2a: corrigido.** Rodadas com a `app_sdr19.apk` (patch `0068`, libsdr, rota `hl_env_hp_v3` até v17300; as do RP5
