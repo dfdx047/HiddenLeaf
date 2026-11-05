@@ -30,7 +30,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Save manager (.ps2 in/out) | funciona | `1e8d294` | RP5 | teste de unidade `Ps2CardTest`, import/export à mão | |
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
 | Mods de dados | parcial | `264b764` | Cube | A35 com `HL_MODS` | só testado junto com o A35 |
-| UN6 A35 (pacote de código) | parcial | `d5fc08b` (`libun5_un6_a35.so` de 11-05 03:37, regerado com `recomp/build.sh --mod` do zero) | Cube, RP5, Odin 3 (16:9 e 20:9) | rota `hl_env_a35f` gravada (11-05 03:40–03:54) | luta Naruto x Naruto e volta à seleção nos 4, com som, sem `missing-target`; o save ainda precisa ser copiado à mão em `BASLUS-55606NARUTO6`; o Cube e o RP5 não seguram 60 fps (NTSC) em toda a luta |
+| UN6 A35 (pacote de código) | parcial | `d5fc08b` (`libun5_un6_a35.so` de 11-05 03:37, regerado com `recomp/build.sh --mod` do zero) | Cube, RP5, Odin 3 (16:9 e 20:9) | rota `hl_env_a35f` gravada (11-05 03:40–03:54) | luta Naruto x Naruto e volta à seleção nos 4, com som, sem `missing-target`; o launcher cria o save do mod a partir do do UN5 (`ModSaves`, 11-05 04:10); o Cube e o RP5 não seguram 60 fps (NTSC) em toda a luta |
 | UN6 Alpha 1.1X | parcial | (este commit; `libun5_a11x.so` de 11-04 15:59) | Cube | rota v3 gravada (11-04 16:10) | só dados mudam: a base roda o programa da mod; luta, Ougi, WINNER e resultado vistos; faltam RP5, Odin e 20:9 |
 | Packs de textura | quebrado | | | | não implementado no motor |
 | Opções do launcher | parcial | `34467f3` | RP5 | à mão | as sem efeito foram escondidas (`cc6696d`) |
@@ -40,6 +40,28 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 04:10, noite, item 5: o launcher cria o save do A35
+
+- **Achado (`n65_cube_a35_nosave`, `HL_MC_LOG=1`):**
+  - sem `BASLUS-55606NARUTO6`, o A35 só pergunta pelo cartão: 11248 `getinfo` e 2808 `getdir`, nenhum `open`;
+  - mostra "Nenhum dado do Naruto Shippuden: Ultimate Ninja 5 encontrado no cartão de memória (PS2) no slot 1 … insira
+    um cartão de memória (PS2) com dados de Naruto Shippuden: Ultimate Ninja 6" e não sai dali.
+  - O mod espera um save que já exista e não cria um. É do próprio mod (o cartão do runtime cria o save do UN5 base).
+- **O save feito à mão em 11-03** é o do UN5 byte a byte (os 7 arquivos comparados): só mudam o nome da pasta e o do
+  arquivo de cabeçalho dentro dela.
+- **No launcher** (`ModSaves.kt`, `KnownVersions.KnownMod.cardFolder`, chamado no `GameActivity.onCreate` antes do motor):
+  - com um mod ligado que tem `cardFolder` (só o A35: `BASLUS-55606NARUTO6`), se a pasta não existe e há
+    `saves/BESLES-55605NARUTO5`, ela é copiada com o cabeçalho renomeado;
+  - a cópia passa por uma pasta temporária, para que uma parada no meio não deixe save pela metade;
+  - um save do mod que já existe não é tocado.
+- **Testes:**
+  - `ModSavesTest`: 3 casos, passam.
+  - `n66_cube_a35_madesave`, com a `app_a35s.apk` (`yld1` + pacote do A35 + isto) e o save do A35 tirado do Cube: o
+    launcher criou a pasta na partida (arquivos do usuário do app, 04:01). O A35 carregou e lutou (cena nativa
+    v5873–9604), até v12119, sem `missing-target`.
+  - O save original voltou ao Cube depois.
+- **A APK final sai daqui:** `app_a35s.apk`.
 
 ### 2026-11-05 04:00, noite, item 5 e conferências: A35 nos 3 aparelhos; giro e 30 fps no Odin; imagem do PC
 

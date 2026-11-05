@@ -71,6 +71,7 @@ class GameActivity : SDLActivity() {
         store = TouchStore(paths.root)
         installDataList()
         runCatching { copyGsxResources() }
+        runCatching { com.dfdx047.hiddenleaf.data.ModSaves.prepare(paths) } // (a mod's card folder, before the engine reads the card)
         super.onCreate(savedInstanceState)
         addTouchPad()
     }

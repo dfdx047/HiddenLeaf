@@ -28,12 +28,18 @@ object KnownVersions {
         "PRG/TEXTSPA.BIN" to "72ec1bb3aead2764bdc096a1a757c6969d1573c99954df6711e0a0495418e927",
     )
 
-    /** A mod the launcher recognises by its boot program. [pack]: the engine has its code pack. */
-    data class KnownMod(val id: String, val name: String, val elf: String, val elfSha256: String, val changesCode: Boolean, val pack: Boolean)
+    /**
+     * A mod the launcher recognises by its boot program. [pack]: the engine has its code pack. [cardFolder]: the memory
+     * card folder the mod loads and never makes itself (the A35: "no data of Ultimate Ninja 5 in slot 1", for New game too);
+     * the launcher makes it from the base game's save ([ModSaves]).
+     */
+    data class KnownMod(val id: String, val name: String, val elf: String, val elfSha256: String, val changesCode: Boolean, val pack: Boolean,
+                        val cardFolder: String = "")
 
     val MODS = listOf(
         KnownMod("un6-a35", "Ultimate Ninja 6 (Alpha 3.5)", "SLUS_556.06",
-            "47c40141a3e1aeb0c96bc28e8dc311938b284d54fd21f4d8ba953c2e16234809", changesCode = true, pack = false),
+            "47c40141a3e1aeb0c96bc28e8dc311938b284d54fd21f4d8ba953c2e16234809", changesCode = true, pack = false,
+            cardFolder = "BASLUS-55606NARUTO6"),
         KnownMod("un6-a11x", "Ultimate Ninja 6 (Alpha 1.1X)", "SLES_556.05",
             "20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056", changesCode = true, pack = false),
         // the Brazilian version: its ELF is packed (SjCRUNCH) but unpacked it is the European code; a data mod
