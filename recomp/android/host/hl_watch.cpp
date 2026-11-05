@@ -17,10 +17,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "ps2_runtime.h"
+#include "runtime/ee_scheduler.h"
 
 namespace hl_watch
 {
     uint32_t g_addr = 0xFFFFFFF0u; // nothing matches until setup() reads HL_WATCH
+    PS2Runtime *g_runtime = nullptr; // (hl_game's install: each line also names the guest thread and its last dispatch)
 
     namespace
     {
@@ -31,7 +34,7 @@ namespace hl_watch
         bool s_ptrs = false;
         // the last events, printed before an implausible one (HL_WATCH_PTRS)
         constexpr int kRing = 16;
-        char s_ring[kRing][200];
+        char s_ring[kRing][260];
         unsigned s_ringPos = 0;
         std::atomic<int> s_bad{0};
 
@@ -45,8 +48,18 @@ namespace hl_watch
             return v == 0u || ((v & 15u) == 0u && v >= 0x100000u && v < 0x02000000u);
         }
 
-        void report(bool bad, const char *line)
+        void report(bool bad, const char *raw)
         {
+            char line[260];
+            if (g_runtime != nullptr)
+            {
+                const size_t n = std::strlen(raw);
+                std::snprintf(line, sizeof(line), "%.*s thr %d at dispatch pc 0x%x sp 0x%x\n", static_cast<int>(n > 0 && raw[n - 1] == '\n' ? n - 1 : n), raw,
+                              g_runtime->eeScheduler().currentThreadId(), g_runtime->m_debugPc.load(std::memory_order_relaxed),
+                              g_runtime->m_debugSp.load(std::memory_order_relaxed));
+            }
+            else
+                std::snprintf(line, sizeof(line), "%s", raw);
             if (!s_ptrs)
             {
                 std::fputs(line, stderr);

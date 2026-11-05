@@ -6,9 +6,7 @@
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 #include "runtime/hl_vif_dump.h"
-#if defined(HL_WATCH_BUILD)
 #include "runtime/ee_scheduler.h"
-#endif
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +20,12 @@
 #include <thread>
 #include <vector>
 
+#if defined(HL_WATCH_BUILD)
+namespace hl_watch
+{
+    extern PS2Runtime *g_runtime;
+}
+#endif
 namespace hl_game
 {
     std::atomic<int> g_paused{0};
@@ -834,6 +838,9 @@ namespace
         {
             dumpSetup();
             g_rdram = runtime->memory().getRDRAM();
+#if defined(HL_WATCH_BUILD)
+            hl_watch::g_runtime = runtime;
+#endif
             g_cameraOriginal = runtime->lookupFunction(kCameraMatrices);
             if (g_cameraOriginal != nullptr)
                 runtime->registerFunction(kCameraMatrices, cameraMatrices);

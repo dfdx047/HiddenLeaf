@@ -41,6 +41,63 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 01:15, noite, itens 2a, 2d, 3b e 3c: o quadro da `0x31b4e0` é sobrescrito; limitador; YUV em NEON
+
+**Item 2a (o salto da 3ª luta), com a `sdr11` no RP5 em 16:9:**
+- A vigia por valor (`rec/n6_rp5_wv`, `app_sdrwatch11.apk`) passou (v17355) e não pegou nada.
+- `rec/n9_rp5_tl` (`HL_THREAD_LOG`, `HL_MISS_DUMP`) repetiu a falha em v16883 e gravou a RAM (`ram_miss.bin`, que fica
+  em `files/runtime/data/hl_frames/`).
+- **O que a RAM mostra:**
+  - a pilha da thread 8 (`0xb63ca0`+`0xc400`, só dela: nenhuma outra thread do log tem pilha ali) tem, de `0xb6fb80`
+    a `0xb6fbf0`, os quadros de outra cadeia de chamadas: `0x35b310` (laço que chama a vtable+0xc de objetos de 0xa0
+    bytes) → `0x3568a0` (sp `0xb6fbd0`, `ra 0x35b3f0`) → `0x356920` (sp `0xb6fbb0`, `ra 0x3568e0`, s0 salvo =
+    `0xe3b4c0`) → `0x3563c0` (sp `0xb6fb80`, `ra 0x356944`);
+  - a `0x3563c0` tem o mesmo par de chamadas que a `0x31b4e0` (`jal 0x1bf9a0`, depois `jal 0x1bfeb0`) e o quadro dela
+    está no mesmo `sp` (`0xb6fb80`);
+  - o anel de despacho da thread 8: ela rodava em `0x3167c0` (sp `0xb6fe40`), entra o tratador do timer (`0x169a10`),
+    e a thread volta em `0x1bfeb0` com `ra 0x31b658` e `sp 0xb6fb80`. Quem montou esse contexto é a `0x31b4e0`,
+    parada numa troca no `jal 0x1bfeb0`. Ao voltar, o epílogo dela lê o `ra` em `sp+0x30` = `0xb6fbb0`, onde está o s0
+    que a `0x356920` salvou: `0xe3b4c0`.
+- **Leitura:**
+  - enquanto a `0x31b4e0` estava parada no `jal`, a cadeia `0x35b310`... rodou na mesma pilha e por cima do quadro
+    dela;
+  - ou a thread 8 tem dois contextos vivos (o de `0x3167c0` e o da `0x31b4e0`), ou outra execução usa a pilha dela;
+  - o código gerado guarda os registradores no contexto, sem cópia local. Quem copia contexto inteiro são as
+    invocações do runtime (RPC, SIF, `SyscallOverride`), mas todas trocam o `sp` pela pilha de invocação.
+- **Próximo passo:** a vigia `app_sdrwatch12.apk` (`hl_watch.cpp` agora diz a thread e o `pc`/`sp` do último
+  despacho em cada linha), 2 rodadas no RP5 em 16:9 (`n11_rp5_wv`, `n12_rp5_wv`).
+- Enquanto isso, as rodadas de 11-04 no Odin (`n5_odin_*`) estavam com a mod Alpha 1.1X ligada: o `un5_mods.txt` de
+  11-04 ficou no aparelho. Renomeei para `un5_mods.dev.txt`, e as rodadas `n10_odin_*` são com o jogo base.
+
+**Item 2d (estouro):**
+- O `hl_spu2.cpp` ganhou um limitador de pico depois do filtro DC: teto de 0,98, envelope com soltura de 100 ms, que
+  só age acima do teto (`HL_SPU2_LIMIT=0` desliga).
+- Odin, com a `sdr10` (com mod, ver acima): 537 s em `n5_odin_v3` e `n5_odin_camp`, pico máximo 0,980 e 0 segundos com
+  pico acima de 1. Antes, eram 681 de 1438 s acima de 1, com máximo de 1,462. O rms médio da rota v3 foi de 0,198 para
+  0,193.
+- Falta a rota com o jogo base nos 3 aparelhos.
+
+**Item 3b (YUV para RGBA em NEON, patch `0062-film-yuv-neon.patch`):**
+- `MPEG.cpp` guarda os planos 4:2:0 do quadro. No `sceMpegGetPicture`, `hl_yuv2rgba.h` converte direto para a imagem
+  do jogo (colunas de 16 pixels, alfa 0x80, as mesmas do caminho antigo), sem o vetor RGBA intermediário e sem a
+  cópia. Isso junta as propostas 1 e 3 do `docs/ipu.md`.
+- A conversão é a do `yuv2rgb_c_32` do swscale refeita: tabelas de 16.16, BT.601 de faixa limitada, croma do vizinho.
+  No aarch64 vai em NEON, 16 pixels de duas linhas por passo.
+- `HL_MPEG_SWS=1` volta ao swscale. Com `HL_PERF`, o log mostra uma linha `[mpeg]` a cada 250 quadros.
+- **Mesma imagem:** 200 quadros do `OPENING.PSS`, comparados com o swscale da build do Android (`libswscale.a` do
+  DragonRage): 0 bytes diferentes no PC e no Cube (`tools/yuvtest/test.cpp`).
+- **Tempo por quadro**, conversão mais escrita na RAM do jogo, na rota de filmes `hl_env_film.txt`:
+  - Odin (`rec/n8_odin_film`): 0,05 + 0,16 = 0,21 ms, contra 0,24 + 0,31 = 0,55 ms com o swscale (`n8_odin_film_sws`);
+  - Cube (`n8_cube_film`): 0,17 + 0,52 = 0,69 ms, contra 0,53 + 0,87 = 1,40 ms com o swscale.
+- A série inteira de patches se aplica limpa sobre a `e563698`, e o resultado é igual à árvore. O `MPEG.cpp` compila no
+  PC (`-fsyntax-only`).
+
+**Item 3c (fluidez), Odin a 120 Hz:**
+- `mpdecimate` no centro da gravação, de 30 a 110 s: na abertura são 25 quadros diferentes por segundo, que é a taxa do
+  `OPENING.PSS`, com um ou outro segundo de 22 a 24 nos cortes escuros. É igual nos dois caminhos.
+- O gravador do Cube grava a 42 fps, então lá a contagem não serve.
+- Falta conferir a sincronia do som no começo e no fim do filme.
+
 ### 2026-11-05 01:00, noite, item 2a: o salto da 3ª luta só acontece com a câmera larga, no RP5
 
 - **As 3 rodadas da `sdr9` de 11-04, no RP5 em 16:9, falham no mesmo ponto** (`rec/sdr9_rp5_v3`, `sdr9b`, `sdr9c`):

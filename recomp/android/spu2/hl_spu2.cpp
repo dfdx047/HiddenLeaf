@@ -315,13 +315,35 @@ void spu2Output(StereoOut32 out)
 {
     float conv[2] = {static_cast<float>(clamp_mix(out.Left)) / INT16_MAX, static_cast<float>(clamp_mix(out.Right)) / INT16_MAX};
     // (some games leave a voice paused at volume: a DC offset; pcsx2 filters it out)
+    float filtered[2];
     for (int c = 0; c < 2; ++c)
     {
         const float output = conv[c] - s_dcIn[c] + 0.995f * s_dcOut[c];
         s_dcIn[c] = conv[c];
         s_dcOut[c] = output;
-        s_chunk[s_chunkPos++] = output;
+        filtered[c] = output;
     }
+    // Peak limiter, both channels linked (HL_SPU2_LIMIT=0 turns it off): the DC filter takes a mix that clamp_mix already
+    // saturated past 1.0 (up to 1.46 seen in the route, half of the seconds above 1.0), where PCSX2's output to 16 bits
+    // clips it. Instant attack, 100 ms release, ceiling 0.98: the gain only drops around a peak, so the loudness is the
+    // same as PCSX2's and nothing goes past the ceiling.
+    static const bool s_limit = []() { const char *v = std::getenv("HL_SPU2_LIMIT"); return v == nullptr || v[0] != '0'; }();
+    if (s_limit)
+    {
+        constexpr float kCeiling = 0.98f;
+        constexpr float kRelease = 0.99979f; // exp(-1 / (0.1 s * 48000))
+        static float s_env = 0.0f;
+        const float level = std::max(std::fabs(filtered[0]), std::fabs(filtered[1]));
+        s_env = std::max(level, s_env * kRelease);
+        if (s_env > kCeiling)
+        {
+            const float gain = kCeiling / s_env;
+            filtered[0] *= gain;
+            filtered[1] *= gain;
+        }
+    }
+    s_chunk[s_chunkPos++] = filtered[0];
+    s_chunk[s_chunkPos++] = filtered[1];
     if (s_chunkPos == s_chunk.size())
     {
         s_chunkPos = 0u;

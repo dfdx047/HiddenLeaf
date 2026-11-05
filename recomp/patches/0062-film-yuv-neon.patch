@@ -1,0 +1,317 @@
+Hidden Leaf: film frames converted from YUV 4:2:0 straight into the guest's image (NEON on aarch64), the same bytes as
+swscale's C converter; HL_MPEG_SWS=1 keeps the old way; HL_PERF logs the cost per frame (docs/ipu.md, proposals 1 and 3).
+
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -20,6 +20,8 @@
+ #include <memory>
+ 
+ #include "Syscalls/Helpers/State.h"
++#include "hl_yuv2rgba.h"
++#include <chrono>
+ 
+ namespace ps2_stubs
+ {
+@@ -32,8 +34,36 @@
+             int repeatPict = 0;
+             int64_t pts90k = -1;
+             std::vector<uint8_t> rgba;
++            // Hidden Leaf: the 4:2:0 planes (Y w*h, then U and V (w/2)*(h/2)), converted at sceMpegGetPicture straight into the
++            // guest's image (hl_yuv2rgba.h, the same bytes as swscale's C converter); rgba stays empty. HL_MPEG_SWS=1: the old way.
++            std::vector<uint8_t> yuv;
+         };
+ 
++        // HL_PERF: the cost of a film frame's colour conversion and its copy to the guest, a line every 250 frames
++        struct MpegConvertMeter
++        {
++            double convertMs = 0.0, writeMs = 0.0;
++            uint32_t frames = 0u;
++            void add(double c, double w)
++            {
++                static const bool s_on = std::getenv("HL_PERF") != nullptr;
++                if (!s_on)
++                    return;
++                convertMs += c;
++                writeMs += w;
++                if (++frames == 250u)
++                {
++                    static const bool s_sws = std::getenv("HL_MPEG_SWS") != nullptr;
++                    std::fprintf(stderr, "[mpeg] %s: decode-side %.3f ms/frame, write to guest %.3f ms/frame (250 frames)\n",
++                                 s_sws ? "swscale" : "hl_yuv", convertMs / frames, writeMs / frames);
++                    convertMs = writeMs = 0.0;
++                    frames = 0u;
++                }
++            }
++        };
++        MpegConvertMeter g_mpegMeter;
++        double g_mpegConvertMs = 0.0; // (convertFrame's part of the frame now being written)
++
+ #if PS2X_HAS_FFMPEG
+         std::string ffmpegErrorString(int err)
+         {
+@@ -410,6 +440,24 @@
+                 decoded.pts90k = m_frame->best_effort_timestamp != AV_NOPTS_VALUE
+                                      ? m_frame->best_effort_timestamp
+                                      : -1;
++                static const bool s_sws = std::getenv("HL_MPEG_SWS") != nullptr;
++                if (!s_sws && srcFormat == AV_PIX_FMT_YUV420P && (width % 16) == 0 && (height % 2) == 0)
++                {
++                    const auto t0 = std::chrono::steady_clock::now();
++                    const size_t ySize = static_cast<size_t>(width) * height, cSize = static_cast<size_t>(width / 2) * (height / 2);
++                    decoded.yuv.resize(ySize + 2u * cSize);
++                    for (int row = 0; row < height; ++row)
++                        std::memcpy(decoded.yuv.data() + static_cast<size_t>(row) * width, m_frame->data[0] + static_cast<ptrdiff_t>(row) * m_frame->linesize[0], width);
++                    for (int row = 0; row < height / 2; ++row)
++                    {
++                        std::memcpy(decoded.yuv.data() + ySize + static_cast<size_t>(row) * (width / 2), m_frame->data[1] + static_cast<ptrdiff_t>(row) * m_frame->linesize[1], width / 2);
++                        std::memcpy(decoded.yuv.data() + ySize + cSize + static_cast<size_t>(row) * (width / 2), m_frame->data[2] + static_cast<ptrdiff_t>(row) * m_frame->linesize[2], width / 2);
++                    }
++                    g_mpegConvertMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
++                    frames.push_back(std::move(decoded));
++                    return true;
++                }
++                const auto tSws = std::chrono::steady_clock::now();
+                 decoded.rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u);
+ 
+                 uint8_t *dstData[4] = {decoded.rgba.data(), nullptr, nullptr, nullptr};
+@@ -427,6 +475,7 @@
+                     std::cerr << "[MPEG] FFmpeg scaler produced no rows." << std::endl;
+                     return false;
+                 }
++                g_mpegConvertMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tSws).count();
+ 
+                 frames.push_back(std::move(decoded));
+                 return true;
+@@ -1714,8 +1763,39 @@
+             }
+         }
+ 
++        void writeDecodedFrameToGuestRgba(uint8_t *rdram, uint32_t destAddr, const MpegDecodedFrame &frame);
++
+         void writeDecodedFrameToGuest(uint8_t *rdram, uint32_t destAddr, const MpegDecodedFrame &frame)
+         {
++            const auto t0 = std::chrono::steady_clock::now();
++            if (!frame.yuv.empty() && rdram && destAddr != 0u && frame.width > 0 && frame.height > 0)
++            {
++                const uint32_t width = static_cast<uint32_t>(frame.width), height = static_cast<uint32_t>(frame.height);
++                const uint32_t outHeight = (height + 15u) & ~15u;
++                const size_t bytes = static_cast<size_t>(width) * outHeight * 4u;
++                uint8_t *dest = getMemPtr(rdram, destAddr);
++                uint8_t *last = getMemPtr(rdram, destAddr + static_cast<uint32_t>(bytes) - 1u);
++                if (dest && last == dest + bytes - 1u)
++                {
++                    const uint8_t *py = frame.yuv.data();
++                    const uint8_t *pu = py + static_cast<size_t>(width) * height;
++                    const uint8_t *pv = pu + static_cast<size_t>(width / 2u) * (height / 2u);
++                    hl_yuv::convertToGuestColumns(py, static_cast<int>(width), pu, static_cast<int>(width / 2u), pv, static_cast<int>(width / 2u),
++                                                  static_cast<int>(width), static_cast<int>(height), static_cast<int>(outHeight), dest);
++                    g_mpegMeter.add(g_mpegConvertMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
++                    return;
++                }
++            }
++            if (frame.rgba.empty())
++            {
++                return;
++            }
++            writeDecodedFrameToGuestRgba(rdram, destAddr, frame);
++            g_mpegMeter.add(g_mpegConvertMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
++        }
++
++        void writeDecodedFrameToGuestRgba(uint8_t *rdram, uint32_t destAddr, const MpegDecodedFrame &frame)
++        {
+             if (!rdram || destAddr == 0u || frame.rgba.empty() || frame.width <= 0 || frame.height <= 0)
+             {
+                 return;
+--- /dev/null
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/hl_yuv2rgba.h
+@@ -0,0 +1,190 @@
++// Hidden Leaf (patch 0062): YUV 4:2:0 (limited range, BT.601) to RGBA, the same bytes as libswscale's unscaled C converter
++// (yuv2rgb_c_32 with the default colorspace details), without its tables: each channel is Yt[838 + j], j = Y + d(U, V), and
++// the table entry i is clip8(((i - 512) * cy - (384 << 16) - oy + 0x8000) >> 16), so Yt[838 + j] = clip8(((j + 326) * cy
++// - (384 << 16) - oy + 0x8000) >> 16). The NEON path does the same integer steps.
++#pragma once
++#include <cstdint>
++#if defined(__aarch64__)
++#include <arm_neon.h>
++#endif
++
++namespace hl_yuv
++{
++    struct Coeffs
++    {
++        int32_t cy, oy, crv, cbu, cgu, cgv; // (cgu, cgv negative)
++        int32_t offR, offB, offGU, offGV;    // -(c >> 9)
++    };
++
++    inline Coeffs coeffs()
++    {
++        // ff_yuv2rgb_coeffs[SWS_CS_ITU601] and ff_yuv2rgb_c_init_tables(fullRange 0, brightness 0, contrast and saturation 1 << 16)
++        const int64_t inv[4] = {104597, 132201, 25675, 53279};
++        int64_t cy = (int64_t(1) << 16) * 255 / 219;
++        const int64_t oy = int64_t(16) << 16;
++        int64_t crv = inv[0], cbu = inv[1], cgu = -inv[2], cgv = -inv[3];
++        crv = (crv * (int64_t(1) << 16) * (int64_t(1) << 16)) >> 32;
++        cbu = (cbu * (int64_t(1) << 16) * (int64_t(1) << 16)) >> 32;
++        cgu = (cgu * (int64_t(1) << 16) * (int64_t(1) << 16)) >> 32;
++        cgv = (cgv * (int64_t(1) << 16) * (int64_t(1) << 16)) >> 32;
++        cy = (cy * (int64_t(1) << 16)) >> 16;
++        crv = ((crv * (int64_t(1) << 16)) + 0x8000) / cy;
++        cbu = ((cbu * (int64_t(1) << 16)) + 0x8000) / cy;
++        cgu = ((cgu * (int64_t(1) << 16)) + 0x8000) / cy;
++        cgv = ((cgv * (int64_t(1) << 16)) + 0x8000) / cy;
++        Coeffs c{};
++        c.cy = int32_t(cy);
++        c.oy = int32_t(oy);
++        c.crv = int32_t(crv);
++        c.cbu = int32_t(cbu);
++        c.cgu = int32_t(cgu);
++        c.cgv = int32_t(cgv);
++        c.offR = int32_t(-(crv >> 9));
++        c.offB = int32_t(-(cbu >> 9));
++        c.offGU = int32_t(-(cgu >> 9));
++        c.offGV = int32_t(-(cgv >> 9));
++        return c;
++    }
++
++    inline uint8_t yt(const Coeffs &c, int32_t j) // j = Y + chroma offset
++    {
++        const int64_t v = (int64_t(j + 326) * c.cy - (int64_t(384) << 16) - c.oy + 0x8000) >> 16;
++        return uint8_t(v < 0 ? 0 : v > 255 ? 255 : v);
++    }
++
++    inline void pixel(const Coeffs &c, int y, int dr, int dg, int db, uint8_t *out)
++    {
++        out[0] = yt(c, y + dr);
++        out[1] = yt(c, y + dg);
++        out[2] = yt(c, y + db);
++        out[3] = 255;
++    }
++
++    // (int64 products: (V * crv) >> 16 is a floor, as in fill_table)
++    inline int dR(const Coeffs &c, int v) { return int((int64_t(v) * c.crv) >> 16) + c.offR; }
++    inline int dB(const Coeffs &c, int u) { return int((int64_t(u) * c.cbu) >> 16) + c.offB; }
++    inline int dG(const Coeffs &c, int u, int v) { return int((int64_t(u) * c.cgu) >> 16) + c.offGU + int((int64_t(v) * c.cgv) >> 16) + c.offGV; }
++
++    // Scalar reference: w and h even.
++    inline void convertScalar(const Coeffs &c, const uint8_t *py, int ys, const uint8_t *pu, int us, const uint8_t *pv, int vs,
++                              uint8_t *dst, int ds, int w, int h)
++    {
++        for (int row = 0; row < h; ++row)
++        {
++            const uint8_t *yr = py + row * ys, *ur = pu + (row >> 1) * us, *vr = pv + (row >> 1) * vs;
++            uint8_t *d = dst + row * ds;
++            for (int x = 0; x < w; ++x)
++            {
++                const int u = ur[x >> 1], v = vr[x >> 1];
++                pixel(c, yr[x], dR(c, v), dG(c, u, v), dB(c, u), d + x * 4);
++            }
++        }
++    }
++
++#if defined(__aarch64__)
++    // NEON: 16 pixels a step (w a multiple of 16). The chroma offsets in 16 bits (|d| < 512), the luma step in 32 bits.
++    inline uint8x8_t ytNeon(int16x8_t j, int32x4_t cy, int32x4_t base)
++    {
++        // ((j + 326) * cy - (384 << 16) - oy + 0x8000) >> 16, then clip to 0..255; base = 326 * cy - (384 << 16) - oy + 0x8000
++        const int32x4_t lo = vmlaq_s32(base, vmovl_s16(vget_low_s16(j)), cy);
++        const int32x4_t hi = vmlaq_s32(base, vmovl_s16(vget_high_s16(j)), cy);
++        const int16x8_t v = vcombine_s16(vshrn_n_s32(lo, 16), vshrn_n_s32(hi, 16));
++        return vqmovun_s16(v);
++    }
++
++    // (v * k) >> 16 for 8 values of 0..255 (floor, as the int64 shift of fill_table), plus off, in 16 bits
++    inline int16x8_t chromaNeon(uint16x8_t v, int32_t k, int32_t off)
++    {
++        const int32x4_t kk = vdupq_n_s32(k), oo = vdupq_n_s32(off);
++        const int32x4_t lo = vaddq_s32(vshrq_n_s32(vmulq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v))), kk), 16), oo);
++        const int32x4_t hi = vaddq_s32(vshrq_n_s32(vmulq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v))), kk), 16), oo);
++        return vcombine_s16(vmovn_s32(lo), vmovn_s32(hi));
++    }
++
++    inline void rowNeon(const uint8_t *yr, uint8_t *d, int16x8x2_t rr, int16x8x2_t gg, int16x8x2_t bb, int32x4_t cy, int32x4_t base,
++                        uint8_t alpha = 255)
++    {
++        const uint8x16_t yv = vld1q_u8(yr);
++        const int16x8_t y0 = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(yv)));
++        const int16x8_t y1 = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(yv)));
++        uint8x16x4_t out;
++        out.val[0] = vcombine_u8(ytNeon(vaddq_s16(y0, rr.val[0]), cy, base), ytNeon(vaddq_s16(y1, rr.val[1]), cy, base));
++        out.val[1] = vcombine_u8(ytNeon(vaddq_s16(y0, gg.val[0]), cy, base), ytNeon(vaddq_s16(y1, gg.val[1]), cy, base));
++        out.val[2] = vcombine_u8(ytNeon(vaddq_s16(y0, bb.val[0]), cy, base), ytNeon(vaddq_s16(y1, bb.val[1]), cy, base));
++        out.val[3] = vdupq_n_u8(alpha);
++        vst4q_u8(d, out);
++    }
++
++    // NEON: 16 pixels of two rows a step (w a multiple of 16, h even); the two rows share their chroma.
++    inline void convertNeon(const Coeffs &c, const uint8_t *py, int ys, const uint8_t *pu, int us, const uint8_t *pv, int vs,
++                            uint8_t *dst, int ds, int w, int h)
++    {
++        const int32x4_t cy = vdupq_n_s32(c.cy);
++        const int32x4_t base = vdupq_n_s32(326 * c.cy - (384 << 16) - c.oy + 0x8000);
++        for (int row = 0; row < h; row += 2)
++        {
++            const uint8_t *y0r = py + row * ys, *y1r = y0r + ys, *ur = pu + (row >> 1) * us, *vr = pv + (row >> 1) * vs;
++            uint8_t *d0 = dst + row * ds, *d1 = d0 + ds;
++            for (int x = 0; x < w; x += 16)
++            {
++                const uint16x8_t u = vmovl_u8(vld1_u8(ur + (x >> 1))), v = vmovl_u8(vld1_u8(vr + (x >> 1)));
++                const int16x8_t r = chromaNeon(v, c.crv, c.offR);
++                const int16x8_t b = chromaNeon(u, c.cbu, c.offB);
++                const int16x8_t g = vaddq_s16(chromaNeon(u, c.cgu, c.offGU), chromaNeon(v, c.cgv, c.offGV));
++                const int16x8x2_t rr = vzipq_s16(r, r), gg = vzipq_s16(g, g), bb = vzipq_s16(b, b);
++                rowNeon(y0r + x, d0 + x * 4, rr, gg, bb, cy, base);
++                rowNeon(y1r + x, d1 + x * 4, rr, gg, bb, cy, base);
++            }
++        }
++    }
++#endif
++}
++
++namespace hl_yuv
++{
++    // The film's frame straight into the guest's image (sceMpegGetPicture's RGB32 layout): columns of 16 pixels, each column
++    // outHeight rows of 16 * 4 bytes, alpha 0x80; rows past the picture are black. w a multiple of 16, h even.
++    inline void convertToGuestColumns(const uint8_t *py, int ys, const uint8_t *pu, int us, const uint8_t *pv, int vs, int w, int h,
++                                      int outHeight, uint8_t *dest)
++    {
++        static const Coeffs c = coeffs();
++#if defined(__aarch64__)
++        const int32x4_t cy = vdupq_n_s32(c.cy);
++        const int32x4_t base = vdupq_n_s32(326 * c.cy - (384 << 16) - c.oy + 0x8000);
++#endif
++        for (int x = 0; x < w; x += 16)
++        {
++            uint8_t *column = dest + static_cast<size_t>(x / 16) * static_cast<size_t>(outHeight) * 64u;
++            for (int row = 0; row < h; row += 2)
++            {
++                const uint8_t *y0r = py + row * ys, *ur = pu + (row >> 1) * us, *vr = pv + (row >> 1) * vs;
++                uint8_t *d0 = column + static_cast<size_t>(row) * 64u;
++#if defined(__aarch64__)
++                const uint16x8_t u = vmovl_u8(vld1_u8(ur + (x >> 1))), v = vmovl_u8(vld1_u8(vr + (x >> 1)));
++                const int16x8_t r = chromaNeon(v, c.crv, c.offR);
++                const int16x8_t b = chromaNeon(u, c.cbu, c.offB);
++                const int16x8_t g = vaddq_s16(chromaNeon(u, c.cgu, c.offGU), chromaNeon(v, c.cgv, c.offGV));
++                const int16x8x2_t rr = vzipq_s16(r, r), gg = vzipq_s16(g, g), bb = vzipq_s16(b, b);
++                rowNeon(y0r + x, d0, rr, gg, bb, cy, base, 0x80u);
++                rowNeon(y0r + ys + x, d0 + 64, rr, gg, bb, cy, base, 0x80u);
++#else
++                for (int r2 = 0; r2 < 2; ++r2)
++                    for (int i = 0; i < 16; ++i)
++                    {
++                        const int u = ur[(x + i) >> 1], v = vr[(x + i) >> 1];
++                        uint8_t *o = d0 + r2 * 64 + i * 4;
++                        pixel(c, y0r[r2 * ys + x + i], dR(c, v), dG(c, u, v), dB(c, u), o);
++                        o[3] = 0x80u;
++                    }
++#endif
++            }
++            for (int row = h; row < outHeight; ++row)
++                for (int i = 0; i < 16; ++i)
++                {
++                    uint8_t *o = column + static_cast<size_t>(row) * 64u + i * 4;
++                    o[0] = o[1] = o[2] = 0u;
++                    o[3] = 0x80u;
++                }
++        }
++    }
++}
