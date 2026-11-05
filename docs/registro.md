@@ -41,6 +41,64 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 02:40, noite, itens 2a, 3c e 4: a causa do salto da 3ª luta (checkpoint na mesma função mais fundo); fila do som
+
+**Item 2a, a causa:**
+- **Patch `0067-ee-run-end-events.patch`:**
+  - evento `E` no fim de cada execução nativa, com o contexto base que ela deixou;
+  - entrada `C` (`0xee004300`) a cada checkpoint do despacho, com o alvo e a origem da chamada suspensa.
+- Com a `app_sdr17.apk`, a `n26_rp5_end` passou e a `n27_rp5_end` falhou. Na `n27`, a mesma execução nativa tem **dois**
+  checkpoints seguidos:
+  1. `C` no `jal 0x1bf9a0` da `0x3563c0`, origem `0x356520`;
+  2. `C` no `jal 0x1bfeb0` da `0x31b4e0`, origem `0x31b650`, já com `sp 0xb6fb80`;
+  3. por fim, `E` com a base `{0x1bfeb0, 0xb6fb80}`.
+- **O mecanismo:**
+  - a `0x31b4e0` faz `jal 0x1bf9a0` em `0x31b640` e depois `jal 0x1bfeb0` em `0x31b650`;
+  - por baixo dessa chamada, mais fundo na pilha do host, o laço dos objetos chega à `0x3563c0`, que chama a
+    `0x1bf9a0` de novo;
+  - o checkpoint cai nessa chamada de dentro e deixa `ctx->pc = 0x1bf9a0`, e a pilha começa a se desfazer.
+- No `dispatchGuestBranch` da chamada externa vale a regra `if (ctx->pc == entryPc) ctx->pc = fallthroughPc;`. Ela tomou
+  o checkpoint por "a função voltou ao próprio começo" e respondeu `true`.
+- Com isso a `0x31b4e0` seguiu com o `sp` da cadeia de dentro: parou de novo no `jal 0x1bfeb0` e, ao voltar, leu o `ra`
+  do quadro da `0x356920` (`0xe3b4c0`).
+- **Por que só no RP5 em 16:9 e com a libsdr:** é preciso que o checkpoint caia exatamente nessa chamada de dentro. A
+  libsdr, a câmera larga e a vigia só mudam o tempo. O rastro de buscas é o mesmo, entrada por entrada, em todas as
+  falhas (`n21`, `n23`, `n27`).
+- **Correção, patch `0068-ee-checkpoint-unwind.patch`:**
+  - o `checkpointDue` marca `m_hlSuspending` quando responde `true`;
+  - o despacho desmarca antes de cada execução nativa;
+  - enquanto a marca está ligada, o `dispatchGuestBranch` responde `false` depois da chamada, seja qual for o `pc`.
+  - É uma correção do runtime: vale com e sem a libsdr. Vai na `app_sdr19.apk`.
+- Primeiras rodadas da `sdr19`: `n32_rp5_fix` (RP5 16:9, v17929), `n36_cube_fix` (v17989) e `n39_odin_fix`, todas sem
+  `missing-target`. As outras estão em curso (`q_n32_rp5.out`, `q_n36_cube.out`, `q_n39_odin.out`).
+- **Descartado no caminho:**
+  - código do jogo rodando fora da GameThread: o patch `0066` (`[ee-foreign]`) deu 0 linhas na `n23`, que falhou;
+  - uma restauração de contexto feita pelo host: o único `R5900Context temp = *ctx` é o do `sceGszbufaddr`, numa cópia.
+
+**Item 3c (sincronia), fila do som:**
+- Nos filmes a fila não deriva: ela fica no nível em que as primeiras rajadas a deixaram (117–197 ms), num dente de
+  serra sem tendência.
+- **Novo no `hl_spu2.cpp`:** um controle segura a fila perto de um alvo, tocando até 1% mais rápido ou mais devagar
+  (`SDL_SetAudioStreamFrequencyRatio`, média de ~1 s). `HL_SPU2_DRIFT=0` desliga.
+- Teste no Cube com alvo de 60 ms (`app_sdr18.apk`):
+
+  | rodada | mediana da fila | menor |
+  |---|---|---|
+  | filmes (`n30_cube_drift`) | 59,4 ms (era 174,7 na `n14_cube_sync`) | ~0 ms em v1578 e v6313 (fim do `LOGO_C` e da abertura) |
+  | rota v3 (`n31_cube_v3drift`) | 58,8 ms (era 170,7 na `n11_cube_v3`) | 26,8 ms |
+
+  - Nos dois pontos de ~0 ms a produção para por mais de 60 ms. A fila de 175 ms absorvia essas paradas.
+- **O alvo passou para 80 ms** (no código, ainda sem medida). O teste fica para quando o Cube terminar o item 2a.
+
+**Item 4:**
+- A mesma `app_nmn4.apk` com o GS do ARMSX2 (`n5_odin_c50`, `hl_env_hp_v3.txt`) mostra a imagem no Odin, a 50 fps em
+  todos os trechos.
+- A tela preta é só do backend próprio do Nominum `ff2e56d` no Adreno 830, a 50 e a 60 (`n4_odin_v3_a`, brilho 0 do
+  começo ao fim). No Cube, com o Mali, a imagem está certa.
+- **Pedido ao Nominum:** com o `ff2e56d`, o backend próprio sai preto no Adreno 830. Na rodada 3, com o `b2ff28b`, ele desenhava. Entre
+  os commits do meio estão o `caf58d7` (PCRTC: o alvo lido pelo circuito não é guardado) e o `b11058f` (DATE e mistura com
+  cópia do alvo lida no shader). As gravações estão em `build/lab/rec/n4_odin_*`.
+
 ### 2026-11-05 02:25, noite, itens 2a, 2d e 4: o contexto da thread 8 volta a um estado velho; limitador no RP5; rodada 4
 
 **Item 2a:**

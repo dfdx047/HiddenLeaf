@@ -1,0 +1,76 @@
+Hidden Leaf: while a checkpoint unwinds the generated code to the dispatcher, dispatchGuestBranch answers false. The
+"ctx->pc == entryPc: the callee came back to its entry" rule took a checkpoint at a call to the same target deeper in
+the host stack for a return, and the outer function went on with the inner chain's sp (UN5's third fight, RP5).
+
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -280,6 +280,9 @@
+     void postEvent(EeEvent event);
+     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
+     // Hidden Leaf: false on a host thread other than the one running the EE (once it started)
++    // Hidden Leaf: true from the moment a checkpoint is due until the dispatcher starts the next native run, while the
++    // generated code unwinds to it. dispatchGuestBranch then answers false whatever the pc says (see there).
++    [[nodiscard]] bool hlSuspending() const noexcept { return m_hlSuspending; }
+     // Hidden Leaf: a dispatch checkpoint (the call from sourcePc to targetPc suspended), in the current thread's ring
+     void hlNoteCheckpoint(uint32_t sourcePc, uint32_t targetPc) noexcept;
+     [[nodiscard]] bool onExecutorThread() const noexcept { return m_executorThread == std::thread::id{} || m_executorThread == std::this_thread::get_id(); }
+@@ -378,6 +381,7 @@
+     [[noreturn]] void jumpToDispatcher();
+     template <typename F>
+     void guarded(F &&body);
++    bool m_hlSuspending = false;
+     void *m_transferJump = nullptr; // the innermost guarded() (a jmp_buf on its frame)
+     struct ScheduledEvent
+     {
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -466,6 +466,7 @@
+             guarded([&] {
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
+             m_guestExecuting.store(true, std::memory_order_release);
++            m_hlSuspending = false;
+             function(m_rdram, &context, &m_runtime);
+             hlTransferred = false;
+             });
+@@ -547,6 +548,7 @@
+ 
+     if (m_stopRequested.load(std::memory_order_acquire))
+     {
++        m_hlSuspending = true;
+         return true;
+     }
+     if (guestInterruptsMasked())
+@@ -556,6 +558,7 @@
+     }
+     if (m_checkpointPending.load(std::memory_order_acquire))
+     {
++        m_hlSuspending = true;
+         return true;
+     }
+ 
+@@ -563,6 +566,7 @@
+     if (nextEventCycle != 0u && m_eeCycle >= nextEventCycle)
+     {
+         m_checkpointPending.store(true, std::memory_order_release);
++        m_hlSuspending = true;
+         return true;
+     }
+ 
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1585,6 +1585,15 @@
+         return false;
+     }
+ 
++    // Hidden Leaf: a checkpoint below this call is unwinding to the dispatcher. Without this, a checkpoint at a call to the
++    // same target deeper in the host stack (UN5: 0x31b4e0 calls 0x1bf9a0, and under it the object loop's 0x3563c0 calls
++    // 0x1bf9a0 again) leaves ctx->pc == entryPc, the rule below takes it for "the callee came back to its entry", and the
++    // outer function goes on with the inner chain's sp (the third fight's jump to 0xe3b4c0, 2026-11-05).
++    if (m_eeScheduler && m_eeScheduler->hlSuspending())
++    {
++        return false;
++    }
++
+     if (ctx->pc == entryPc)
+     {
+         ctx->pc = fallthroughPc;

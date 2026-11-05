@@ -114,6 +114,25 @@ namespace
             SDL_ResumeAudioStreamDevice(s_stream);
             s_playing = true;
         }
+        // Hold the queue near kTargetBytes by playing up to 1% faster or slower. Without it the queue settles wherever the
+        // first bursts left it (117-197 ms in the films, Odin and Cube, 2026-11-05) and the sound plays that far behind the
+        // picture. The average queue moves about 1 s behind (a chunk is 5.3 ms). HL_SPU2_DRIFT=0: off.
+        static const bool s_drift = []() {
+            const char *e = std::getenv("HL_SPU2_DRIFT");
+            return e == nullptr || e[0] != '0';
+        }();
+        if (s_drift && s_playing)
+        {
+            constexpr float kTargetBytes = 48000.0f * kBytesPerFrame * 80.0f / 1000.0f; // (60 ms ran nearly dry at the films' ends)
+            static float s_avg = kTargetBytes, s_ratio = 1.0f;
+            s_avg += (static_cast<float>(SDL_GetAudioStreamQueued(s_stream)) - s_avg) * (1.0f / 190.0f);
+            const float ratio = 1.0f + std::clamp((s_avg - kTargetBytes) / kTargetBytes * 0.01f, -0.01f, 0.01f);
+            if (std::fabs(ratio - s_ratio) >= 0.0005f)
+            {
+                SDL_SetAudioStreamFrequencyRatio(s_stream, ratio);
+                s_ratio = ratio;
+            }
+        }
     }
 
     void reset()

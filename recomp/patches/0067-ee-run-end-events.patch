@@ -1,0 +1,67 @@
+Hidden Leaf: in the dispatch ring, an 'E' event at the end of each native run (the base context it left; kind 1: it left by
+a transfer) and a 'C' entry at each dispatch checkpoint (the suspended call's target and source).
+
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -280,6 +280,8 @@
+     void postEvent(EeEvent event);
+     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
+     // Hidden Leaf: false on a host thread other than the one running the EE (once it started)
++    // Hidden Leaf: a dispatch checkpoint (the call from sourcePc to targetPc suspended), in the current thread's ring
++    void hlNoteCheckpoint(uint32_t sourcePc, uint32_t targetPc) noexcept;
+     [[nodiscard]] bool onExecutorThread() const noexcept { return m_executorThread == std::thread::id{} || m_executorThread == std::this_thread::get_id(); }
+     void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -459,12 +459,15 @@
+             continue;
+         }
+ 
++        const int hlRunId = running->id;
++        bool hlTransferred = true;
+         try
+         {
+             guarded([&] {
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
+             m_guestExecuting.store(true, std::memory_order_release);
+             function(m_rdram, &context, &m_runtime);
++            hlTransferred = false;
+             });
+             m_guestExecuting.store(false, std::memory_order_release);
+             m_insideInterrupt = false;
+@@ -482,6 +485,8 @@
+             throw;
+         }
+ 
++        if (GuestThread *const hlEnded = thread(hlRunId))
++            hlEvent(*hlEnded, 'E', hlTransferred ? 1u : 0u); // (the end of a native run, and the base context it left)
+         if (guestInterruptsMasked())
+         {
+             continue;
+@@ -504,6 +509,15 @@
+     publishSnapshot();
+ }
+ 
++void EeScheduler::hlNoteCheckpoint(uint32_t sourcePc, uint32_t targetPc) noexcept
++{
++    if (m_currentThreadId == 0)
++        return;
++    auto &d = hlDispatchRing()[m_currentThreadId];
++    d.pcs[d.next] = {0xEE004300u, targetPc, sourcePc}; // printed as "0xee004300(ra <target> sp <source>)"
++    d.next = (d.next + 1u) % 64u;
++}
++
+ void EeScheduler::requestStop()
+ {
+     m_stopRequested.store(true, std::memory_order_release);
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1539,6 +1539,7 @@
+     // this charge bounds straight-line call chains that have no local loop.
+     if (m_eeScheduler && m_eeScheduler->checkpointDue(EeScheduler::kGuestDispatchCycles))
+     {
++        m_eeScheduler->hlNoteCheckpoint(sourcePc, targetPc);
+         return false;
+     }
+ 
