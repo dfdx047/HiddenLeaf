@@ -25,7 +25,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Especial com um botão (Ougi) | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube | jogado por toque, gravado (`p2_cube`, `p3_odin60`, `p4_134`, `p6_cube`, `p8`–`p10`) | ligado e desligado; △△○ à mão e disputa vistos a 50 (Cube), 60 e 120 (Odin); falta o Ougi da CPU a 120 e o Cube a 60 |
 | Painel de pausa | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de campanha (`PAUSE_AT`, `QUIT_AT`): 4:3, tela cheia, continuar, sair | "Sair do jogo" volta ao launcher nos 4 |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
-| 60/120 interpolados | parcial | `app_sdr19.apk` (lab) | Odin 3 | `[interp]` na 2ª luta (`n5_odin_c60`, `n5_odin_c120`) | 53–60 e 101–120 apresentações por segundo; qualidade da imagem não conferida |
+| 60/120 interpolados | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube (60) | jogado e gravado, `tools/flicker.py` quadro a quadro, antes (`b1_odin120_good1`) e depois (`p10`, `p11`) | avisos 2D não piscam mais; sombra preta não vista; 100–120 e 58–60 apresentações por segundo |
 | Resolução 1x–4x | não testado | | | | |
 | Save manager (.ps2 in/out) | funciona | `1e8d294` | RP5 | teste de unidade `Ps2CardTest`, import/export à mão | |
 | Desbloquear tudo | não testado | `44cf73e` | | | opção do launcher (`0050` poke) |
@@ -40,6 +40,27 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 12:20, dia, itens 1 e 2: Ougi da CPU a 60/120; piscar a 60/120 antes e depois
+
+**Item 1, o que faltava:** Ougi da CPU e disputa no Hard, os dois trocados ao vivo no painel. Odin a 120,
+`rec/p11_odin120/play_10.mp4` 79–89 s (Ougi "Linked", pedidos, OK/ERROR, 3 passos do 1P no log); Cube a 60,
+`rec/p11_cube60/play_11.mp4` 15–25 s (3 passos do 1P). Falta só a CPU no Odin a 50 (vai na rota final).
+
+**Item 2 (piscar e efeitos sumindo a 60/120): corrigido pela reescrita da interpolação do `9aa3ad0`.** Método:
+`build/lab/tools/flicker.py VIDEO INÍCIO DURAÇÃO` acha quadros diferentes dos dois vizinhos com os vizinhos parecidos
+(o A-B-A do piscar), na taxa da gravação (118–120 quadros por segundo), numa grade 8x6.
+- **Antes** (`good-20261105-1` reinstalado no Odin, 120, Naruto x Naruto): `rec/b1_odin120_good1/hlseg_12.mp4` 100–117 s,
+  81 picos em ~17 s de luta. Os avisos 2D da disputa ("PRESS!", "Press the appropriate button", "COM You win!!") só saem
+  no quadro real do jogo, 1 de cada ~5; os interpolados vêm sem eles (quadros 2406–2419 e 2476–2480). No fim do mesmo vídeo
+  (`hlseg_13`) a tela preta com HUD e os controles do menu: o congelamento do item 1, como no relato.
+- **Depois** (`app_d6`): Odin 120 `p11_odin120/hlseg_10.mp4` 66–75 s, 0 picos na luta; os avisos do Ougi em 24 quadros
+  seguidos (81,5–81,7 s), todos com eles. Odin 60 `p10_odin120/hlseg_14.mp4` 100–150 s e Cube 60 `p11_cube60/hlseg_10.mp4`
+  100–160 s: os picos que sobram são do próprio jogo (o corte "Linked", o "Start Battle", o NOW LOADING, o clarão branco de
+  um golpe no Cube, quadro 955 em 123,9 s), olhados um por um.
+- **Sombra preta:** não aparece em nenhum dos vídeos a 60/120 de hoje, nem no "antes". Sem caso para comparar; fica aberto
+  até ver um.
+- Falta a mesma disputa de "PRESS!" (a de pedra-papel-tesoura, não a do Ougi) no d6, quadro a quadro.
 
 ### 2026-11-05 11:20, dia, item 1 (continuação): especial desligado, Ougi da CPU e disputa, 50/60/120
 
