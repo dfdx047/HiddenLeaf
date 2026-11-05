@@ -41,6 +41,34 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 01:00, noite, item 2a: o salto da 3ª luta só acontece com a câmera larga, no RP5
+
+- **As 3 rodadas da `sdr9` de 11-04, no RP5 em 16:9, falham no mesmo ponto** (`rec/sdr9_rp5_v3`, `sdr9b`, `sdr9c`):
+  - a 3ª luta começa em v14880 e, em v16883, a thread 8 "volta" para `0xe3b4c0`. O `pc`, o `ra`, o `a0` e o `s0` valem
+    todos `0xe3b4c0`, e a palavra 0 desse objeto vale `0x5e9fb0`, com jeito de vtable;
+  - antes do salto roda o tratador do timer do kernel (`0x169a10`, lê o TIMER0, `ra 0` na pilha de invocação
+    `0x1fe7ff0`, o dos alarmes). Depois a thread 8 volta em `0x1bfeb0`/`0x31b658`;
+  - o retorno seguinte, o `jr ra` de `0x31b4e0` (quadro de 0x80, `ra` em `sp+0x30`, com `sp 0xb6fb80` = slot
+    `0xb6fbb0`), lê `0xe3b4c0` em vez do `ra`.
+- **Passagens:** à meia-noite, a mesma build e a mesma rota passaram 3 de 3 no RP5 (`n1_rp5_dump`, `n2_rp5_dump`,
+  `n3_rp5_pure`, até v17981–18048).
+  - **A diferença é a imagem:** o desenvolvedor pôs o RP5 em 4:3 às 00:03 (`un5_settings.txt`, `aspect_milli=1333`,
+    copiado em `files/un5_settings.dev-0003.txt`). Os logs confirmam: as rodadas com falha têm 13 linhas `[cam]`
+    (câmera larga), e as passagens têm 0.
+  - Voltei o RP5 a `aspect_milli=0` (tela cheia, o padrão das rotas). Com isso, a `sdr10` repete a falha
+    (`rec/n4_rp5_ret`, v17973, `cam=13`). No fim da noite o RP5 volta a 1333.
+- **O que não reproduz:**
+  - o Odin em 16:9 (`n1_odin_sdr9`, `n2_odin_pure`, câmera larga, até v18024–18068);
+  - o Cube (tela quadrada: não há câmera larga);
+  - a build da vigia no RP5 em 16:9 (`w10_rp5_v3`), cuja 2ª luta acaba em outro momento (v12034 contra v13292).
+- **Tentativa sem resultado:** `HL_RETCHECK` (um gancho em volta da `0x31b4e0`). A função é interrompida por trocas de
+  thread e volta ao despacho no meio (em `0x172390`/`0x170000`), então o gancho só pega falsos positivos. Tirei.
+- **Próximo passo:** a vigia (`app_sdrwatch11.apk`) com `HL_WATCH=b6fbb0` e o modo novo `HL_WATCH_VALUE=e3b4c0` (só as
+  escritas desse valor, com os 16 eventos antes), no RP5 em 16:9.
+- **Item 1, no PC:** o runtime foi recompilado com `-ffp-contract=off` (`build/lab/pc_nofma.log`, 00:28). Em 70 s, os
+  dois binários (`ps2EntryRunner` novo e `build/lab/ps2EntryRunner_fma`) dão o mesmo log de boot: 0 erros, só o número
+  de linhas `[perf] nice` muda (`pc_nofma_run.log`, `pc_fma_run.log`). Não vi a imagem.
+
 ### 2026-11-05 00:30, noite, itens 1 e 3a: `-ffp-contract=off` no PC; os filmes não são escuros
 
 **Item 1 (`-ffp-contract=off`, pedido do `docs/integracao.md` do Nominum, linha 268):**

@@ -9,7 +9,7 @@
 // setup() runs from un5_main.cpp after hl_env.txt is loaded (a static initializer would run before it, at dlopen).
 // HL_WATCH_PTRS=1 (for a heap list head): a write or change is logged only when a word of the watched 8 bytes stops looking
 // like a pointer of that list (0, or 16-aligned in 0x100000-0x2000000), and then with the last 16 events before it; without
-// it, the first 400 of each kind are logged.
+// it, the first 400 of each kind are logged. HL_WATCH_VALUE=<hex>: the same, for the writes of that one value.
 #if defined(HL_WATCH_BUILD)
 #include <dlfcn.h>
 #include <atomic>
@@ -35,7 +35,15 @@ namespace hl_watch
         unsigned s_ringPos = 0;
         std::atomic<int> s_bad{0};
 
-        bool plausible(uint32_t v) { return v == 0u || ((v & 15u) == 0u && v >= 0x100000u && v < 0x02000000u); }
+        // HL_WATCH_VALUE=<hex>: in place of the pointer test, only that value is "bad" (who writes it)
+        bool s_haveValue = false;
+        uint32_t s_value = 0u;
+        bool plausible(uint32_t v)
+        {
+            if (s_haveValue)
+                return v != s_value;
+            return v == 0u || ((v & 15u) == 0u && v >= 0x100000u && v < 0x02000000u);
+        }
 
         void report(bool bad, const char *line)
         {
@@ -80,6 +88,13 @@ namespace hl_watch
         g_addr = static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) & ~3u;
         const char *ptrs = std::getenv("HL_WATCH_PTRS");
         s_ptrs = ptrs != nullptr && ptrs[0] == '1';
+        if (const char *value = std::getenv("HL_WATCH_VALUE"))
+        {
+            s_haveValue = true;
+            s_value = static_cast<uint32_t>(std::strtoul(value, nullptr, 16));
+            s_ptrs = true;
+            std::fprintf(stderr, "[watch] only the writes of 0x%08x are logged, with the 16 events before\n", s_value);
+        }
         std::fprintf(stderr, "[watch] watching 0x%08x+8%s\n", g_addr, s_ptrs ? ", logging only what is not a list pointer" : "");
     }
 
