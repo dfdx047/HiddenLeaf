@@ -41,6 +41,39 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 16:50, dia: lutas dos mods nos 2 aparelhos (passou), retenção agindo no Ougi, som dos filmes (2 tentativas sem efeito)
+
+**APK `app_d21`** (= HEAD `75b7d23` + o `build/lab`; bibliotecas base e `libun5_un6_a35.so` recompiladas às 16:00, as duas com a
+chamada `Bt4Gsx_LiveFight`). Antes da `d21`, a biblioteca do A35 era a de 13:54, sem a retenção.
+
+**Mods, luta completa como jogador (Ougi pelo botão especial, vitória, resultado, volta à seleção), 1P vs 2P parado, chakra
+infinito, Hidden Leaf Village.** Tudo gravado com som:
+| Aparelho | Mod | fps | Gravação | Resultado |
+|---|---|---|---|---|
+| RG Cube | A35 | 50 (o jogo NTSC: 60 Hz) | `rec/r1_cube_a35_50` | Ougi na tela 3 vezes (o último com a transformação de Kyubi do A35), "Vencedor", rank S, seleção |
+| RG Cube | Alpha 1.1X | 60 | `rec/r2_cube_a11x_60` | 8 retenções, uma em cada Ougi; vitória (Health 74), seleção |
+| Odin 3, Qualcomm | A35 | 60 | `rec/r3_odin_a35_60` | Ougi na tela 7 vezes, "Vencedor" (Saúde 57), seleção |
+| Odin 3, Qualcomm | Alpha 1.1X | 50 | `rec/r4_odin_a11x_50` | 4 retenções, vitória (Health 62), seleção |
+- `build/lab/blackscan.sh DIR` (o centro da tela, sem HUD nem controles, com Y médio < 24, a cada 0,5 s): nas lutas nenhum trecho
+  escuro; os que aparecem (≤ 1,5 s) são telas de transição com os controles de menu (vistos: `e.png` do scratchpad).
+- **A retenção agindo:** na Alpha, cada Ougi tira o quadro de luta do nativo e, 25 vsyncs depois, a retenção pega (~370 vsyncs,
+  até o Ougi entrar na tela). Nesse trecho a disputa do Ougi ("PRESS!", "Done", as mãos se chocando) aparece certa
+  (`r2_cube_a11x_60` seg. 12, 22–31 s), e a luta volta normal. Com a espera de 300, esse trecho era preto (o GS sozinho).
+- O Odin ficou no driver da Qualcomm em todas as rodadas desde 14:40 (item 5).
+- Texto da Alpha na tela de Mods (corrigido, `app_d21`): visto no Cube e no Odin.
+
+**Toques:** no Odin a luta só aceita o toque de baixo nível (`mtfight.py`); no Cube o `input swipe` funciona (`fightrun.sh`), e o
+`sendevent` no `goodix-ts` não chegou.
+
+**Som dos filmes e logos: não corrigido.** Duas tentativas no `MPEG.cpp`, as duas medidas com boot em tempo real no Cube e o
+mapa de ruído (`scratchpad/snd/nmap.py`):
+1. Cópia do pacote de som para fora do anel (`s3_cube_boot`): ficou pior, ruído médio contínuo. O jogo usa
+   `sceMpegDemuxPssRing` e o callback trata a volta do anel pelo endereço; um ponteiro fora do anel quebra a conta.
+2. Callbacks de som rodando dentro do demux, com `invokeCurrentSequence`, como a libmpeg faz (`s4_cube_boot`): **igual** a antes
+   (`s2`). Logo os bytes que o callback lê não são reescritos antes dele: a hipótese do anel estava errada.
+Desfeitas as duas (o patch da 2 guardado em `scratchpad/0070-mpeg-sound-callbacks-in-demux.patch.tried`, fora da série). O ruído
+está depois do callback: o caminho EE → IOP → SPU2 (o envio do PCM ao IOP ou a leitura do AutoDMA).
+
 ### 2026-11-05 16:30, dia, prioridade 1b (efeitos, texturas, agarrões): o GS puro apaga a luta; retenção do nativo em 25 vsyncs; aura do Vermilion falta
 
 Tudo no Odin 3 com o **driver da Qualcomm** (o dono deixou o Turnip; troquei às 14:40, a escolha dele está em
