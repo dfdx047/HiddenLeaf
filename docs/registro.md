@@ -41,6 +41,10 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 17:46, dia: correção de hora
+
+- A entrada de baixo, marcada 17:52, foi escrita às 17:46.
+
 ### 2026-11-05 17:52, dia: fechamento e correção de horas
 
 - **Horas (correção):** as três entradas de baixo, marcadas 16:50, 17:05 e 17:50, foram escritas às 16:48, 16:51 e 17:45
