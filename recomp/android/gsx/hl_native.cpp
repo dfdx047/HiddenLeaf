@@ -71,6 +71,19 @@ namespace
 	//     against the scene's Z itself: same pixels, finer, and no copy. It is read as CT24 with TEXA's AEM: no colour, no shade;
 	//   - bloom, page 0x1C0 again, then pages 0x1E0 and 0x1E8 (128 and 64): shrink, blur, and added back to the scene.
 	constexpr uint32_t kSceneFbp = 0, kSceneFbw = 8, kSceneZbp = 0xF0, kPostFbp = 0x1C0, kHalfFbp = 0x1E0, kQuarterFbp = 0x1E8, kDisplayFbp = 0x70;
+	// The game can also swap the two blocks: the Z copy (and the half and quarter) in 0x1C0, the shadows and the bloom in
+	// 0x1E0. It happens after an Ougi clash (rock-paper-scissors) and stays so for the rest of the fight, or until another
+	// Ougi swaps them back. The fight detector only knew 0x1E0, the GS got the fight and drew it black, with the HUD on top,
+	// for the rest of the round (docs/registro.md, 2026-11-05). Which way it is goes by the page of each frame's Z copy.
+	// Off by default (HL_NATIVE_SWAP=1 turns it on, for tests): with it the native also takes the Ougi, which use the same
+	// swapped blocks, and draws them with blocks of garbage (rec/v5_odin_d9, 2026-11-05); the GS draws them right.
+	const bool s_swapOn = std::getenv("HL_NATIVE_SWAP") != nullptr;
+	uint32_t s_swap = 0u; // 0: as above; 0x20: swapped (the pages of 0x1C0 and 0x1E0 traded)
+	inline uint32_t postFbp() { return kPostFbp ^ s_swap; }
+	// the device's clock in ms (as the recordings' hlseg_t.txt), for the log lines a recording is matched against
+	inline long long wallMs() { return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); }
+	inline uint32_t halfFbp() { return kHalfFbp ^ s_swap; }
+	inline uint32_t quarterFbp() { return kQuarterFbp ^ s_swap; }
 	constexpr int kSceneW = 512, kSceneH = 448, kDisplayW = 512, kDisplayH = 512;
 	enum Target : uint8_t { kTScene, kTShadow, kTBloom, kTHalf, kTQuarter, kTDisplay, kTargets };
 	constexpr int32_t texOfTarget(int target) { return -2 - target; }
@@ -180,6 +193,21 @@ namespace
 	// its prompts (docs/registro.md, 2026-11-05).
 	const bool s_scanKeep = std::getenv("HL_SCANMSK_KEEP") != nullptr;
 	uint32_t s_prim = 0;
+	// HL_FRAME_LOG=1: every 50 vsyncs, the draw targets (FRAME) the game's GIF tags went to, with the scene on or off (for a
+	// fight the detector stops seeing: the black with the HUD after an Ougi clash, docs/registro.md 2026-11-05)
+	const bool s_frameLog = std::getenv("HL_FRAME_LOG") != nullptr;
+	uint64_t s_frameSeen[12] = {};
+	uint32_t s_frameTags[12] = {};
+	inline void noteFrameTag(uint64_t frame)
+	{
+		for (uint32_t i = 0; i < 12u; ++i)
+			if (s_frameTags[i] == 0u || s_frameSeen[i] == frame)
+			{
+				s_frameSeen[i] = frame;
+				++s_frameTags[i];
+				return;
+			}
+	}
 
 	// the current vertex
 	float s_s = 0, s_t = 0, s_q = 1;
@@ -638,7 +666,7 @@ namespace
 		const uint32_t fbmsk = static_cast<uint32_t>(frame >> 32);
 		// (the copy of the scene's Z for the shadows: they test against the scene's own. And alpha alone: nothing reads the frame's alpha.)
 		static const char* const s_debugKeep = std::getenv("HL_NATIVE_OFF");
-		if (fbp == kHalfFbp && fbw == 4u && fpsm == 0x31u && s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneZbp * 32u && !(s_debugKeep && std::strchr(s_debugKeep, 'p')))
+		if (fbp == halfFbp() && fbw == 4u && fpsm == 0x31u && s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneZbp * 32u && !(s_debugKeep && std::strchr(s_debugKeep, 'p')))
 			return kDrop;
 		if (fbmsk == 0x00FFFFFFu)
 			return kDrop;
@@ -650,11 +678,11 @@ namespace
 			TO_GS("frame buffer");
 		if (fbp == kSceneFbp && fbw == kSceneFbw)
 			target = kTScene;
-		else if (fbp == kPostFbp && fbw == 4u)
+		else if (fbp == postFbp() && fbw == 4u)
 			target = s_tme ? kTBloom : kTShadow;
-		else if (fbp == kHalfFbp && fbw == 2u)
+		else if (fbp == halfFbp() && fbw == 2u)
 			target = kTHalf;
-		else if (fbp == kQuarterFbp && fbw == 1u)
+		else if (fbp == quarterFbp() && fbw == 1u)
 			target = kTQuarter;
 		else if (fbp == kDisplayFbp && fbw == kSceneFbw)
 			target = kTDisplay;
@@ -703,7 +731,7 @@ namespace
 		else
 		{
 			// (none, or the shadows' test, which here goes against the scene's Z)
-			const bool shadowTest = target == kTShadow && ztst == 3u && (zbuf & 0x1FFu) == kHalfFbp;
+			const bool shadowTest = target == kTShadow && ztst == 3u && (zbuf & 0x1FFu) == halfFbp();
 			if (!zmsk || (ztst != 1u && !shadowTest))
 				TO_GS("Z buffer");
 		}
@@ -765,13 +793,13 @@ namespace
 			int source = -1;
 			if (tbp == kSceneFbp * 32u && tbw == kSceneFbw && tpsm == PSM_CT32)
 				source = kTScene;
-			else if (tbp == kPostFbp * 32u && tbw == 4u && tpsm == 1u)
+			else if (tbp == postFbp() * 32u && tbw == 4u && tpsm == 1u)
 				source = kTShadow;
-			else if (tbp == kPostFbp * 32u && tbw == 4u && tpsm == PSM_CT32)
+			else if (tbp == postFbp() * 32u && tbw == 4u && tpsm == PSM_CT32)
 				source = kTBloom;
-			else if (tbp == kHalfFbp * 32u && tbw == 2u && tpsm == PSM_CT32)
+			else if (tbp == halfFbp() * 32u && tbw == 2u && tpsm == PSM_CT32)
 				source = kTHalf;
-			else if (tbp == kQuarterFbp * 32u && tbw == 1u && tpsm == PSM_CT32)
+			else if (tbp == quarterFbp() * 32u && tbw == 1u && tpsm == PSM_CT32)
 				source = kTQuarter;
 			if (source >= 0 && s_debugOff && std::strchr(s_debugOff, 'p'))
 				TO_GS("target read");
@@ -1001,8 +1029,9 @@ namespace
 		}
 	}
 
-	// What says a fight is on the screen: every frame of one copies the Z to page 0x1E0 (width 4, Z24), for its shadows.
-	constexpr uint64_t kFightFrameMask = 0x3F3F01FFull, kFightFrame = 0x310401E0ull;
+	// What says a fight is on the screen: every frame of one copies the Z to page 0x1E0 (width 4, Z24), for its shadows, or to
+	// 0x1C0 with the blocks swapped (s_swap).
+	constexpr uint64_t kFightFrameMask = 0x3F3F01DFull, kFightFrame = 0x310401C0ull;
 	constexpr uint32_t kFightFramesToStart = 8u, kFightVsyncsToStop = 30u;
 	bool s_fightSeen = false;
 	uint32_t s_fightFrames = 0u, s_vsyncsSinceFight = 1u << 30;
@@ -1038,8 +1067,15 @@ namespace
 			std::fprintf(stderr, "hl_native: v%llu game SCANMSK %llu (scene %d)\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(value & 3u), s_sceneOn ? 1 : 0);
 		s_regs[r & 255u] = value;
 		s_seen[r & 255u] = true;
-		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame)
+		if ((r == R_FRAME || r == R_FRAME + 1u) && (value & kFightFrameMask) == kFightFrame && (s_swapOn || (value & 0x20u)))
+		{
 			s_fightSeen = true;
+			const uint32_t swap = (value & 0x20u) ? 0u : 0x20u;
+			if (swap != s_swap)
+				std::fprintf(stderr, "hl_native: v%llu (%lld ms) the Z copy in page %llx: shadows and bloom in %x\n", static_cast<unsigned long long>(s_vsync), wallMs(),
+					static_cast<unsigned long long>(value & 0x1FFu), kPostFbp ^ swap);
+			s_swap = swap;
+		}
 		if (r == R_TRXDIR && (value & 3u) == 0u)
 			beginTransfer();
 		s_gsInSync = false;
@@ -1089,6 +1125,8 @@ namespace
 			}
 			else if (flg >= 2u)
 				receiveImage(body, qwords * 16u);
+			if (s_frameLog && flg < 2u)
+				noteFrameTag(s_regs[R_FRAME + ((s_prim >> 9) & 1u)]);
 			at += 16u + qwords * 16u;
 		}
 		s_gsInSync = true; // (the GS saw it all)
@@ -2428,7 +2466,7 @@ void vsync()
 		s_dirty = true;
 		s_gsInSync = true;
 		toSmallCores();
-		std::fprintf(stderr, "hl_native: scene on at vsync %llu\n", static_cast<unsigned long long>(s_vsync));
+		std::fprintf(stderr, "hl_native: scene on at vsync %llu (%lld ms)\n", static_cast<unsigned long long>(s_vsync), wallMs());
 	}
 	else if (s_sceneOn && s_vsyncsSinceFight > kFightVsyncsToStop)
 	{
@@ -2452,10 +2490,19 @@ void vsync()
 		applyAspect();
 		s_fightFrames = 0u;
 		toAllCores();
-		std::fprintf(stderr, "hl_native: scene off at vsync %llu\n", static_cast<unsigned long long>(s_vsync));
+		std::fprintf(stderr, "hl_native: scene off at vsync %llu (%lld ms)\n", static_cast<unsigned long long>(s_vsync), wallMs());
 	}
 	if ((s_vsync % 500u) == 0u)
 		logStats();
+	if (s_frameLog && (s_vsync % 50u) == 0u)
+	{
+		char line[640];
+		int n = std::snprintf(line, sizeof(line), "hl_native: v%llu (%lld ms) scene %d, since fight %u, frames", static_cast<unsigned long long>(s_vsync), wallMs(), s_sceneOn ? 1 : 0, s_vsyncsSinceFight);
+		for (uint32_t i = 0; i < 12u && s_frameTags[i] != 0u && n < 600; ++i)
+			n += std::snprintf(line + n, sizeof(line) - n, " %llx:%u", static_cast<unsigned long long>(s_frameSeen[i]), s_frameTags[i]);
+		std::fprintf(stderr, "%s\n", line);
+		std::memset(s_frameTags, 0, sizeof(s_frameTags));
+	}
 }
 
 void flushAll()

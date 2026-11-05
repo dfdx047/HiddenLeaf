@@ -41,6 +41,40 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 11:40, dia: correção de horas, o Odin com o Turnip, o preto depois do choque de Ougi (aberto)
+
+**Horas erradas:** as duas entradas anteriores, "11:20" e "12:20", foram escritas às ~10:00 e ~10:40 (o relógio do
+aparelho e do PC confirma: 10:58 quando percebi). O relatório publicado como "13:00"
+(https://claude.ai/artifact/Utyg1DbQ6nes1aRwWNbDLE) saiu às ~10:45; será republicado na mesma URL às 13:00.
+
+**O Odin 3 está com o Turnip desde as 07:41.** O launcher tem `turnip_gen8_v38-patched-vulkan_1.4.363` escolhido
+(`files/drivers/selected`); o log diz `VKLoader: opening custom Vulkan driver via adrenotools`. Todas as gravações de hoje no
+Odin (`d1` a `p11`, `b1`, `v1` a `v5`) são com o Turnip, não com o driver da Qualcomm. As de 11-05 03:20–04:42 (`n5*`, `f1_*`)
+eram com o da Qualcomm. Os itens 1 e 2 no Odin precisam ser refeitos com o driver do sistema (fica na rota final; o Turnip
+volta a ser escolhido no fim, como estava).
+
+**Preto com HUD depois do choque de Ougi (pedra-papel-tesoura), aberto.** Visto 3 vezes, sempre depois do "PRESS!" dos dois
+Ougi ao mesmo tempo com "COM You win!!": `b1_odin120_good1/hlseg_13` (o `good-20261105-1`: não é regressão do d6),
+`v1_odin_turnip/hlseg_13` 92 s em diante (d6, 120, Simple), `rec/v2_odin_clash` (d7). O Ougi do vencedor não roda; a luta
+continua (tempo, combo, itens, a CPU batendo) com o 3D preto até o fim do round.
+- **`HL_FRAME_LOG=1`** (novo, `hl_native.cpp`, desligado por padrão): a cada 50 vsyncs, os FRAME dos GIF tags do jogo, com a
+  cena ligada ou não, e a hora do aparelho em ms (também nas linhas `scene on/off`), para casar com `hlseg_t.txt`.
+- **O que o jogo desenha no preto (`v2_odin_clash`, v10700–11900):** a cópia de Z das sombras vai para a página `0x1C0`
+  (`310401c0`), as sombras para `0x1E0` (`401e0`), aparece `80180` (página `0x180`, largura 8, 1 tag por quadro) e **não há a
+  cópia da cena para `0x70`** (`ff00000000080070`), que o DISPFB (`1070`, constante a rota toda pelo `HL_PRIV_LOG`) mostra.
+  Na luta normal: Z em `0x1E0`, sombras em `0x1C0`, cópia para `0x70`. É a disposição que o jogo usa no Ougi (os dois blocos
+  trocados). O detector do nativo só conhece a `0x1E0`, então o nativo não liga e tudo vai ao GS.
+- **Não é o GS que não sabe desenhar a luta:** com `HL_NATIVE=0` no Odin (Turnip), o GS desenha a luta normal inteira
+  (`d2_odin_ougi_nonat`). O jogo fica preso no modo de desenho do Ougi sem o Ougi.
+- **Tentativa (d8/d9, `HL_NATIVE_SWAP=1`):** o nativo aceita as duas disposições pela página da cópia de Z. Com isso ele
+  passa a desenhar também os Ougi normais, e desenha o do Kyubi com blocos de lixo colorido (`rec/v5_odin_d9/hlseg_11.mp4`
+  26–34 s, quadro em 30,5 s); o GS desenha esses Ougi certos. O caso do choque não se repetiu com o d8/d9 (o choque é raro:
+  2 em ~10 lutas), então não sei se o nativo desenharia a luta presa. **Fica desligado por padrão** (`app_d10`: igual ao d6
+  mais os logs).
+- **Falta:** um choque no PCSX2 (o que deveria acontecer depois do "COM You win!!"), e saber por que o jogo não roda o Ougi
+  do vencedor aqui. Ferramentas novas em `build/lab`: `aggro.py`, `ougispam.py` (Ougi à mão sem parar, com o chakra
+  "Unlimited" das Battle Settings, para provocar o choque, só depuração), `fightwatch.sh`, `tofight.sh`, `selfight.sh`.
+
 ### 2026-11-05 12:20, dia, itens 1 e 2: Ougi da CPU a 60/120; piscar a 60/120 antes e depois
 
 **Item 1, o que faltava:** Ougi da CPU e disputa no Hard, os dois trocados ao vivo no painel. Odin a 120,
