@@ -41,6 +41,72 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 02:25, noite, itens 2a, 2d e 4: o contexto da thread 8 volta a um estado velho; limitador no RP5; rodada 4
+
+**Item 2a:**
+- `app_sdr13.apk` (anel de eventos): a `n16_rp5_ring` também falhou. No RP5 em 16:9, a `sdr13` falhou 2 de 2, e a `n17`
+  foi parada. No Odin em 20:9 com a `sdr13`, `n15_odin209_v3` e `n16_odin209_v3` foram até o fim (2 de 2).
+- **Patch novo, `0065-ee-event-ring-merge.patch`:**
+  - os eventos do escalonador também entram no anel de despacho, na ordem real (`0xee00<tag><tipo>`);
+  - os dois anéis passam a ter 64 entradas;
+  - o anel é impresso 8 por linha, porque o Android cortava a linha longa e o fim se perdia (foi o que aconteceu na `n19`).
+- Rodadas no RP5 em 16:9:
+  - `app_sdr14.apk`: `n18` passou, `n19` falhou;
+  - `app_sdr15.apk`: `n20` passou, `n21` falhou, `n22` passou.
+  - Somando a noite com a libsdr e sem a vigia: 4 falhas em 7.
+- **A ordem real na `n21`:**
+  1. O último despacho é `0x3167c0` (`sp 0xb6fe40`).
+  2. Na execução nativa seguinte, o laço da `0x35b310` passa por dois objetos. A `0x3563c0` do primeiro chama a
+     `0x1bf9a0` e a `0x1bfeb0`. A do segundo não chama nada.
+  3. A interrupção é empilhada (`P0`) com o contexto base já em `{pc 0x1bfeb0, ra 0x31b658, sp 0xb6fb80}`.
+  4. Depois dela (`O0`), o despacho roda a `0x1bfeb0` e a `0x31b658`, e a `0x31b4e0` tira da pilha o `ra 0xe3b4c0`.
+- **O fato novo:** o rastro de buscas da GameThread não tem a `0x31b4e0` nesta execução, nem quem a chama. Ele é
+  `thread_local` e registra tudo o que passa pelo `lookupFunction`. Mesmo assim, o contexto da thread 8 termina no
+  estado da `0x31b4e0` parada no próprio `jal 0x1bfeb0`. Ou esse estado é velho e voltou ao contexto, ou foi escrito
+  por código que não rodou na GameThread.
+- **Lido e descartado:**
+  - os ganchos do Hidden Leaf (`cameraMatrices`, `fighterInput`, `sequenceStep`, `padRead`, `promptPressed`) chamam o
+    original e depois só mexem na memória e no `v0`, nunca no `pc`;
+  - a conclusão do RPC (`finishCall` e `completeClient`) só escreve o `v0` e os buffers, e não copia nenhum contexto de
+    volta.
+- **Achado à parte, sem prova de que seja a causa:** o `guarded()` não restaura o `m_transferJump` quando o corpo lança.
+  Quem lança é o `invokeCurrentSequence`, no `ExitThread` com handlers. O ponteiro fica num `jmp_buf` de um quadro que
+  já morreu.
+- **Hipótese em teste, patch `0066-ee-foreign-lookup.patch`:** `[ee-foreign]` registra toda busca de função do jogo
+  feita fora da thread do host que roda o EE. Vai na `app_sdr16.apk`, rodadas `n23`–`n25_rp5_foreign`. No boot da `n23`,
+  nenhuma linha.
+
+**Item 2d (estouro) no RP5:** `n18`, `n20`, `n21` e `n22` (rota v3 com o jogo base, uns 260 s cada) dão pico máximo de
+0,980 e nenhuma janela acima de 1. O rms médio fica entre 0,213 e 0,235. Com isto, o item fecha nos 3 aparelhos.
+
+**Item 4 (rodada 4, Nominum `ff2e56d`, `app_nmn4.apk`):**
+- **Build:** export para `build/nominum-ff2e56d`, catálogo da VU1 com 53 imagens e 1196 blocos (`build/vu1rec`), GS
+  `libbt4gsx_ff2e56d.so`. Script `build/lab/nmn4.sh`.
+- **Erro meu de rota:** os envs `hl_env_n3_v3_a/b.txt` ainda têm o `POKE` da rota antiga. Com a libsdr, o `POKE` dá o
+  salto conhecido para `0xbd9c90` (`sp 0x20821380`), visto na `n4_cube_v3_a/b` e na `n4_odin209_v3_b` (guardadas como
+  `*.poke`). Refeito com `hl_env_r4_v3_a/b.txt`, que é a rota `hl_env_hp_v3.txt` mais `NOMINUM_BACKEND=nominum` (e mais
+  `NOMINUM_VU1=1` no b).
+- **Cube, campanha (fps médio, com o pior entre parênteses):**
+
+  | combinação | vila | andar | menu START |
+  |---|---|---|---|
+  | b | 49,7 (39,0) | 47,1 (8,6) | 48,6 (30,6) |
+  | b sem blocos (`NOMINUM_VU1_REC=0`) | 48,6 | 45,7 | 40,7 |
+  | a | 48,6 | 45,9 | 40,8 |
+
+  - Os blocos recompilados tiram uns 4–5 ms da VU1 (15,4 para 11,5 ms na vila).
+  - O GS do Nominum fica em 5–6,5 ms.
+  - A imagem está certa (brilho médio 106 no centro do vídeo).
+- **Linha "replay thread on the cores of capacity":** 0 em todas as rodadas com o `ff2e56d`; na rodada 3 eram 3 por
+  rodada com o backend próprio. Confirmado.
+- **Odin: imagem preta.** Nas 5 rodadas do Odin (16:9 a e b, 20:9 v3 e campanha b, giro), a área do jogo sai preta
+  (brilho médio 0,7–0,9), com o HUD do app e o contador por cima.
+  - O Odin estava em "60 interpolado": o log tem `[interp] asked 60`, e a rodada 3 foi a 50. O `fps_mode` voltou para
+    50 pelo toque do giro.
+  - Guardadas como `*.i60`. Refeitas a 50, mais duas a 60 (b e c) para separar a causa: `q_r4_odin3.out`.
+- **Odin, giro:** são refeitas só as 3 swapchains do giro (`turn 90 → 270 → 90`), mas a imagem estava preta. Repetido
+  a 50.
+
 ### 2026-11-05 01:40, noite, itens 2a, 2b, 2c, 2d e 3c: o sdrdrv não tem callback; som por tela; sincronia dos filmes
 
 **Item 2a:**

@@ -1,0 +1,39 @@
+Hidden Leaf: [ee-foreign], a guest function looked up off the EE's host thread (the first 40, then every 5000th).
+
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -279,6 +279,8 @@
+     void requestStop();
+     void postEvent(EeEvent event);
+     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    // Hidden Leaf: false on a host thread other than the one running the EE (once it started)
++    [[nodiscard]] bool onExecutorThread() const noexcept { return m_executorThread == std::thread::id{} || m_executorThread == std::this_thread::get_id(); }
+     void accountCycles(uint32_t cycles) noexcept;
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -31,6 +31,7 @@
+ #include <limits>
+ #include <chrono>
+ #include <atomic>
++#include <unistd.h>
+ #include <thread>
+ #include <unordered_map>
+ #include <sstream>
+@@ -1287,6 +1288,15 @@
+ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
+ {
+     pushDispatchPc(address);
++    if (m_eeScheduler && !m_eeScheduler->onExecutorThread())
++    {
++        // Hidden Leaf: guest code looked up off the EE's host thread (it would race the EE on a guest context)
++        static std::atomic<int> s_foreign{0};
++        const int n = s_foreign.fetch_add(1, std::memory_order_relaxed);
++        if (n < 40 || n % 5000 == 0)
++            std::fprintf(stderr, "[ee-foreign] host thread %d looks up guest 0x%x (%d so far; EE thread %d)\n", static_cast<int>(gettid()), address, n + 1,
++                         m_eeScheduler->currentThreadId());
++    }
+ 
+     uint32_t slot = 0u;
+     if (generatedFunctionTableSlot(address, slot))

@@ -1,0 +1,71 @@
+Hidden Leaf: the scheduler events (0063) also in the dispatch ring, in order with the dispatches, and both rings of 64, printed
+8 a line (Android cuts a long line); an 'R' event says whether a wait's completion runs first.
+
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -24,7 +24,7 @@
+     // Hidden Leaf: the last top-level dispatches (pc, ra, sp) of each thread, for HL_EE_DUMP
+     struct HlDispatchRing
+     {
+-        std::array<std::array<uint32_t, 3>, 32> pcs{};
++        std::array<std::array<uint32_t, 3>, 64> pcs{};
+         uint32_t next = 0u;
+     };
+ 
+@@ -55,6 +55,10 @@
+         r.ev[r.next] = {static_cast<uint32_t>(tag) | (kind << 8u), t.context.pc, getRegU32(&t.context, 31), getRegU32(&t.context, 29),
+                         static_cast<uint32_t>(t.invocations.size())};
+         r.next = (r.next + 1u) % 32u;
++        // (and in the dispatch ring, in order with the dispatches: 0xEE00<tag><kind>(ra <base pc> sp <base sp>))
++        auto &d = hlDispatchRing()[t.id];
++        d.pcs[d.next] = {0xEE000000u | (static_cast<uint32_t>(tag) << 8u) | (kind & 0xFFu), t.context.pc, getRegU32(&t.context, 29)};
++        d.next = (d.next + 1u) % 64u;
+     }
+ 
+     constexpr int KE_OK = 0;
+@@ -369,9 +373,9 @@
+                 // Hidden Leaf: a thread that ran into pc 0 (returned from its entry, or jumped to 0)
+                 const auto &ring = hlDispatchRing()[running->id];
+                 std::cerr << "[ee-dump] thread " << running->id << " ran into pc 0 (dormant); last dispatches:" << std::hex;
+-                for (uint32_t i = 0; i < 32u; ++i)
++                for (uint32_t i = 0; i < 64u; ++i)
+                 {
+-                    const auto &e = ring.pcs[(ring.next + i) % 32u];
++                    const auto &e = ring.pcs[(ring.next + i) % 64u];
+                     if (e[0] != 0u)
+                     {
+                         std::cerr << " 0x" << e[0] << "(ra 0x" << e[1] << " sp 0x" << e[2] << ")";
+@@ -413,11 +417,13 @@
+                     // Hidden Leaf: the thread that jumps into nothing, and its last dispatches (which return got a bad ra)
+                     const auto &ring = hlDispatchRing()[running->id];
+                     std::cerr << "[ee-dump] thread " << running->id << " jumps to 0x" << std::hex << context.pc << "; last dispatches:";
+-                    for (uint32_t i = 0; i < 32u; ++i)
++                    for (uint32_t i = 0; i < 64u; ++i)
+                     {
+-                        const auto &e = ring.pcs[(ring.next + i) % 32u];
++                        const auto &e = ring.pcs[(ring.next + i) % 64u];
+                         if (e[0] != 0u)
+                             std::cerr << " 0x" << e[0] << "(ra 0x" << e[1] << " sp 0x" << e[2] << ")";
++                        if ((i & 7u) == 7u && i != 63u)
++                            std::cerr << std::endl << "[ee-dump]  ..."; // (Android cuts a long line)
+                     }
+                     std::cerr << std::dec << std::endl;
+                     const auto &events = hlEventRing()[running->id];
+@@ -445,7 +451,7 @@
+         {
+             auto &ring = hlDispatchRing()[running->id];
+             ring.pcs[ring.next] = {context.pc, getRegU32(&context, 31), getRegU32(&context, 29)};
+-            ring.next = (ring.next + 1u) % 32u;
++            ring.next = (ring.next + 1u) % 64u;
+         }
+ 
+         if (checkpointDue(kGuestDispatchCycles))
+@@ -1873,7 +1879,7 @@
+     item.status = EeThreadStatus::Running;
+     m_currentThreadId = item.id;
+     renewTimeSlice();
+-    hlEvent(item, 'R', 0u);
++    hlEvent(item, 'R', item.resumeCompletion ? 1u : 0u); // (kind 1: a wait's completion will run first)
+ }
+ 
+ void EeScheduler::makeDormant(GuestThread &item)
