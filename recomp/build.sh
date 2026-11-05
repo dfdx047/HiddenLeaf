@@ -169,12 +169,14 @@ if [ "${HL_NO_PC:-0}" = 1 ]; then
     echo "HL_NO_PC=1: the generated code is in place; the PC runtime (step 7) is not built"
     exit 0
 fi
+# -ffp-contract=off: with -march=native (FMA), GCC fuses a*b+c into one rounding (-ffp-contract=fast is its default); the
+# VU and the EE's FPU never do. The Android build has had it on every source since 8fac981 (recomp/android/CMakeLists.txt).
 # link-time optimization only with HL_LTO=1: the LTO link of the whole game takes long and a lot of memory
 no_lto=ON; [ "${HL_LTO:-0}" = "1" ] && no_lto=OFF
 cmake -S "$B/PS2Recomp" -B "$B/PS2Recomp/build-rt" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS2X_BUILD_RECOMP=OFF -DPS2X_BUILD_ANALYZER=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF \
     -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_FFMPEG=ON -DPS2X_DISABLE_IPO="$no_lto" \
-    -DCMAKE_CXX_FLAGS="-march=native" -DCMAKE_C_FLAGS="-march=native"
+    -DCMAKE_CXX_FLAGS="-march=native -ffp-contract=off" -DCMAKE_C_FLAGS="-march=native -ffp-contract=off"
 cmake --build "$B/PS2Recomp/build-rt" -j"$jobs"
 runner=$(find "$B/PS2Recomp/build-rt" -name ps2EntryRunner -type f | head -1)
 echo "runner: $runner"

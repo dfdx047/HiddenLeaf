@@ -41,6 +41,36 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 00:30, noite, itens 1 e 3a: `-ffp-contract=off` no PC; os filmes não são escuros
+
+**Item 1 (`-ffp-contract=off`, pedido do `docs/integracao.md` do Nominum, linha 268):**
+
+- **Android:** já valia desde `8fac981` (11-01). `recomp/android/CMakeLists.txt` põe `UN5_NUMERIC` (`-fno-strict-aliasing
+  -fwrapv -ffp-contract=off`) em `add_compile_options`. Conferido no `build/android/build.ninja`: 815 de 815 objetos da
+  `libun5` (runtime, VU0, VU1, FPU do EE e código gerado) e da `hl_spu2` têm o flag. Nada muda no APK, e não há rota
+  a refazer por isto.
+- **PC:** o `recomp/build.sh` passava só `-march=native`. Com FMA (`-mfma` ligado neste processador), o GCC funde
+  `a*b+c` (o padrão dele é `-ffp-contract=fast`). Agora passa `-march=native -ffp-contract=off` em C e C++.
+  - O runtime do PC está sendo recompilado com o flag (`build/lab/pc_nofma.log`). O binário antigo ficou em
+    `build/lab/ps2EntryRunner_fma`. A rota curta no PC fica para quando a compilação acabar.
+
+**Item 3a (filmes escuros):** não é defeito. Medido contra o PSS e contra o PCSX2.
+
+- **De onde veio a suspeita:** do contact sheet de 1 quadro a cada 8 s (entrada de 11-04 18:40), que caiu nas
+  transições pretas e no *fade-in* do filme. Com 1 quadro a cada 2 s, os filmes aparecem inteiros nas duas builds
+  (`sdr9_rp5_v3`, com a libsdr, e `cam_rp5_v3`, com os stubs).
+- **Medida:** quadros reduzidos a 128x112, casados pela correlação da luminância.
+  - **PCSX2 contra o `OPENING.PSS` decodificado pelo FFmpeg no PC** (vídeo de referência de 10-31, t = 13–17 s):
+    correlação 0,96. A cor média do PCSX2 fica a 3–6% da do PSS (por exemplo, RGB 81/59/39 contra 86/63/41).
+  - **RP5 (`rec/sdr9_rp5_v3`) contra o mesmo PSS:** correlação 0,90–0,95. A cor média fica a 1–6% (153/130/110 contra
+    159/133/110). Os dois quadros com diferença maior (até 50% no vermelho) estão no meio de um corte, onde o
+    casamento erra.
+- **A conversão está certa:** o PSS diz `color_range=tv`, e o `MPEG.cpp` usa o `sws_scale` padrão (BT.601, faixa
+  limitada para RGBA completa). É a mesma conta da CSC da IPU no PCSX2 (`(Y-16)*1,164`, `(Cr-128)*1,596`).
+  - Diferença que sobra, sem efeito visível: a IPU dá alfa 0/0x40/0x80 pelos limiares TH0/TH1, e o runtime escreve
+    sempre 0x80.
+- **Visto de passagem:** o corredor da abertura não está no `OPENING.PSS`. É desenhado em tempo real pelo motor.
+
 ### 2026-11-04 18:40, item 8: a falha da libsdr vinha da rota de teste (o `POKE`), não do jogo
 
 **Correção da entrada das 18:00:** os `free` ruins não são uma cauda velha da lista. Quem os causa é a nossa rota.
