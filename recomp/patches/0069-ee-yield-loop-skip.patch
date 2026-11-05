@@ -1,0 +1,57 @@
+Hidden Leaf: threads that only hand the EE to each other (32 yields in a row with under 512 cycles between them) are an
+idle EE: the clock moves on to the next event (UN5's films' ends: 6 fps for 12 s on the Cube). HL_YIELD_SKIP=0: off.
+publishSnapshot builds its copy at most every 20 ms (only the PC's debug panel reads it).
+
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -382,6 +382,8 @@
+     template <typename F>
+     void guarded(F &&body);
+     bool m_hlSuspending = false;
++    uint64_t m_hlLastYieldCycle = 0u; // (rotateReadyQueue: the yields that only hand the EE around)
++    uint32_t m_hlYieldStreak = 0u;
+     void *m_transferJump = nullptr; // the innermost guarded() (a jmp_buf on its frame)
+     struct ScheduledEvent
+     {
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -967,6 +967,22 @@
+             skipIdleCycles();
+             return KE_OK;
+         }
++        // Hidden Leaf: threads that only hand the EE to each other are an idle EE too. UN5 at each film's end: two or more
++        // ready threads yield in turn for 1.5 s of the game's time, each turn a transfer, so the EE clock crawls (~170 ms of
++        // host time a vsync on the Cube, the picture at 6 fps for 12 s). After 32 turns in a row with under 512 cycles (a
++        // few calls: the runtime counts 8 a call) between them, the clock moves on to the next event before the turn. HL_YIELD_SKIP=0: off.
++        static const bool s_yieldSkip = []() {
++            const char *e = std::getenv("HL_YIELD_SKIP");
++            return e == nullptr || e[0] != '0';
++        }();
++        if (s_yieldSkip && !interruptSafe && !m_insideInterrupt)
++        {
++            const uint64_t since = m_eeCycle - m_hlLastYieldCycle;
++            m_hlYieldStreak = since < 512u ? m_hlYieldStreak + 1u : 0u;
++            if (m_hlYieldStreak >= 32u)
++                skipIdleCycles();
++            m_hlLastYieldCycle = m_eeCycle;
++        }
+         enqueueReady(*self);
+         m_currentThreadId = 0;
+         m_rescheduleRequested = true;
+@@ -1745,6 +1761,16 @@
+ 
+ void EeScheduler::publishSnapshot()
+ {
++    // Hidden Leaf: at most every 20 ms of host time. Only the PC's debug panel reads it, and building it (a sorted copy of
++    // every thread, semaphore and event flag, with allocations) at each scheduler call was ~20% of the EE in UN5's
++    // yield loops.
++    {
++        static std::chrono::steady_clock::time_point s_last{};
++        const auto now = std::chrono::steady_clock::now();
++        if (now - s_last < std::chrono::milliseconds(20))
++            return;
++        s_last = now;
++    }
+     EeKernelSnapshot next{};
+     next.sequence = ++m_snapshotSequence;
+     next.eeCycle = m_eeCycle;
