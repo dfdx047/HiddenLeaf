@@ -41,6 +41,19 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 17:52, dia: fechamento e correção de horas
+
+- **Horas (correção):** as três entradas de baixo, marcadas 16:50, 17:05 e 17:50, foram escritas às 16:48, 16:51 e 17:45
+  (pelo `date` dos commits `8ff49da`, `62d9e52`, `025160d`).
+- **Relatório do dia** (mesma URL do das 13:00, versão 3): https://claude.ai/artifact/Utyg1DbQ6nes1aRwWNbDLE. Veredito:
+  pronto para lançar com `app_d26` / `good-20261105-3`.
+- **Pendências conhecidas:**
+  - a aura do Vermilion Mode no nativo;
+  - os logos Bandai Namco e Bandai não conferidos;
+  - 1,5 s de preto na transformação do Kyubi (`f1_odin_d26` hlseg_12 125 s), a comparar com o PCSX2;
+  - agarrões de outros personagens, 3 cenários, a build de 11-03 e o PCSX2 lado a lado.
+- O online não foi tocado.
+
 ### 2026-11-05 17:50, dia, prioridade 2: o chiado dos filmes e logos (corrigido, `0070`), `good-20261105-3`
 
 **Causa.** O callback de PCM do jogo (`0x1046A0`, o do `ezmovie`) copia o pacote inteiro ou nada (`0x1044F0`, o
