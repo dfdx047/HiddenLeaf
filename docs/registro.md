@@ -22,7 +22,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Widescreen nos menus | parcial | `2fee126` | RP5 | prints | esticados; "Esticar" e "Desenhar em 16:9" não existem |
 | Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: a cortina de transição não cobre a largura (~1 s por troca); menus esticados |
 | Controles por cena | funciona | `9c6c786` | RP5 | prints (11-02) | cena pelo overlay e estado (`TouchBridge.nativeScene`) |
-| Especial com um botão (Ougi) | parcial | `a3dbcfc` | RP5, Odin 3, Cube | rota v3 gravada, log `[sp]`, 1x e 2x no Cube (11-04 15:25) | o jogo mostra o pedido e o toque responde; "ERROR" era da COM; 2x dobra as respostas; △△ à mão e disputa não vistos |
+| Especial com um botão (Ougi) | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube | jogado por toque, gravado (`p2_cube`, `p3_odin60`, `p4_134`, `p6_cube`, `p8`–`p10`) | ligado e desligado; △△○ à mão e disputa vistos a 50 (Cube), 60 e 120 (Odin); falta o Ougi da CPU a 120 e o Cube a 60 |
 | Painel de pausa | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de campanha (`PAUSE_AT`, `QUIT_AT`): 4:3, tela cheia, continuar, sair | "Sair do jogo" volta ao launcher nos 4 |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
 | 60/120 interpolados | parcial | `app_sdr19.apk` (lab) | Odin 3 | `[interp]` na 2ª luta (`n5_odin_c60`, `n5_odin_c120`) | 53–60 e 101–120 apresentações por segundo; qualidade da imagem não conferida |
@@ -40,6 +40,48 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-05 11:20, dia, item 1 (continuação): especial desligado, Ougi da CPU e disputa, 50/60/120
+
+APK `app_d6` (o d5 mais o log `[sp] v.. pad P step N wants C` do `HL_SP_LOG`: o botão que a sequência pede agora, o que
+a tela mostra). Jogado por toque, em tempo real; a sequência respondida por `build/lab/seqplayer.py` (lê o pedido no log e
+toca o botão depois de 0,25–0,45 s, repetindo a cada ~0,5 s enquanto o pedido não muda, como um jogador). Battle
+Settings do próprio jogo: Simple ou Hard, chakra ilimitado (opções de jogador).
+
+**Visto funcionando (sem congelar, sem listras, pedidos na tela, volta à luta):**
+- **Ougi à mão, especial desligado, Odin a 120 interpolado, 3x:** Choji x Sai, △△○ por toque, sequência respondida:
+  `rec/p4_134/play_15.mp4` 50–74 s (corte "Reversal", "Press!", OK/ERROR, o Ougi inteiro).
+- **Ougi à mão, especial desligado, Cube a 50:** o △△○ inicia o Ougi do Guy ("Unleash Ultimate Jutsu"), mas o golpe
+  errou o Sai 4 vezes (`p5_cube`, `p6_cube`); o do Choji acertou: `rec/p6_cube/hlseg_11.mp4` 149–168 s.
+- **Ougi da CPU e disputa, Cube a 50, Hard, Naruto x Naruto:** `rec/p8_cube_cpu/hlseg_11.mp4` 68–90 s e
+  `rec/p9_cube_cpu/hlseg_10.mp4` 84–94 s. Os toques do 1P entram (os passos avançam no log: △ ○ ○); a CPU completa
+  mais rápido (5 contra 3) e ganha; ERROR do 1P e OK da COM.
+- **Ougi da CPU e disputa, Odin a 60 (trocado ao vivo no painel de pausa), Hard, Choji x Naruto+Sakura:** três disputas
+  na mesma luta, `rec/p10_odin120/play_15.mp4` 18–28 s (Ougi "Linked") e o log `seq_p10o5.out` (2 a 3 passos
+  respondidos em cada).
+- **Luta inteira a 60 no Odin** (`p10_odin120/play_14.mp4`, 1 s a 60 quadros por segundo em 150 s, visão geral 140–168 s):
+  sem piscar, efeitos de golpe e textos em todos os quadros.
+
+**Não é defeito:**
+- O `wants` sai ~0,5 s antes do corte "Ultimate Jutsu"; toques antes de o pedido aparecer não contam (como para o
+  jogador). O primeiro toque do tocador caía nesse tempo.
+- As 3 lutas sem Ougi da CPU no Odin (v152400–176850) eram no Simple: saí das Battle Settings com △ (Back), que descarta a
+  mudança. Com ✕ (OK) o Hard vale.
+
+**Correção da entrada de 09:00 (o branco do começo do Ougi):** não é a troca nativo→GS. Com o nativo desligado
+(`HL_NATIVE=0`, `rec/p7_cube_gs`) o branco aparece igual. A duração muda com o Ougi (0,4 s o do Naruto e 1,75 s o do
+Choji no Cube; 3,6 s o "Linked" no Odin a 60) e os pedidos já se desenham por cima: parece a tela de carga do Ougi do
+próprio jogo. Falta medir o tempo no PCSX2 (o daqui só tem o controle SDL-1 configurado; o vídeo de referência não tem Ougi).
+
+**Visto e ainda aberto:**
+- Preto de ~0,75 s com o HUD no fim do Ougi (`p6_cube/hlseg_11.mp4` 168,0–168,5 s), pelo GS, antes de o nativo religar
+  (v88875). A conferir no PCSX2.
+- Ougi da CPU a 120 e a 50 no Odin, e a 60 no Cube: não feitos ainda.
+- Layout: a coluna de botões da sequência do 1P (canto inferior esquerdo) fica sob o D-pad no Cube (1:1) e em parte no
+  Odin. Proposta: durante o Ougi, D-pad mais transparente ou mais alto (a sequência usa as direções).
+- Só para depuração: com `HL_NATIVE=0` a luta em 3D sai preta no Cube (HUD e Ougi aparecem) e o zero do SCANMSK não vale
+  (`GS SCANMSK 2` no log). Não é o caminho do jogador.
+- O painel diz que a resolução interna "vale na próxima vez que o jogo abrir" e não tem 0,75x (item 6 pede ao vivo).
 
 ### 2026-11-05 09:00, dia, item 1 (Ougi do jogador): congelamento, SCANMSK e controles; método novo
 

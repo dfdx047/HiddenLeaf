@@ -448,6 +448,21 @@ namespace
             std::memcpy(rdram + pad + kPadPressed, &pressed, 4);
         }
         g_sequenceOriginal(rdram, ctx, runtime);
+        // HL_SP_LOG: the button the sequence wants now from each pad, what the screen shows (for a test player that reads it)
+        static const bool s_seqLog = std::getenv("HL_SP_LOG") != nullptr;
+        static int s_lastWant[2] = {-2, -2};
+        for (uint32_t p = 0; s_seqLog && p < 2u; ++p)
+        {
+            const int16_t at = static_cast<int16_t>(read16(obj + 0x312u + p * 2u));
+            const int code = at >= 0 && at < 0x100 ? static_cast<int8_t>(rdram[(obj + 0x112u + (p << 8) + static_cast<uint32_t>(at)) & 0x1FFFFFFu]) : -1;
+            const int want = rdram[(obj + 0x1Au + p) & 0x1FFFFFFu] == 0u ? (at << 4) | (code & 15) : -1;
+            if (want != s_lastWant[p])
+            {
+                s_lastWant[p] = want;
+                if (want >= 0 && code >= 0 && code < 8)
+                    std::fprintf(stderr, "[sp] v%llu pad %u step %d wants %d\n", static_cast<unsigned long long>(g_tick), p, static_cast<int>(at), code);
+            }
+        }
         for (uint32_t p = 0; on && p < 2u; ++p)
             std::memcpy(rdram + gfx + 0x1Cu + p * 0x78u + kPadPressed, &saved[p], 4);
     }
