@@ -41,6 +41,67 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-05 17:50, dia, prioridade 2: o chiado dos filmes e logos (corrigido, `0070`), `good-20261105-3`
+
+**Causa.** O callback de PCM do jogo (`0x1046A0`, o do `ezmovie`) copia o pacote inteiro ou nada (`0x1044F0`, o
+`copy2area`: `if (len0 + len1 < slen0 + slen1) return 0`) e devolve 0 quando o buffer de som está cheio. A libmpeg então para o
+demux nesse pacote e o oferece de novo. O runtime ignorava o retorno, e o pacote se perdia. Os pacotes de som do PSS têm
+tamanho ímpar (4077, 4063 bytes de dado). Cada perda tira o fluxo dos blocos L/R de 512 bytes por um número ímpar, e cada
+amostra de 16 bits vira lixo (o ruído em escala total, RMS ≈ 1/√3) até a próxima perda ímpar. Daí o chiado e o som certo
+alternando.
+
+**Como achei** (`HL_SIFDMA_DUMP`, só no laboratório, fora do patch: grava o que `0x100830` manda ao IOP, o buffer de 24 KB em
+`0x170fc0`):
+- `rec/s5_cube_sif`: o fluxo enviado é o PCM do disco, com saltos de ~61 KB (pacotes perdidos), de tamanho ímpar.
+- Correção do registro de 14:35: o `scratchpad/snd/pssaudio.py` não tirava os 4 bytes do sub-stream, que nos filmes do UN5
+  são `ff a0 00 00`, e não `a0 ..`. A referência `OPENING.pcm` de antes tinha 4 bytes a mais por pacote. O demux do runtime e
+  o callback estavam certos nisso.
+- O exemplo do `ezmovie` só pula esses 4 bytes. Os índices de ruído da referência continuam valendo, porque o deslocamento era
+  par.
+
+**Correção** (`recomp/patches/0070-mpeg-sound-in-order.patch`, só o `MPEG.cpp`):
+- Os eventos de som entram numa fila em ordem, com um callback por vez.
+- O recusado volta na próxima chamada do demux, que não pega dado novo enquanto isso (devolve 0 e espera um vsync, como o
+  caminho de backpressure que já existia).
+- Os bytes do pacote são guardados quando ele entra na fila. Se o anel do jogo já tem dado novo ali (a leitura do CD avança),
+  a cópia vai para `0x7C000`, o topo da RAM do kernel: o kernel HLE não usa, e o runtime confere que está toda zerada antes.
+- Tem de ser um endereço abaixo do fim do anel (`0xfbdc80 + 0x60000`), porque o callback trata o que passa do fim como volta e
+  faz um mínimo com sinal (`0x100EA0`).
+- `HL_MPEG_AUDIO_DROP=1` volta ao jeito antigo.
+
+**Antes e depois** (boot em tempo real, idioma por toque, filmes inteiros; som do SPU2 gravado pelo motor):
+| Gravação | Aparelho | Pacotes | Trechos de 100 ms com ruído (`#`) | Continuidade contra o disco (`xoff.py`, OPENING 5/30/55/80 s) |
+|---|---|---|---|---|
+| `s5_cube_sif` (antes, `d22lab`) | Cube | ~1/3 perdidos | 493 | atraso +30, +5,7, −25, −45 s: sem continuidade |
+| `s6`, `s7` (fila sem cópia) | Cube | 2987 aceitos, 1532 perdidos (anel reescrito) | — | — |
+| `s8_cube_fifo3` (`d25lab`) | Cube | 4505 aceitos, 0 perdidos | ~4 | 38,085 s nos 4 pontos |
+| `b1_cube_d26` | Cube | 4505 / 0 | 4 | 37,920 s nos 4 |
+| `b1_odin_d26` | Odin | 4505 / 0 | 3 | 39,437 s nos 4 |
+| `f1_cube_d26`, `f1_odin_d26` (2º boot e luta) | os dois | 4499 / 0; 4505 / 0 | — | — |
+| `b3_cube_d26`; `b3_odin_a35_d26` (3º boot; o A35) | os dois | 0 perdidos | 4; 1 | — |
+- Os `#` que sobram estão na entrada dos filmes (o corte do logo para o filme).
+- Vídeo igual: 250 quadros distintos em 10 s no meio do `OPENING`, antes e depois (`mpdecimate`).
+- Sincronia: o primeiro quadro do filme aparece aos 29,8 s do vídeo, e o som dele começa aos 29,81 s (`b1_cube_d26`).
+- Fica no fim de cada filme `33`–`37` pacotes na fila (~0,7 s), descartados no `sceMpegReset`. Antes, esses e outros mil se
+  perdiam. Não ouvi corte no fim: o fim do `OPENING` é silêncio.
+
+**Regressão (`app_d26`, base e A35 recompilados):**
+- Cube, base, 60 fps: 2º boot inteiro, Combate Livre 1P vs 2P, Ougi, vitória (Health 64), resultado, seleção (`f1_cube_d26`).
+- Odin, base, 50 fps, Turnip: o mesmo, com Ougi e o 2P no "Fourth Awakened Mode"; vitória (Health 55), resultado, seleção
+  (`f1_odin_d26`).
+- Na transformação do 2P, 1,5 s de preto entre o vermelho e o clarão branco (`hlseg_12` 125,0–126,0 s), dentro da cena do
+  jogo, com a retenção agindo. A conferir no PCSX2; o `MPEG.cpp` não age na luta.
+- Odin, A35: 3º boot, a abertura do A35 em laço até o START, Load Game, seleção (`b3_odin_a35_d26`).
+- A série de 70 patches aplica limpa num checkout novo do `e563698`, e o `MPEG.cpp`/`SIF.cpp` saem iguais aos da árvore.
+
+**Não visto:** os logos mudos (Bandai Namco, Bandai). O `LOGO_C` é o do CRIWARE e agora toca inteiro.
+
+**Aparelhos no fim:**
+- Odin: Turnip (`selected.turnip-1440`), configurações do dono (`un5_settings.owner-1625.txt`: 120 fps, 4x, filtro 2,
+  especial desligado), mods desligados. Às 16:50 eu tinha posto as de 07:50 por engano; corrigido.
+- Cube: 60 fps, mods desligados.
+- Nos dois, o `hl_env.txt` de laboratório foi tirado (o motor gravava o som em disco).
+
 ### 2026-11-05 17:05, dia: som dos filmes, o que fica descartado (para a próxima sessão)
 
 O callback de som do jogo é o `pcmCallback` do exemplo `ezmovie` da Sony (`0x1046A0`, registrado em `0x105d9c` pelo

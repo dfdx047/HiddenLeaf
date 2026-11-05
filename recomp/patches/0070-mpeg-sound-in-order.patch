@@ -1,0 +1,283 @@
+Hidden Leaf: the films' sound in order, one packet at a time. UN5's PCM callback (0x1046A0, the ezmovie one) copies a whole
+packet or nothing and returns 0 when its sound buffer is full; the libmpeg stops the demux on that packet and offers it again.
+The runtime dropped it: the packets have odd sizes (4077, 4063 bytes), so each drop put the stream off its 512-byte L/R blocks
+by an odd count and it played as full-scale noise until the next odd drop (the boot's "hiss"). Now the sound events wait in a
+FIFO, one callback in flight; a refused one is offered again at the next demux call, which takes no new data until then. The
+packet's bytes are saved when queued: if the game's ring has new data there by then, the copy goes to 0x7C000 (the top of the
+kernel's RAM, unused by the HLE kernel, checked all zero; the callback takes an address past the ring's end as wrapped).
+HL_MPEG_AUDIO_DROP=1: the old way.
+
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1697,6 +1697,210 @@
+             runtime->eeScheduler().queueInvocation(std::move(invocation));
+         }
+ 
++        // Hidden Leaf: the movie sound one packet at a time, in order. The game's PCM callback (UN5 0x1046A0, the ezmovie
++        // one) copies all of a packet or nothing and returns 0 when its sound buffer is full; the libmpeg then stops the
++        // demux on that packet and hands it again later. Dropped here, the packets (odd sizes: 4077, 4063 bytes) put the
++        // stream off its 512-byte L/R blocks by an odd count and it played as full-scale noise until the next drop
++        // (HL_MPEG_AUDIO_DROP=1: the old way). A held packet makes the demux take no new data (backpressure), so the
++        // game's ring keeps its bytes; a 64-byte hash checks it anyway before each retry.
++        struct HlAudioPending
++        {
++            MpegStreamCallbackEvent event;
++            MpegRegisteredCallback callback;
++            R5900Context callerCtx;
++            uint64_t hash = 0u;
++            uint32_t tries = 0u;
++            std::vector<uint8_t> bytes; // the packet as it was, for when the ring moved on under it
++        };
++        uint32_t g_hlRingBase = 0u, g_hlRingSize = 0u, g_hlScratch = 0u, g_hlScratchUsed = 0u;
++        constexpr uint32_t kHlScratchSize = 0x4000u;
++
++        std::vector<uint8_t> hlAudioCopy(const uint8_t *rdram, uint32_t addr, uint32_t len)
++        {
++            std::vector<uint8_t> out(len);
++            const uint32_t end = g_hlRingBase + g_hlRingSize;
++            for (uint32_t i = 0; i < len; ++i)
++            {
++                uint32_t a = addr + i;
++                if (g_hlRingSize != 0u && a >= end)
++                    a -= g_hlRingSize;
++                const uint8_t *b = getConstMemPtr(rdram, a);
++                out[i] = b ? *b : 0u;
++            }
++            return out;
++        }
++        std::mutex g_hlAudioMutex;
++        std::deque<HlAudioPending> g_hlAudioFifo;
++        bool g_hlAudioInFlight = false;
++        bool g_hlAudioBlocked = false;
++        uint32_t g_hlAudioHeld = 0u, g_hlAudioLost = 0u, g_hlAudioSent = 0u;
++
++        bool hlAudioOrdered()
++        {
++            static const bool s_on = std::getenv("HL_MPEG_AUDIO_DROP") == nullptr;
++            return s_on;
++        }
++
++        uint64_t hlAudioHash(const uint8_t *rdram, uint32_t addr, uint32_t len)
++        {
++            uint64_t h = 1469598103934665603ull;
++            const uint32_t n = std::min<uint32_t>(len, 64u);
++            for (uint32_t i = 0; i < n; ++i)
++            {
++                const uint8_t *b = getConstMemPtr(rdram, addr + i);
++                h = (h ^ (b ? *b : 0u)) * 1099511628211ull;
++            }
++            return h;
++        }
++
++        void hlAudioPump(uint8_t *rdram, PS2Runtime *runtime);
++
++        // with g_hlAudioMutex held
++        void hlAudioDispatchFront(uint8_t *rdram, PS2Runtime *runtime, HlAudioPending &front)
++        {
++            const MpegStreamCallbackEvent &event = front.event;
++            uint32_t cbDataAddr = runtime->guestMalloc(kMpegCallbackDataSize, 16u);
++            const bool fromHeap = cbDataAddr != 0u;
++            if (!fromHeap)
++            {
++                constexpr uint32_t kSlots = 64u;
++                static uint32_t s_base = 0u;
++                static uint32_t s_next = 0u;
++                if (s_base == 0u)
++                {
++                    const uint32_t top = runtime->reserveAsyncCallbackStack(kSlots * kMpegCallbackDataSize, 16u);
++                    s_base = top != 0u ? top - kSlots * kMpegCallbackDataSize : 0u;
++                }
++                if (s_base == 0u)
++                {
++                    return;
++                }
++                cbDataAddr = s_base + (s_next++ % kSlots) * kMpegCallbackDataSize;
++            }
++            if (!writeMpegCallbackData(rdram, cbDataAddr, event))
++            {
++                if (fromHeap)
++                    runtime->guestFree(cbDataAddr);
++                return;
++            }
++            R5900Context callbackCtx = front.callerCtx;
++            SET_GPR_U32(&callbackCtx, 4, event.mpegAddr);
++            SET_GPR_U32(&callbackCtx, 5, cbDataAddr);
++            SET_GPR_U32(&callbackCtx, 6, front.callback.data);
++            SET_GPR_U32(&callbackCtx, 7, 0u);
++            SET_GPR_U32(&callbackCtx, 29, 0u);
++            SET_GPR_U32(&callbackCtx, 31, 0u);
++            callbackCtx.pc = front.callback.func;
++            GuestInvocation invocation{};
++            invocation.kind = GuestInvocationKind::RpcCallback;
++            invocation.context = callbackCtx;
++            invocation.onComplete = [rdram, runtime, cbDataAddr, fromHeap](const R5900Context &done, R5900Context &)
++            {
++                if (fromHeap)
++                    runtime->guestFree(cbDataAddr);
++                const bool taken = getRegU32(&done, 2) != 0u;
++                {
++                    std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++                    g_hlAudioInFlight = false;
++                    if (g_hlAudioFifo.empty())
++                        return;
++                    if (taken)
++                    {
++                        g_hlAudioFifo.pop_front();
++                        g_hlAudioBlocked = false;
++                        ++g_hlAudioSent;
++                    }
++                    else
++                    {
++                        if (g_hlAudioFifo.front().tries++ == 0u)
++                            ++g_hlAudioHeld;
++                        g_hlAudioBlocked = true;
++                        return; // again at the next demux call (a vsync later)
++                    }
++                }
++                hlAudioPump(rdram, runtime);
++            };
++            g_hlAudioInFlight = true;
++            runtime->eeScheduler().queueInvocation(std::move(invocation));
++        }
++
++        void hlAudioPump(uint8_t *rdram, PS2Runtime *runtime)
++        {
++            std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++            while (!g_hlAudioInFlight && !g_hlAudioFifo.empty())
++            {
++                HlAudioPending &front = g_hlAudioFifo.front();
++                // a packet held too long (300 tries) or whose bytes changed under it is dropped, as before
++                if (front.tries > 300u)
++                {
++                    ++g_hlAudioLost;
++                    g_hlAudioFifo.pop_front();
++                    g_hlAudioBlocked = false;
++                    continue;
++                }
++                if (hlAudioHash(rdram, front.event.dataAddr, front.event.len) != front.hash)
++                {
++                    // the ring has new data there: the saved copy goes to a scratch area below the ring's end (the game's
++                    // callback takes an address at or past the end as wrapped)
++                    // (the top of the kernel's RAM, which the HLE kernel leaves alone; it must be all zero the first time)
++                    static int s_scratchOk = -1;
++                    if (s_scratchOk < 0)
++                    {
++                        constexpr uint32_t kBase = 0x0007C000u;
++                        const uint8_t *z = getConstMemPtr(rdram, kBase);
++                        s_scratchOk = z && std::all_of(z, z + kHlScratchSize, [](uint8_t b) { return b == 0u; }) ? 1 : 0;
++                        g_hlScratch = s_scratchOk ? kBase : 0u;
++                        std::fprintf(stderr, "[mpeg] sound scratch at %x (%s), the ring %x + %x\n", kBase, s_scratchOk ? "free" : "in use: not used", g_hlRingBase, g_hlRingSize);
++                    }
++                    uint8_t *dst = g_hlScratch ? getMemPtr(rdram, g_hlScratch) : nullptr;
++                    if (!dst || front.bytes.size() > kHlScratchSize || g_hlScratch + front.bytes.size() > g_hlRingBase + g_hlRingSize)
++                    {
++                        ++g_hlAudioLost;
++                        g_hlAudioFifo.pop_front();
++                        g_hlAudioBlocked = false;
++                        continue;
++                    }
++                    std::memcpy(dst, front.bytes.data(), front.bytes.size());
++                    front.event.dataAddr = g_hlScratch;
++                    front.hash = hlAudioHash(rdram, g_hlScratch, front.event.len);
++                    ++g_hlScratchUsed;
++                }
++                hlAudioDispatchFront(rdram, runtime, front);
++                if (!g_hlAudioInFlight)
++                {
++                    g_hlAudioFifo.pop_front(); // no callback slot: drop it rather than spin
++                    ++g_hlAudioLost;
++                }
++            }
++            static uint32_t s_logged = 0u;
++            if (g_hlAudioSent / 2000u != s_logged)
++            {
++                s_logged = g_hlAudioSent / 2000u;
++                std::fprintf(stderr, "[mpeg] sound packets: %u taken, %u held a while, %u from the copy, %u lost\n", g_hlAudioSent, g_hlAudioHeld, g_hlScratchUsed, g_hlAudioLost);
++            }
++        }
++
++        void hlAudioReset(const char *why)
++        {
++            std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++            std::fprintf(stderr, "[mpeg] sound packets at %s: %u taken, %u held a while, %u lost, %zu pending\n", why, g_hlAudioSent, g_hlAudioHeld, g_hlAudioLost, g_hlAudioFifo.size());
++            if (!g_hlAudioInFlight)
++                g_hlAudioFifo.clear();
++            g_hlAudioBlocked = false;
++        }
++
++        bool hlAudioBlockedNow(uint8_t *rdram, PS2Runtime *runtime)
++        {
++            {
++                std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++                if (!g_hlAudioBlocked)
++                    return false;
++            }
++            hlAudioPump(rdram, runtime); // the held packet again
++            std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++            return g_hlAudioBlocked || g_hlAudioInFlight;
++        }
++
+         void dispatchStreamCallbacks(uint8_t *rdram,
+                                      R5900Context *ctx,
+                                      PS2Runtime *runtime,
+@@ -1707,13 +1911,24 @@
+                 return;
+             }
+ 
++            bool audio = false;
+             for (const MpegStreamCallbackEvent &event : events)
+             {
+                 for (const MpegRegisteredCallback &callback : event.callbacks)
+                 {
++                    if (hlAudioOrdered() && (event.streamType == kMpegStrPCM || event.streamType == kMpegStrADPCM) && rdram && ctx && runtime &&
++                        callback.func != 0u && runtime->hasFunction(callback.func))
++                    {
++                        std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++                        g_hlAudioFifo.push_back(HlAudioPending{event, callback, *ctx, hlAudioHash(rdram, event.dataAddr, event.len), 0u, hlAudioCopy(rdram, event.dataAddr, event.len)});
++                        audio = true;
++                        continue;
++                    }
+                     dispatchGuestStreamCallback(rdram, ctx, runtime, event, callback);
+                 }
+             }
++            if (audio)
++                hlAudioPump(rdram, runtime);
+         }
+ 
+         void dispatchStreamCallbacksUnlocked(uint8_t *rdram,
+@@ -2174,6 +2389,7 @@
+ 
+     void sceMpegDelete(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        hlAudioReset("the delete");
+         (void)rdram;
+ 
+         const uint32_t mpegAddr = getRegU32(ctx, 4);
+@@ -2274,6 +2490,19 @@
+         const uint32_t availableBytes = getRegU32(ctx, 6);
+         const uint32_t ringBaseAddr = getRegU32(ctx, 7);
+         const uint32_t ringSize = readAbiArg4(rdram, ctx);
++        {
++            std::lock_guard<std::mutex> lock(g_hlAudioMutex);
++            g_hlRingBase = ringBaseAddr & PS2_RAM_MASK;
++            g_hlRingSize = ringSize <= PS2_RAM_SIZE ? ringSize : 0u;
++        }
++        if (hlAudioOrdered() && hlAudioBlockedNow(rdram, runtime))
++        {
++            // a sound packet the game's buffer did not take yet: no new data until it does (the libmpeg stops there too)
++            setReturnS32(ctx, 0);
++            if (runtime->eeScheduler().currentThreadId() > 0)
++                runtime->eeScheduler().waitVSync(runtime->eeScheduler().currentVSyncTick(), 0);
++            return;
++        }
+ 
+         std::vector<MpegStreamCallbackEvent> callbackEvents;
+         std::vector<uint32_t> completedMpegIds;
+@@ -2644,6 +2873,7 @@
+ 
+     void sceMpegReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        hlAudioReset("the reset");
+         (void)runtime;
+         const uint32_t param_1 = getRegU32(ctx, 4);
+         {
