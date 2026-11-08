@@ -39,7 +39,34 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 
+### Lutas contra o PCSX2 (bancada no PC, desde 2026-11-08)
+
+Recomp do PC (`ps2EntryRunner`, GS de software do runtime, sem o nativo) contra o PCSX2 da bancada, mesma rota de botões,
+`HLB_RNG=1`, `tools/hlbench.py diff`. "Estado igual" = posição, vida, chakra e ação dos dois lutadores iguais em todas as
+chamadas. O 1P fica parado contra a CPU.
+
+| Luta (1P x CPU) | Cenário | Rota | Build | Chamadas | Estado | O que ainda difere |
+|---|---|---|---|---|---|---|
+| Naruto x Naruto, 1 rodada | lamen | `route_idle` (`p2` x `r18`) | `e0beedf` | 3113 | igual | cores `0x80xxxxxx` e `+0x000` já no quadro 0; heap 0x80 deslocado |
+| Neji x Naruto, 2 rodadas | lamen | `route_v2` (`pv2` x `rv2`) | `e0beedf` | 2013 + 714 | igual | idem |
+| Kakashi x Naruto, 2 rodadas | lamen e a 2ª área | `route_v3` (`pv3` x `rv3`) | `e0beedf` | 1445 + 1301 | igual | idem; heap no mesmo lugar |
+
+Falta: imagem (capturas nos mesmos quadros dos dois lados), outros cenários, Ougi, campanha, a CPU nos dois lados.
+
 ## Histórico (mais novo primeiro)
+
+### 2026-11-08 07:10, manhã: Neji e Kakashi contra a CPU iguais ao PCSX2 (retomada depois de queda de energia)
+
+- A energia caiu às ~05:16, logo depois de rodar o recomp nas rotas novas; o resto do trabalho até `e0beedf` está
+  commitado. O `android/settings.gradle.kts` aparece mexido (plugin `foojay-resolver-convention`); não é deste
+  trabalho, deixei como estava.
+- Rotas novas (`~/build/pcsx2-bench/runs/route_v1..v3.txt`, achadas com capturas `m1`, `m2`, `mv1..3`): a mesma de
+  `route_idle` com outras escolhas na seleção. `route_v2` = Neji (1P) x Naruto (CPU); `route_v3` = Kakashi x Naruto.
+  `route_v1` não foi usada.
+- Comparação (`pv2` x `rv2`, `pv3` x `rv3`, até v8500, as duas rodadas de cada): **estado igual em todas as chamadas das
+  4 rodadas**. Tabela em "Lutas contra o PCSX2", acima.
+- A luta começa 28–42 vsyncs depois do PCSX2 (v5434 x v5392; v5414 x v5386); na `route_idle`, 6. O recomp sai do
+  menu com 5 números do Mersenne Twister a mais (143 x 138) nas três rotas. Abertos, junto com as cores e o `+0x000`.
 
 ### 2026-11-08 01:58, noite: bancada contra o PCSX2 (branch `lab/bench-pcsx2`), `rand` do jogo, FPU em corte (em teste)
 
