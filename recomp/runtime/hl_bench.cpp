@@ -11,6 +11,7 @@
 //   HLB_RAMAT=1,30,50  the EE RAM at these frames of the first fighter, in <prefix>_ramNN_fFFFFF.bin
 //   HLB_MARK=1         "[hlb] v.. fight .. frame .." on stderr at each frame of the first fighter (to date other logs)
 //   HLB_CDBUSY=N       experiment: sceCdSync(1) answers busy for N vsyncs after each sceCdRead, once a fight began
+//   HLB_RNGLOG=F,T     every call of the Mersenne Twister (0x180BA0) and rand (0x17C558) in frames F..T: "rng ..." lines
 //   HLB_P1CPU=0x23     the first fighter's kind (low byte of fighter+0x60) becomes this at its first frame of each fight,
 //                      as the second (CPU) fighter has it: CPU against CPU
 // The buttons come from the runtime's HL_PADROUTE (the same syntax as HLB_ROUTE on the PCSX2 side).
@@ -58,6 +59,18 @@ namespace
     // takes time to seek and read would
     constexpr uint32_t kCdRead = 0x174308u, kCdSync = 0x1738D0u;
     uint32_t s_cdBusy = 0, s_cdReadVsync = 0;
+    // HLB_RNGLOG=F,T: every call of the Mersenne Twister and of rand in frames F..T
+    constexpr uint32_t kMtNext = 0x180BA0u, kRand = 0x17C558u;
+    // and the game's helpers on top of it: a float in [0, f12) (0x1810D0), an int in [0, a0] (0x181020), a word (0x180FF0)
+    constexpr uint32_t kRandHelpers[3] = {0x1810D0u, 0x181020u, 0x180FF0u};
+    PS2Runtime::RecompiledFunction s_helperOriginal[3] = {};
+    // HLB_SFLOG=1 with HLB_RNGLOG: the soft-float double routines called from the effect loop (0x34BC9C..0x34BCE4), with
+    // their 64-bit arguments and result, to check them against exact IEEE arithmetic
+    constexpr uint32_t kSoftFloat[5] = {0x172108u /* fptodp */, 0x16F4B0u /* fabs */, 0x172598u /* dpsub */,
+                                         0x172600u /* dpmul */, 0x172BF0u /* dptoli */};
+    PS2Runtime::RecompiledFunction s_sfOriginal[5] = {};
+    uint32_t s_rngFrom = 0, s_rngTo = 0;
+    PS2Runtime::RecompiledFunction s_mtOriginal = nullptr, s_randOriginal = nullptr;
     PS2Runtime::RecompiledFunction s_cdReadOriginal = nullptr, s_cdSyncOriginal = nullptr;
     void (*s_prevVsync)(PS2Runtime *, uint64_t) = nullptr;
 
@@ -171,6 +184,60 @@ namespace
         s_cdSyncOriginal(rdram, ctx, runtime);
     }
 
+    void rngNote(R5900Context *ctx, const char *what)
+    {
+        if (s_fight != 0 && s_frame >= s_rngFrom && s_frame <= s_rngTo)
+            std::fprintf(s_txt, "rng v%u frame %u %s ra %x sp %x mti %u\n", s_vsync, s_frame, what, GPR_U32(ctx, 31), GPR_U32(ctx, 29), rd32(kMtIndex));
+    }
+
+    void mtNext(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        rngNote(ctx, "mt");
+        s_mtOriginal(rdram, ctx, runtime);
+    }
+
+    void randNext(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        rngNote(ctx, "rand");
+        s_randOriginal(rdram, ctx, runtime);
+    }
+
+    template <int I>
+    void randHelper(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (s_fight != 0 && s_frame >= s_rngFrom && s_frame <= s_rngTo)
+        {
+            uint32_t f12;
+            std::memcpy(&f12, &ctx->f[12], 4);
+            // the effect loop at 0x34BB20 compares *(s2 + s1*16 + 0x48) + 0x1E4 with the number drawn
+            const uint32_t ra = GPR_U32(ctx, 31);
+            uint32_t obj = 0, cnt = 0;
+            if (ra == 0x34BC98u || ra == 0x34BE48u)
+            {
+                obj = rd32(GPR_U32(ctx, 18) + GPR_U32(ctx, 17) * 16u + 0x48u);
+                cnt = (obj >= 0x100000u && obj < 0x2000000u) ? rd32(obj + 0x1E4u) : 0xFFFFFFFFu;
+            }
+            std::fprintf(s_txt, "rng v%u frame %u fn %x ra %x a0 %x f12 %08x mti %u obj %x cnt %x\n", s_vsync, s_frame, kRandHelpers[I],
+                         ra, GPR_U32(ctx, 4), f12, rd32(kMtIndex), obj, cnt);
+        }
+        s_helperOriginal[I](rdram, ctx, runtime);
+    }
+
+    template <int I>
+    void softFloat(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t ra = GPR_U32(ctx, 31);
+        const bool note = s_fight != 0 && s_frame >= s_rngFrom && s_frame <= s_rngTo && ra >= 0x34BC9Cu && ra <= 0x34BCE4u;
+        const uint64_t a0 = GPR_U64(ctx, 4), a1 = GPR_U64(ctx, 5);
+        uint32_t f12;
+        std::memcpy(&f12, &ctx->f[12], 4);
+        s_sfOriginal[I](rdram, ctx, runtime);
+        if (note)
+            std::fprintf(s_txt, "sf v%u frame %u fn %x ra %x a0 %016llx a1 %016llx f12 %08x -> %016llx\n", s_vsync, s_frame,
+                         kSoftFloat[I], ra, static_cast<unsigned long long>(a0), static_cast<unsigned long long>(a1), f12,
+                         static_cast<unsigned long long>(GPR_U64(ctx, 2)));
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (s_prevVsync)
@@ -182,6 +249,28 @@ namespace
             s_inputOriginal = runtime->lookupFunction(kFighterInput);
             if (s_inputOriginal != nullptr)
                 runtime->registerFunction(kFighterInput, fighterInput);
+            if (s_rngTo != 0u)
+            {
+                s_mtOriginal = runtime->lookupFunction(kMtNext);
+                s_randOriginal = runtime->lookupFunction(kRand);
+                if (s_mtOriginal != nullptr && s_randOriginal != nullptr)
+                {
+                    runtime->registerFunction(kMtNext, mtNext);
+                    runtime->registerFunction(kRand, randNext);
+                }
+                if (std::getenv("HLB_SFLOG") != nullptr)
+                {
+                    const PS2Runtime::RecompiledFunction sf[5] = {softFloat<0>, softFloat<1>, softFloat<2>, softFloat<3>, softFloat<4>};
+                    for (int i = 0; i < 5; ++i)
+                        if ((s_sfOriginal[i] = runtime->lookupFunction(kSoftFloat[i])) != nullptr)
+                            runtime->registerFunction(kSoftFloat[i], sf[i]);
+                }
+                const PS2Runtime::RecompiledFunction hooks[3] = {randHelper<0>, randHelper<1>, randHelper<2>};
+                for (int i = 0; i < 3; ++i)
+                    if ((s_helperOriginal[i] = runtime->lookupFunction(kRandHelpers[i])) != nullptr)
+                        runtime->registerFunction(kRandHelpers[i], hooks[i]);
+                std::fprintf(s_txt, "v%u rng log frames %u..%u: %d\n", s_vsync, s_rngFrom, s_rngTo, s_mtOriginal != nullptr);
+            }
             if (s_cdBusy != 0u)
             {
                 s_cdReadOriginal = runtime->lookupFunction(kCdRead);
@@ -228,6 +317,12 @@ namespace
             s_rng = std::getenv("HLB_RNG") != nullptr;
             s_ramDump = std::getenv("HLB_RAM") != nullptr;
             s_mark = std::getenv("HLB_MARK") != nullptr;
+            if (const char *v = std::getenv("HLB_RNGLOG"))
+            {
+                char *e;
+                s_rngFrom = static_cast<uint32_t>(std::strtoul(v, &e, 0));
+                s_rngTo = *e ? static_cast<uint32_t>(std::strtoul(e + 1, nullptr, 0)) : s_rngFrom;
+            }
             s_cdBusy = std::getenv("HLB_CDBUSY") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_CDBUSY"))) : 0u;
             if (const char *v = std::getenv("HLB_RAMAT"))
                 for (const char *p = v; *p;)

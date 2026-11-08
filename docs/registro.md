@@ -91,6 +91,35 @@ Rumo novo pedido pelo dono: correto primeiro, no PC, sem o caminho nativo da lut
     conforme a distância, latência de meia rotação, leitura por setor conforme a velocidade (CAV), leitura antecipada,
     e o mesmo drive servindo o streaming de som do IOP. Item próprio: dar ao CD do runtime esse tempo (o hardware também
     tem). Até lá, a bancada calibra o atraso para seguir comparando a lógica depois desse ponto.
+- **Com o atraso de CD calibrado na bancada** (`HLB_CDBUSY=14`, só para seguir comparando): o gatilho da rodada cai no
+  quadro 59 como no PCSX2, e o estado de jogo fica igual até o quadro 142 (antes 52).
+- **`SQRT.S` da FPU ao mais próximo** (patch `0072`, `d95db07`): desde o quadro ~100 `+0x32C`/`+0x330` dos dois
+  lutadores saíam 1 ulp abaixo do PCSX2. No `iFPU.cpp` o `recSQRT_S_xmm` troca o MXCSR para o mais próximo só nessa
+  instrução; o RSQRT da FPU e o SQRT/DIV/RSQRT da VU ficam em corte (a VU0 macro roda no MXCSR da FPU, sem troca). A
+  `0071` tinha posto a raiz da FPU em corte. Separadas `ps2_fsqrt` (FPU, mais próximo) e `ps2_vu_sqrt` (VU, corte);
+  teste de unidade igual nos 4 milhões. **Comparado:** `+0x32C`/`+0x330` iguais do quadro 2 ao 143 (`r7` contra `p2`).
+- **Desvios por sinal em 64 bits** (patch `0073`): no quadro 125 da CPU o recomp tirava 2 números a mais do
+  Mersenne Twister. Caminho até a causa, com `HLB_RNGLOG` (cada chamada ao gerador e aos auxiliares `0x1810D0`,
+  `0x181020`, `0x180FF0`, com chamador, argumento e pilha, nos dois lados):
+  - as chamadas eram as mesmas e na mesma thread até a 174.ª do quadro 131 (contagem do 1P); ali o laço de partículas
+    `0x34BB20` comparou `obj->0x1E4 < (int)((1.0 - |x|) * 15.0)` (x = float aleatório em ±0,7) e, só no recomp, falhou
+    e sorteou de novo (ramo `0x34BE20`);
+  - envolvendo as rotinas de double por software do jogo (só no recomp, `HLB_SFLOG`) e conferindo em Python contra IEEE:
+    `1.0 - 0.00516868…` deu `-3.00516…` (erro de exatamente 4,0 na fração de ponto fixo da `fp-bit`);
+  - causa: em `_fpadd_parts` (`0x172464`) o jogo testa o sinal da diferença de frações de 64 bits com `bltzl`, e o
+    gerador emitia `GPR_S32(ctx, rs) < 0`. No R5900 BLTZ, BGEZ, BLEZ, BGTZ (e as formas *L* e *AL*) olham os 64 bits
+    (o PCSX2 usa `SD[0]`). A `0073` troca as quatro condições para `GPR_S64` em `control_flow_emitter.cpp` (o único
+    lugar que as emite). Conferido antes: `SET_GPR_U32`/`S32` estendem o sinal como o MIPS; só `SET_GPR_ZE32` zera, em
+    `LHU`/`LBU`/`LWU`, que zeram no hardware também.
+  - Isso afeta toda conta em double por software do jogo (`dpadd`/`dpsub`, e o que usa `_fpadd_parts`), não só o efeito.
+- **Resultado com `0071`+`0072`+`0073` e o atraso de CD calibrado na bancada** (`r14` contra `p2`, Naruto x Naruto no
+  lamen, 1P parado contra a CPU, até v8500): **posição, vida, chakra e ação dos dois lutadores iguais ao PCSX2 nas 3113
+  chamadas da luta inteira; o gerador (índice e estado) igual em todos os registros.** O que ainda difere:
+  - cores da luz (`0x80xxxxxx`) e um campo de tempo (`+0x000`, ~53019 contra ~53041) que já chegam diferentes à luta;
+  - ponteiros deslocados de 0x80 (o heap do recomp começa a luta 0x80 bytes antes do do PCSX2): diferença de antes da
+    luta, a achar;
+  - o atraso de CD é da bancada (`HLB_CDBUSY=14`); sem ele o início da rodada vem 6 quadros antes e a luta diverge.
+    A correção do produto é o tempo de CD no runtime (próximo item).
 - **1P como CPU** (`HLB_P1CPU=0x23`, o byte baixo de `+0x60` do 2P posto no 1P no primeiro quadro): os dois lutadores
   andam um pouco e ficam parados se encarando a partir do quadro ~460, até o tempo acabar (visto no PCSX2, captura do
   quadro 1201). Não serve como luta CPU contra CPU; a referência continua sendo 1P parado contra a CPU. Falta achar
