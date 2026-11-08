@@ -78,10 +78,19 @@ Rumo novo pedido pelo dono: correto primeiro, no PC, sem o caminho nativo da lut
   - No jogo (`r2` contra `p2`): a posição inicial do 2P (`75.0001`) e o ângulo `-pi/2` agora saem iguais ao PCSX2. O
     estado de jogo fica **igual até o quadro 52** de cada lutador (antes: diferente no quadro 0). O jogo carrega, chega
     à luta e luta normalmente.
-- **Divergência seguinte (aberta):** a passagem da introdução da rodada para a luta (os dois lutadores entram juntos na
-  ação 5, animação `0x5B`) acontece no quadro 59 no PCSX2 e no 53 no recomp; a duração depois é igual (28 quadros). Não
-  é conta: é o gatilho que chega 6 quadros antes. Suspeita: algo assíncrono (voz do locutor por ADX/IOP, leitura de
-  CD instantânea no recomp). Investigando com dumps de RAM nos quadros 1, 30 e 52 (`HLB_RAMAT`).
+- **Divergência seguinte: tempo do CD (causa achada, aberta).** A passagem da introdução da rodada para a luta (os
+  dois lutadores entram juntos na ação 5, animação `0x5B`) acontece no quadro 59 no PCSX2 e no 53 no recomp; a duração
+  depois é igual (28 quadros). Dumps de RAM nos quadros 1, 30, 52 e 58 (`HLB_RAMAT`): a lista de tarefas em `0x6194B0`
+  (contador em `0x617AC8`, `0x110B40` insere, `0x110980` zera) do recomp no quadro 52 já está como a do PCSX2 no 58.
+  Com `HL_CD_LOG` e marcas por quadro (`HLB_MARK`): a única leitura de disco entre o início da luta e o gatilho é a do
+  quadro 2 (`sceCdRead` do EE em `0x174308`, chamada de `0x141330`, lbn `0x110C47`, 5 setores para `0x69CB40`). No
+  runtime o `sceCdRead` é HLE e termina na hora, e o `sceCdSync` (`0x1738D0`) sempre responde "pronto". **Prova:** com
+  `HLB_CDBUSY=12` (só na bancada: o `sceCdSync(1)` responde "ocupado" 12 vsyncs depois de cada leitura feita na luta) o
+  gatilho passou para o quadro 58. O jogo espera essa leitura; o PCSX2 dá tempo de busca e leitura ao disco, nós não.
+  - O modelo do PCSX2 (`CDVD.cpp`, `cdvdStartSeek`/`cdvdBlockReadTime`): busca completa 100 ms ou rápida 30 ms
+    conforme a distância, latência de meia rotação, leitura por setor conforme a velocidade (CAV), leitura antecipada,
+    e o mesmo drive servindo o streaming de som do IOP. Item próprio: dar ao CD do runtime esse tempo (o hardware também
+    tem). Até lá, a bancada calibra o atraso para seguir comparando a lógica depois desse ponto.
 - **1P como CPU** (`HLB_P1CPU=0x23`, o byte baixo de `+0x60` do 2P posto no 1P no primeiro quadro): os dois lutadores
   andam um pouco e ficam parados se encarando a partir do quadro ~460, até o tempo acabar (visto no PCSX2, captura do
   quadro 1201). Não serve como luta CPU contra CPU; a referência continua sendo 1P parado contra a CPU. Falta achar

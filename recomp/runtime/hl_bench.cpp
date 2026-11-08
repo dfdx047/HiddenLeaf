@@ -9,6 +9,8 @@
 //   HLB_QUIT=<vsync>   exit at this vsync
 //   HLB_RAM=1          the EE RAM at each fight's first call (before HLB_RNG), in <prefix>_ramNN.bin
 //   HLB_RAMAT=1,30,50  the EE RAM at these frames of the first fighter, in <prefix>_ramNN_fFFFFF.bin
+//   HLB_MARK=1         "[hlb] v.. fight .. frame .." on stderr at each frame of the first fighter (to date other logs)
+//   HLB_CDBUSY=N       experiment: sceCdSync(1) answers busy for N vsyncs after each sceCdRead, once a fight began
 //   HLB_P1CPU=0x23     the first fighter's kind (low byte of fighter+0x60) becomes this at its first frame of each fight,
 //                      as the second (CPU) fighter has it: CPU against CPU
 // The buttons come from the runtime's HL_PADROUTE (the same syntax as HLB_ROUTE on the PCSX2 side).
@@ -49,8 +51,14 @@ namespace
     bool s_rng = false;
     uint32_t s_p1cpu = 0;
     bool s_ramDump = false;
+    bool s_mark = false;
     std::vector<uint32_t> s_ramAt;
     PS2Runtime::RecompiledFunction s_inputOriginal = nullptr;
+    // HLB_CDBUSY=N (an experiment): sceCdSync(non-blocking) says "busy" for N vsyncs after each sceCdRead, as a disc that
+    // takes time to seek and read would
+    constexpr uint32_t kCdRead = 0x174308u, kCdSync = 0x1738D0u;
+    uint32_t s_cdBusy = 0, s_cdReadVsync = 0;
+    PS2Runtime::RecompiledFunction s_cdReadOriginal = nullptr, s_cdSyncOriginal = nullptr;
     void (*s_prevVsync)(PS2Runtime *, uint64_t) = nullptr;
 
     inline uint32_t rd32(uint32_t a)
@@ -108,6 +116,8 @@ namespace
         s_lastHook = s_vsync;
         if (f == s_first)
             ++s_frame;
+        if (s_mark && f == s_first)
+            std::fprintf(stderr, "[hlb] v%u fight %u frame %u\n", s_vsync, s_fight, s_frame);
         if (f == s_first && std::find(s_ramAt.begin(), s_ramAt.end(), s_frame) != s_ramAt.end())
         {
             char name[48];
@@ -140,6 +150,27 @@ namespace
         s_inputOriginal(rdram, ctx, runtime);
     }
 
+    void cdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        s_cdReadVsync = s_vsync;
+        std::fprintf(s_txt, "v%u cdread lbn %x sectors %x\n", s_vsync, GPR_U32(ctx, 4), GPR_U32(ctx, 5));
+        s_cdReadOriginal(rdram, ctx, runtime);
+    }
+
+    void cdSync(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t mode = GPR_U32(ctx, 4);
+        if (mode != 0u && s_fight != 0u && s_vsync - s_cdReadVsync < s_cdBusy)
+        {
+            SET_GPR_S32(ctx, 2, 1);
+            ctx->pc = GPR_U32(ctx, 31);
+            return;
+        }
+        if (mode == 0u && s_fight != 0u && s_vsync - s_cdReadVsync < s_cdBusy)
+            std::fprintf(s_txt, "v%u cdsync blocking while busy\n", s_vsync);
+        s_cdSyncOriginal(rdram, ctx, runtime);
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (s_prevVsync)
@@ -151,6 +182,17 @@ namespace
             s_inputOriginal = runtime->lookupFunction(kFighterInput);
             if (s_inputOriginal != nullptr)
                 runtime->registerFunction(kFighterInput, fighterInput);
+            if (s_cdBusy != 0u)
+            {
+                s_cdReadOriginal = runtime->lookupFunction(kCdRead);
+                s_cdSyncOriginal = runtime->lookupFunction(kCdSync);
+                if (s_cdReadOriginal != nullptr && s_cdSyncOriginal != nullptr)
+                {
+                    runtime->registerFunction(kCdRead, cdRead);
+                    runtime->registerFunction(kCdSync, cdSync);
+                }
+                std::fprintf(s_txt, "v%u cd busy %u vsyncs: %d\n", s_vsync, s_cdBusy, s_cdSyncOriginal != nullptr);
+            }
             std::fprintf(s_txt, "v%u hooked 0x%x: %d\n", s_vsync, kFighterInput, s_inputOriginal != nullptr);
         }
         const uint32_t ovl = std::memcmp(s_ram + kOverlayBase, "MWo3", 4) == 0 ? rd32(kOverlayBase + 4) : 0u;
@@ -185,6 +227,8 @@ namespace
             std::fwrite(header, 4, 4, s_bin);
             s_rng = std::getenv("HLB_RNG") != nullptr;
             s_ramDump = std::getenv("HLB_RAM") != nullptr;
+            s_mark = std::getenv("HLB_MARK") != nullptr;
+            s_cdBusy = std::getenv("HLB_CDBUSY") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_CDBUSY"))) : 0u;
             if (const char *v = std::getenv("HLB_RAMAT"))
                 for (const char *p = v; *p;)
                 {
