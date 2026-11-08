@@ -43,6 +43,7 @@ if [ "$iso" = "--mod" ]; then
     rm -rf "$tmp"; mkdir -p "$tmp"
     say "1. the mod's disc"
     7z x -y -o"$tmp" "$mod_iso" >/dev/null
+    python3 "$here/tools/un5.py" lbn "$mod_iso" "$tmp/hl_lbn.txt"
     boot=$(sed -n 's/^BOOT2 *= *cdrom0:\\\([^;]*\);.*/\1/p' "$tmp/SYSTEM.CNF" | tr -d '\r')
     sha=$(sha256sum "$tmp/$boot" | cut -d' ' -f1)
     id=$(python3 -c "import sys; sys.path.insert(0, '$here/tools'); import un5; print(un5.KNOWN_MODS.get('$sha', ('',))[0])")
@@ -68,6 +69,8 @@ if [ ! -f "$B/disc/SLES_556.05" ]; then
     rm -rf "$B/disc"
     7z x -y -o"$B/disc" "$iso" >/dev/null
 fi
+# the files' sectors on the disc, so the runtime gives the game the same numbers as the disc does
+python3 "$here/tools/un5.py" lbn "$iso" "$B/disc/hl_lbn.txt"
 ls "$B/disc"
 
 say "3. the ELF for the recompiler"

@@ -273,6 +273,19 @@ def cmd_extract(a):
     print(f"{n} files in {a.dir}")
 
 
+def cmd_lbn(a):
+    # Where each file sits on the disc: "<first sector, hex> <bytes> <path>" per line, by sector. The runtime reads the
+    # extracted disc, so without this it gives the files sectors of its own; with it, the game sees the same sector
+    # numbers as on the disc (and PCSX2), and the drive's seek times can follow the real layout (docs/registro.md,
+    # 2026-11-08).
+    iso = Iso(a.iso)
+    rows = sorted((off // SECTOR, size, p) for p, (off, size) in iso.files.items())
+    with open(a.out, "w") as f:
+        for lsn, size, p in rows:
+            f.write(f"{lsn:x} {size} {p}\n")
+    print(f"{len(rows)} files in {a.out}")
+
+
 def cmd_overlays(a):
     paths = []
     for x in a.paths:
@@ -735,6 +748,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("verify"); s.add_argument("iso"); s.set_defaults(fn=cmd_verify)
     s = sub.add_parser("extract"); s.add_argument("iso"); s.add_argument("dir"); s.set_defaults(fn=cmd_extract)
+    s = sub.add_parser("lbn"); s.add_argument("iso"); s.add_argument("out"); s.set_defaults(fn=cmd_lbn)
     s = sub.add_parser("overlays"); s.add_argument("paths", nargs="+"); s.set_defaults(fn=cmd_overlays)
     s = sub.add_parser("diff"); s.add_argument("base"); s.add_argument("mod"); s.add_argument("-o"); s.set_defaults(fn=cmd_diff)
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)

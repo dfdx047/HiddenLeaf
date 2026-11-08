@@ -1,0 +1,135 @@
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+index 504b63d..b80371a 100644
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -12,6 +12,7 @@ bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
+ #include "ps2x/iop/ps2_path.h"
+ 
+ #include <algorithm>
++#include <fstream>
+ #include <array>
+ #include <cctype>
+ #include <cstdlib>
+@@ -509,12 +510,50 @@ namespace ps2x::iop::detail
+                 node.lsn = cursor;
+                 cursor += node.sectors;
+             }
++            // Hidden Leaf: hl_lbn.txt next to the extracted files (tools/un5.py lbn) puts each file on its sector of the real
++            // disc, as the EE side does, so the game and the drive see the disc's layout; the files it does not list
++            // (the runtime's own) go after the real volume's end
++            std::unordered_map<std::string, uint32_t> realLbn;
++            uint32_t realEnd = 0u;
++            {
++                std::ifstream in(rootPath / "hl_lbn.txt");
++                std::string line;
++                while (std::getline(in, line))
++                {
++                    const size_t a = line.find(' ');
++                    const size_t b = a == std::string::npos ? a : line.find(' ', a + 1);
++                    if (b == std::string::npos)
++                        continue;
++                    std::string path = line.substr(b + 1);
++                    while (!path.empty() && (path.back() == '\r' || path.back() == '\n'))
++                        path.pop_back();
++                    std::transform(path.begin(), path.end(), path.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++                    const uint32_t lsn = static_cast<uint32_t>(std::strtoul(line.substr(0, a).c_str(), nullptr, 16));
++                    const uint32_t bytes = static_cast<uint32_t>(std::strtoul(line.substr(a + 1, b - a - 1).c_str(), nullptr, 10));
++                    realLbn[path] = lsn;
++                    realEnd = std::max(realEnd, lsn + alignSectors(bytes));
++                }
++            }
++            if (!realLbn.empty())
++                cursor = std::max(cursor, realEnd);
+             for (IsoNode &node : nodes)
+             {
+                 if (node.directory)
+                     continue;
+-                node.lsn = cursor;
+                 node.sectors = alignSectors(node.size);
++                if (!realLbn.empty())
++                {
++                    std::string relative = std::filesystem::relative(node.hostPath, rootPath, error).generic_string();
++                    std::transform(relative.begin(), relative.end(), relative.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++                    const auto it = error ? realLbn.end() : realLbn.find(relative);
++                    error.clear();
++                    if (it != realLbn.end())
++                    {
++                        node.lsn = it->second;
++                        continue;
++                    }
++                }
++                node.lsn = cursor;
+                 cursor += node.sectors;
+             }
+             volumeSectors = std::max<uint32_t>(cursor, 32u);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index f5a2733..94c996c 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1,5 +1,6 @@
+ #include "runtime/hl_image.h"
+ #include <algorithm>
++#include <fstream>
+ #include <cctype>
+ 
+ namespace
+@@ -38,6 +39,42 @@ namespace
+         return value;
+     }
+ 
++    // Hidden Leaf: where each file sits on the real disc. hl_lbn.txt next to the extracted files (tools/un5.py lbn:
++    // "<first sector, hex> <bytes> <path>" per line) gives the files their sectors on the disc instead of pseudo ones,
++    // so the game sees the numbers it sees on the PS2 and in PCSX2 (docs/registro.md, 2026-11-08).
++    std::unordered_map<std::string, uint32_t> g_cdRealLbn;
++    std::filesystem::path g_cdRealLbnRoot;
++    bool g_cdRealLbnLoaded = false;
++
++    uint32_t cdRealLbn(const std::filesystem::path &root, const std::filesystem::path &file)
++    {
++        if (!g_cdRealLbnLoaded || g_cdRealLbnRoot != root)
++        {
++            g_cdRealLbnLoaded = true;
++            g_cdRealLbnRoot = root;
++            g_cdRealLbn.clear();
++            std::ifstream in(root / "hl_lbn.txt");
++            std::string line;
++            while (std::getline(in, line))
++            {
++                const size_t a = line.find(' ');
++                const size_t b = a == std::string::npos ? a : line.find(' ', a + 1);
++                if (b == std::string::npos)
++                    continue;
++                std::string path = line.substr(b + 1);
++                while (!path.empty() && (path.back() == '\r' || path.back() == '\n'))
++                    path.pop_back();
++                g_cdRealLbn[toLowerAscii(path)] = static_cast<uint32_t>(std::strtoul(line.substr(0, a).c_str(), nullptr, 16));
++            }
++        }
++        std::error_code ec;
++        const std::filesystem::path relative = std::filesystem::relative(file, root, ec);
++        if (ec)
++            return 0u;
++        const auto it = g_cdRealLbn.find(toLowerAscii(relative.generic_string()));
++        return it == g_cdRealLbn.end() ? 0u : it->second;
++    }
++
+     std::string stripIsoVersionSuffix(std::string value)
+     {
+         const std::size_t semicolon = value.find(';');
+@@ -414,10 +451,13 @@ namespace
+         CdFileEntry entry;
+         entry.hostPath = path;
+         entry.sizeBytes = static_cast<uint32_t>(std::min<uint64_t>(sizeBytes, 0xFFFFFFFFu));
+-        entry.baseLbn = g_nextPseudoLbn;
+         entry.sectors = sectorsForBytes(sizeBytes);
+-
+-        g_nextPseudoLbn += entry.sectors + 1;
++        entry.baseLbn = cdRealLbn(root, path);
++        if (entry.baseLbn == 0u)
++        {
++            entry.baseLbn = g_nextPseudoLbn;
++            g_nextPseudoLbn += entry.sectors + 1;
++        }
+         g_cdFilesByKey.emplace(key, entry);
+         entryOut = entry;
+         g_lastCdError = 0;

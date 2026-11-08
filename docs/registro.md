@@ -120,6 +120,14 @@ Rumo novo pedido pelo dono: correto primeiro, no PC, sem o caminho nativo da lut
     luta, a achar;
   - o atraso de CD é da bancada (`HLB_CDBUSY=14`); sem ele o início da rodada vem 6 quadros antes e a luta diverge.
     A correção do produto é o tempo de CD no runtime (próximo item).
+- **Setores reais do disco** (patch `0074`, `tools/un5.py lbn`, `recomp/build.sh`): o runtime lê o disco extraído e
+  dava aos arquivos setores próprios (EE: pseudo-LBNs a partir de `0x100000`, na ordem em que o jogo abre os arquivos;
+  IOP: uma ISO virtual com outra ordem). A extração agora escreve `build/disc/hl_lbn.txt` (setor real, tamanho e caminho
+  de cada arquivo, lidos da ISO) e as duas HLEs põem cada arquivo no setor real; os arquivos que não estão na tabela
+  (os `hl_*` do runtime) vão para depois do fim do volume real (`0xE31FB`). **Conferido:** a leitura do quadro 2 da luta
+  sai em `0x85AC7` como no PCSX2 (antes `0x110C47`), o IOP acha o `SNDDATA.BIN` em `0x1788A` (real); o jogo carrega e a
+  luta continua igual ao PCSX2 do começo ao fim. Base para o tempo do drive, que depende de onde a cabeça está. Falta
+  o mesmo no importador do Android (parado).
 - **1P como CPU** (`HLB_P1CPU=0x23`, o byte baixo de `+0x60` do 2P posto no 1P no primeiro quadro): os dois lutadores
   andam um pouco e ficam parados se encarando a partir do quadro ~460, até o tempo acabar (visto no PCSX2, captura do
   quadro 1201). Não serve como luta CPU contra CPU; a referência continua sendo 1P parado contra a CPU. Falta achar
