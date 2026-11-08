@@ -688,7 +688,11 @@ STUB_AT = {
 # data (missing-target 0xbd9c90, v10300-11700) on the RP5 and the Odin: docs/registro.md, 2026-11-03 11:30.)
 # (Since 2026-11-05 libsdr is recompiled by default. The jump into data was the dispatch taking a checkpoint below a call to
 # the same target for a return, patch 0068, not libsdr: docs/registro.md, 2026-11-05 02:40.)
-UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin")
+# rand (0x17C558): the game's own newlib rand, a 64-bit LCG (0x5851F42D4C957F2D) on its _reent (*(0x412DD8) + 0xA8, seeded by
+# its srand at 0x17C540) that gives 31 bits. The runtime's stub gave the host's std::rand() & 0x7FFF and ignored the seed:
+# the CPU's choices (BTL 0x6F0E60, 0x6F1260, 0x6F1720) and rand()/2^31 (0x192830) came out of another sequence and range
+# (docs/registro.md, 2026-11-08).
+UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin|rand")
 # HL_SDR=0 at build time leaves the three libsdr calls as stubs (no sound in the logos and films)
 if os.environ.get("HL_SDR", "1") != "0":
     UNSTUB = re.compile(UNSTUB.pattern + r"|sceSdRemoteInit|sceSdRemote|sceSdTransToIOP")
