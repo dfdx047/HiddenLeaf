@@ -621,6 +621,65 @@ aparece em tela de 100 Hz ou mais (`DisplayCaps`); um 120 salvo vira 60 numa tel
 thread GS do ARMSX2 dividia o núcleo grande com a VuWorker (estava no cpu4). Prendê-la nos núcleos pequenos (como root,
 pelo hlprofile) deu 43,5 fps e 82%: refutada. O limite é a VU1 (interpretador) num A77 a 1,77 GHz. Não otimizado.
 
+## Correto primeiro: bancada contra o PCSX2 (desde 2026-11-08)
+
+O dono testou o `app_d26` e achou o jogo muito quebrado (defeitos diferentes por personagem, cenários com erro, câmera
+doida, tela preta até o próximo especial). Duas fontes de defeito estavam misturadas: o recomp do EE e o caminho nativo da
+luta. A fase atual é só no PC, sem o nativo (no PC ele nem existe: o `HL_NATIVE` é da `libbt4gsx` do Android; no PC a
+imagem sai pelo GS de software do runtime). O Android fica parado até a tabela de lutas do registro estar toda verde.
+
+### O que os outros recomps do dono fazem diferente (2026-11-08, só leitura)
+
+Lidos: BT4 (`DragonRage/port/build/bt4/BT3-Recomp` e `port/bt4/patches/`, mais o `ps2recomp-dbz.patch` do dbz-bt4-recomp) e
+BT2 (`DragonRage/bt2/runtime`, `bt2/docs`), e o modelo de float do BT3 descompilado (`Tenkaichi3Decomp/port/src/softfloat_ps2.c`).
+O BT3-Recomp parte de um PS2Recomp mais velho que o nosso `e563698`; o BT2 parte de `c5a9d02` (4 commits antes) e reescreve o
+código gerado com regex (`bt2/tools/ps2recomp/prepare_runtime.py`) num runtime escrito à mão. Nos dois, várias áreas já estão
+atrás do nosso (expoente 255, divisão por zero, `CVT.W.S` truncando, VDIV/VSQRT/VFTOI, CLIP, MMI, escalonador por prioridade).
+
+Por ordem de chance de explicar defeito de jogo:
+
+| # | Diferença | Nos falta? | Pode explicar? | Testado por eles |
+|---|---|---|---|---|
+| 1 | **`rand` (0x17C558) era um stub do host**: `std::rand() & 0x7FFF`, sem a semente do `srand` do jogo (0x17C540). O do jogo é o LCG de 64 bits do newlib (`0x5851F42D4C957F2D`, estado em `*(0x412DD8)+0xA8`), 31 bits | sim | **sim**: as escolhas da CPU no `BTL` (`0x6F0E60`, `0x6F1260`, `0x6F1720`), `rand()/2^31` sempre perto de 0 (`0x192830`), `(rand()>>19)%101` sempre 0 (`0x359D80`), direções pela metade (`0x743720`) | BT3 `616e85e`, BT2 roda o do jogo |
+| 2 | **FPU e VU0 macro arredondam ao mais próximo**; o PCSX2 corta para zero (MXCSR do EE com RZ+DAZ+FTZ), soma e subtração **sem bits de guarda** (o operando menor perde os bits que cairiam além de 1 bit de guarda: `iFPU.cpp` `FPU_ADD_SUB`), `DIV.S` ao mais próximo (`FPUDivFPCR`), resultado preso em ±FLT_MAX (`fpuFloat`) | sim | sim: 1 ulp em metade das contas, acumulado em física, câmera e limiares | BT3 só bateu tick a tick com o PCSX2 depois desse modelo (`f6438a5`, `d7dbf9c`); o BT3-Recomp viu RZ+FTZ+DAZ **global na thread** quebrar menus e carga (`97ad839`): fazer por operação, não no MXCSR |
+| 3 | VU0 e VU1 **sem clamp**; o GameDB do PCSX2 pede para este jogo `vu0ClampMode: 3` ("fundos de diálogo errados") e `vu1ClampMode: 3` ("SPS nos personagens") | a conferir | imagem dos personagens e diálogos | GameDB do PCSX2 |
+| 4 | `ChangeThreadPriority` devolve 0 em vez da prioridade antiga; o ADXM_Lock/Unlock da CRI (`0x12E4B8`/`0x12E540`) guarda o retorno em `0x3F6180` e restaura, pedindo prioridade 0 (recusada) | sim | ordem das threads, som (é o "todos na prioridade 1" do `0039`) | dbz |
+| 5 | Tempo do host: o VBLANK precisa do prazo em ciclos **e** do relógio do host; T0–T3 e IOP em ciclos fictícios; `0021`/`0069` adiantam o relógio | sim | não determinístico entre aparelhos; o jogo mede o quadro pelo T0 (`0x1061a4` zera, `0x108748` lê, guarda em `*(gp-0x3F4)+4`) | BT2: VBLANK em pontos fixos |
+| 6 | `BLTZ/BGEZ/BLEZ/BGTZ` testam 32 bits; 36 sítios do UN5 testam um valor de `ld`/`lq` (`0x102620`, `0x159f18`, ADV `0x816390`) | sim | pouco provável | BT2, 491 sítios sem regressão |
+| 7 | Callbacks do IOP para o EE (sifcmd 15/16/20/21/23) descartados; VBLANK do IOP em NTSC | sim | som | BT2 |
+| 8 | INTC: causa mascarada por `DisableIntc` descartada em vez de guardada; a cadeia de tratadores não para em retorno negativo | sim | tempo | BT2, contra capturas do PCSX2 |
+| 9 | `SuspendThread`/`ResumeThread` devolvem 0 (o BT3 devolve o tid) | conferir a ABI | pouco | BT3 |
+| 10 | Pad lido ao vivo a cada `scePadRead` (o BT2 trava um bloco por VBLANK); pressão só 0 ou 0xFF | sim | entrada | BT2 |
+| — | Flags de STATUS da VU0 macro nunca calculadas; `VCLIP`/`VRNEXT`; `LQ`/`SQ` sem alinhar a 16; bit SPR da tag DMA; VU0 por thread; `malloc`/`free` em stub (o heap não fica onde fica no PS2) | sim | baixo: o UN5 não chama os leitores (`sceVu0ClipScreen*`), não usa `vclip`/`vrnext`, 1 `lq` estático | BT3, BT2 |
+| — | Som: o dbz arredonda `AllocSysMemory` e `sceSifAllocIopHeap` a 256 bytes (com menos, o ADX estalava a cada 8192 amostras); o nosso usa 16 (IOP) e 64 (EE) | sim | estalos | dbz |
+
+Já certos no nosso (não regredir): `MFC1` com extensão de sinal (a "câmera maluca" do BT2), SQRT/RSQRT, `DIV.S` x/0,
+VF0/VI0, VLQI/VSQI, PMADDH/PHMADH, `-ffp-contract=off`, prioridade estrita sem fatia de tempo (`0039`).
+
+Relatórios completos dos dois agentes: copiados em `build/lab/bench/bt4-vs-hl.md` e `bt2-vs-hl.md` (fora do git).
+
+### A bancada (CPU contra CPU, sem savestate)
+
+- **PCSX2 da bancada** (fora do repositório): `~/build/pcsx2-bench/src` (PCSX2 `v2.9.162`) com o gancho
+  `pcsx2/HLBench.cpp`, ligado por `HLB_OUT`. Usa o mecanismo de ponto de parada do recompilador do EE para chamar o gancho
+  (sem pausar) na entrada de `0x21E660`. Configuração portátil em `b/bin` (`portable.ini`): BIOS `scph39001`, renderizador
+  por software, sem patches nem cheats, cartão em pasta formatado e vazio no slot 1 (o recomp tem um de 8 MB formatado e
+  vazio), slot 2 vazio. Rodar: `~/build/pcsx2-bench/run.sh <prefixo>` (Qt em `xcb`, sem MangoHud).
+- **Recomp do PC:** `recomp/runtime/hl_bench.cpp` (só fora do Android), mesmo gancho por `registerFunction`, os mesmos
+  registros; rodar com `~/build/pcsx2-bench/runrc.sh <prefixo>`. Os botões vêm do `HL_PADROUTE` (no PCSX2, `HLB_ROUTE`, mesma sintaxe).
+- **Registro** (`<prefixo>.bin`): a cada chamada de `0x21E660` (a entrada de cada lutador, uma vez por quadro do jogo, 25 por
+  segundo): vsync, luta, número da chamada, endereço do lutador, `ra`, índice do Mersenne Twister, hash do estado dos dois
+  geradores, a câmera (`*(0x617ACC)`), os 0xC00 bytes do lutador e os 0x280 da câmera. `<prefixo>.txt` tem os eventos.
+- **Geradores aleatórios do jogo:** um Mersenne Twister de 624 palavras de 64 bits (estado em `0x627D40`, índice em
+  `gp-0x7FA8` = `0x60FF48`, gerador `0x180BA0`, tabela `mag01` em `0x413254`) e o `rand` do newlib (acima). Com `HLB_RNG=1`, na
+  primeira entrada de lutador de cada luta os dois lados põem o índice em `0x271` (a próxima chamada ressemeia com a semente
+  padrão do jogo) e o estado do `rand` em 1.
+- **Comparação:** `tools/hlbench.py diff <pcsx2.bin> <recomp.bin>`: casa por luta e número de chamada, o lutador pela ordem
+  em que aparece; ponteiros que diferem pelo mesmo deslocamento dos lutadores contam como iguais. Mostra a primeira chamada
+  com diferença, os campos (deslocamento, os dois valores, como float) e como a diferença se espalha.
+- **Luta de referência** (`build/lab/hl_env.txt` cortada antes da luta, `runs/route_idle.txt`): Naruto x Naruto no lamen,
+  o 1P parado contra a CPU. No PCSX2 a luta começa no v5306 nas duas rodadas.
+
 ## Teste nos aparelhos
 
 - **AYN Odin 2 Mini** (Snapdragon 8 Gen 2, Adreno 740), mais os aparelhos do Dragon Rage: RG Cube (Mali-G57, o alvo
