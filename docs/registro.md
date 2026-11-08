@@ -55,6 +55,51 @@ Falta: imagem (capturas nos mesmos quadros dos dois lados), outros cenários, Ou
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-08 08:24, manhã: falta fumaça, poeira e clarão nas lutas do PC; as texturas deles nunca chegam à VRAM (aberto)
+
+**Defeito (visto, PC, GS de software do runtime):** capturas lado a lado a cada 25 quadros da luta Kakashi x Naruto
+(`route_v3`, `ps25` x `rs25`, 30 pares): no recomp faltam a nuvem de fumaça da substituição, a poeira no chão e o clarão
+branco e roxo dos golpes. O resto (cenário, personagens, HUD, as letras de impacto, o brilho redondo) sai igual. É o
+"efeitos diferentes" do relato do dono, e o estado de jogo continua igual ao PCSX2.
+
+**Onde se perde (passo a passo, cada um medido):**
+1. **O GS recebe os desenhos iguais.** Dump do GS do PCSX2 no quadro 199 (`HLB_GSDUMP=199,12`, novo na bancada do
+   PCSX2) contra o GIF do recomp nos mesmos quadros (`HLB_GIFCAP=199,24`, novo): grupos de desenho (FRAME, TEX0, PRIM,
+   ALPHA, TEST, com o contexto e o `PRMODE` certos) e número de vértices iguais quadro a quadro em 8 quadros; os
+   vértices da fumaça (`tbp 4928`) iguais em posição, Z, cor e STQ. (Uma primeira leitura acusou `TEST` diferente; era
+   meu leitor sem `CTXT`/`PRMODE`. Errado, corrigido.)
+2. **As texturas desses desenhos não estão na VRAM.** Elas usam `PSMT8H`, `PSMT4HL`, `PSMT4HH` (27, 36, 44), guardadas
+   nos 8 bits altos das páginas `0x70`–`0x16F` (o buffer da tela `0x70` e o Z24 em `0xF0`). PCSX2: esses bytes cheios
+   (321989 palavras); recomp: **zero em todas**, no quadro 1 da luta, no 199 e já no v1500 e v2601 (`HLB_RAMV`, novo).
+3. **No PCSX2 elas são enviadas uma vez no boot**, entre o v1400 e o v1500 (dumps de 100 em 100 vsyncs): ~264 envios
+   `IMAGE` com `BITBLTBUF` de destino `0x1B/0x24/0x2C` a partir do bloco 3584, de v1445 a v1462, por pacotes comuns de
+   A+D + `IMAGE`, junto com cargas de CLUT (8x2 CT32 em `0x12C0x`).
+4. **O recomp lê o mesmo arquivo e descomprime:** `DATA/DATA.CVM` a partir de `0x7093000` (lbn `0x2851E`–`0x286D4`;
+   PCSX2 v1411–1464, recomp v1462–1532, `HLB_CDLOG` novo no recomp). As texturas aparecem descomprimidas na RAM do
+   recomp no v1505 (`0xC38D3C`; PCSX2 `0xC36BBC` no v1444, heap deslocado).
+5. **Mas o recomp não manda nenhum desses envios ao GIF** (captura de v550 a v1550 e de v1495 a v1525: nenhuma
+   transferência para esses formatos nem para os blocos 3584–12000, nem as cargas de CLUT; os pacotes de A+D e
+   `SCISSOR` do mesmo quadro saem iguais aos do PCSX2). O pacote não está na RAM principal do PCSX2 em nenhum dos
+   dumps (montado e consumido entre eles, ou no scratchpad). O bit SPR do endereço de DMA é tratado pelo runtime
+   (`ps2IsScratchpadAddress` aceita o bit 31): não é isso.
+6. gdb com leitura vigiada no buffer descomprimido do recomp (`HLB_TRAPV`, novo): só o descompressor (`0x1AACD0`,
+   `0x1AADF0`, chamados de `0x1B0300`/`0x1B7ED0`/`0x1B4650`) e cópias (`0x1D70F0`) mexem nele; ninguém lê para enviar.
+   O endereço é reaproveitado, então isso não prova sozinho.
+
+**Próximo passo:** achar no código do jogo a rotina que monta esses envios (a que lê o arquivo descomprimido e escreve
+`BITBLTBUF` com `dpsm 0x24/0x2C/0x1B`) e por que ela não roda ou desiste no recomp (condição, interrupção, fila
+esvaziada num tratador). A ferramenta: ganchos de entrada de função nos dois lados (a bancada do PCSX2 já tem o
+mecanismo), contando chamadas entre v1440 e v1530.
+
+**Ferramentas desta etapa (no laboratório, não commitadas):** no `recomp/runtime/hl_bench.cpp`, `HLB_GIFCAP=F[,N]`,
+`HLB_GIFCAPV=V,N` (GIF no formato do `HL_GSCAP`, um registro `0xFF` por vsync), `HLB_RAMV=V,...` (o `hl_ram` do
+runtime: RAM, VRAM e VU1), `HLB_CDLOG=1`, `HLB_TRAPV=V` e a VRAM junto no `HLB_RAMAT`. O `HLB_GIFCAP` precisa de um
+escritor no `ps2_memory.cpp` do runtime (`g_hlGifCap`), por enquanto editado direto no `build/PS2Recomp` (o `build.sh`
+apaga): vira patch antes de commitar. No PCSX2 da bancada (`HLBench.cpp`, fora do repositório): `HLB_GSDUMP=F[,N]`,
+`HLB_GSDUMPV=V,...` com `HLB_GSDUMPN`, `HLB_RAMV`. Leitores em Python no scratchpad desta sessão (a passar para
+`tools/`): dump do PCSX2 → formato `HL_GSCAP`, grupos por estado, vértices, transferências, VRAM por página. A VRAM
+no estado do dump do PCSX2 começa no byte 425.
+
 ### 2026-11-08 07:10, manhã: Neji e Kakashi contra a CPU iguais ao PCSX2 (retomada depois de queda de energia)
 
 - A energia caiu às ~05:16, logo depois de rodar o recomp nas rotas novas; o resto do trabalho até `e0beedf` está
