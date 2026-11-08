@@ -1,0 +1,50 @@
+diff --git a/ps2xRecomp/src/lib/vu_translation_helpers.cpp b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+index bcf2de0..c03788c 100644
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -82,7 +82,7 @@ namespace ps2recomp
+     {
+         uint8_t ftf = inst.vectorInfo.ftf;
+         uint8_t ft_reg = inst.rt;
+-        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = ps2_fsqrt(ft); }}", ft_reg, ft_reg, ftf);
++        return fmt::format("{{ float ft = _mm_cvtss_f32(_mm_shuffle_ps(ctx->vu0_vf[{}], ctx->vu0_vf[{}], _MM_SHUFFLE(0,0,0,{}))); ctx->vu0_q = ps2_vu_sqrt(ft); }}", ft_reg, ft_reg, ftf);
+     }
+ 
+     std::string CodeGenerator::translateVU_VRSQRT(const Instruction &inst)
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index ca555ed..e15b142 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -336,12 +336,13 @@ PS2_FLOAT_NOINLINE inline float ps2_fdiv_slow(float a, float b, bool nearest = t
+     return ps2_from_double(ps2_to_double(a) / ps2_to_double(b), nearest);
+ }
+ 
+-// sqrt(|ft|), toward zero; the result is never negative, sqrt(-0) is +0.
+-PS2_FLOAT_NOINLINE inline float ps2_fsqrt_slow(float a)
++// sqrt(|ft|); the result is never negative, sqrt(-0) is +0. nearest: the FPU's SQRT.S (PCSX2 iFPU.cpp recSQRT_S_xmm
++// switches to nearest for it); otherwise toward zero (the VU's SQRT)
++PS2_FLOAT_NOINLINE inline float ps2_fsqrt_slow(float a, bool nearest = false)
+ {
+     if ((std::bit_cast<uint32_t>(a) & PS2_FLOAT_EXP_MASK) == 0u)
+         return 0.0f;
+-    return ps2_from_double(std::sqrt(std::fabs(ps2_to_double(a))));
++    return ps2_from_double(std::sqrt(std::fabs(ps2_to_double(a))), nearest);
+ }
+ 
+ // fs / sqrt(|ft|). The sign of ft is ignored everywhere, so a zero ft gives +-max with the sign of fs alone.
+@@ -480,7 +481,15 @@ inline float ps2_vu_div(float a, float b)
+     return ps2_fall_normal(a, b, r) ? ps2_chop_quotient(a, b, r) : ps2_fdiv_slow(a, b, false);
+ }
+ 
++// SQRT.S: to nearest
+ inline float ps2_fsqrt(float a)
++{
++    const float x = std::fabs(a);
++    return ps2_fall_normal(x, x, x) ? std::sqrt(x) : ps2_fsqrt_slow(a, true);
++}
++
++// the VU's SQRT: toward zero
++inline float ps2_vu_sqrt(float a)
+ {
+     const float x = std::fabs(a);
+     return ps2_fall_normal(x, x, x) ? ps2_chop_root(x) : ps2_fsqrt_slow(a);
