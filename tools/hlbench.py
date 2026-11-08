@@ -4,6 +4,7 @@
     tools/hlbench.py info <run.bin>
     tools/hlbench.py diff <pcsx2.bin> <recomp.bin> [--fight N] [--ignore 0x10,0x14-0x1f] [--show 20]
     tools/hlbench.py dump <run.bin> --fight N --call C [--fighter|--camera] [--from 0x0 --to 0x100]
+    tools/hlbench.py ram <pcsx2_ramNN.bin> <recomp_ramNN.bin> [--from 0x3d5760 --to 0x700000] [--show 60]
 
 A record is written at the entry of 0x21E660 (the per-frame input of each fighter): vsync, fight, call number in the fight,
 fighter address, return address, the Mersenne Twister's index and a hash of its state, the camera's address, then the
@@ -201,6 +202,25 @@ def cmd_dump(path, fight, call, what='fighter', a=0, b=None):
               '   ' + ' '.join('%10.4g' % fl(w[(off >> 2) + k]) for k in range(4) if (off >> 2) + k < len(w)))
 
 
+def cmd_ram(pa, pb, a=0x3D5760, b=0x700000, show=60):
+    # the EE RAM at a fight's first call on both sides (HLB_RAM=1): differing words, in runs of nearby addresses
+    da = open(pa, 'rb').read()
+    db = open(pb, 'rb').read()
+    wa = struct.unpack_from('<%dI' % ((b - a) // 4), da, a)
+    wb = struct.unpack_from('<%dI' % ((b - a) // 4), db, a)
+    diffs = [(a + i * 4, x, y) for i, (x, y) in enumerate(zip(wa, wb)) if x != y]
+    runs = []
+    for d in diffs:
+        if runs and d[0] - runs[-1][-1][0] <= 0x20:
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+    print('%d words differ in %#x..%#x, %d runs' % (len(diffs), a, b, len(runs)))
+    for r in runs[:show]:
+        first = r[0]
+        print('  %#08x..%#08x %4d words  first %s' % (r[0][0], r[-1][0] + 3, len(r), fmt(first[0], first[1], first[2])))
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -225,6 +245,8 @@ def main(argv):
             cmd_info(p)
     elif argv[1] == 'diff':
         cmd_diff(pos[0], pos[1], int(opts['fight']) if 'fight' in opts else None, opts.get('ignore', ''), int(opts.get('show', 20)))
+    elif argv[1] == 'ram':
+        cmd_ram(pos[0], pos[1], int(opts.get('from', '0x3d5760'), 0), int(opts.get('to', '0x700000'), 0), int(opts.get('show', 60)))
     elif argv[1] == 'dump':
         cmd_dump(pos[0], int(opts['fight']), int(opts['call']), opts.get('what', 'fighter'), int(opts.get('from', '0'), 0),
                  int(opts['to'], 0) if 'to' in opts else None)

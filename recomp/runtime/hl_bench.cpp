@@ -7,6 +7,10 @@
 //   HLB_SHOT=N         a frame dump (the runtime's hl_shot trigger) every N fight frames
 //   HLB_FRAMES=N       records per fight at most
 //   HLB_QUIT=<vsync>   exit at this vsync
+//   HLB_RAM=1          the EE RAM at each fight's first call (before HLB_RNG), in <prefix>_ramNN.bin
+//   HLB_RAMAT=1,30,50  the EE RAM at these frames of the first fighter, in <prefix>_ramNN_fFFFFF.bin
+//   HLB_P1CPU=0x23     the first fighter's kind (low byte of fighter+0x60) becomes this at its first frame of each fight,
+//                      as the second (CPU) fighter has it: CPU against CPU
 // The buttons come from the runtime's HL_PADROUTE (the same syntax as HLB_ROUTE on the PCSX2 side).
 //
 // A record is written at the entry of 0x21E660, the per-frame input of each fighter (a0 = the fighter): the fighter's
@@ -17,10 +21,12 @@
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -41,6 +47,9 @@ namespace
     uint32_t s_vsync = 0, s_lastHook = 0, s_fight = 0, s_call = 0, s_frame = 0, s_first = 0;
     uint32_t s_shot = 0, s_maxCalls = 0, s_quit = 0, s_lastOverlay = 0xFFFFFFFFu;
     bool s_rng = false;
+    uint32_t s_p1cpu = 0;
+    bool s_ramDump = false;
+    std::vector<uint32_t> s_ramAt;
     PS2Runtime::RecompiledFunction s_inputOriginal = nullptr;
     void (*s_prevVsync)(PS2Runtime *, uint64_t) = nullptr;
 
@@ -80,6 +89,13 @@ namespace
             s_frame = 0;
             s_first = f;
             std::fprintf(s_txt, "v%u fight %u start: fighter %08x mti %u mt %08x\n", s_vsync, s_fight, f, rd32(kMtIndex), rngHash());
+            if (s_ramDump)
+            {
+                char name[32];
+                std::snprintf(name, sizeof(name), "_ram%02u.bin", s_fight);
+                if (FILE *r = std::fopen((s_prefix + name).c_str(), "wb"))
+                    std::fwrite(s_ram, 1, 0x2000000u, r), std::fclose(r);
+            }
             if (s_rng)
             {
                 wr32(kMtIndex, 0x271u);
@@ -92,6 +108,19 @@ namespace
         s_lastHook = s_vsync;
         if (f == s_first)
             ++s_frame;
+        if (f == s_first && std::find(s_ramAt.begin(), s_ramAt.end(), s_frame) != s_ramAt.end())
+        {
+            char name[48];
+            std::snprintf(name, sizeof(name), "_ram%02u_f%05u.bin", s_fight, s_frame);
+            if (FILE *r = std::fopen((s_prefix + name).c_str(), "wb"))
+                std::fwrite(s_ram, 1, 0x2000000u, r), std::fclose(r);
+        }
+        if (s_p1cpu != 0 && s_frame == 1 && f == s_first)
+        {
+            const uint32_t kind = rd32(f + 0x60);
+            wr32(f + 0x60, (kind & ~0xFFu) | s_p1cpu);
+            std::fprintf(s_txt, "v%u fighter %08x kind %08x -> %08x\n", s_vsync, f, kind, rd32(f + 0x60));
+        }
         ++s_call;
         if (s_maxCalls == 0 || s_call <= s_maxCalls)
         {
@@ -155,6 +184,15 @@ namespace
             const uint32_t header[4] = {0x31424C48u, 1u, kFighterBytes, kCameraBytes};
             std::fwrite(header, 4, 4, s_bin);
             s_rng = std::getenv("HLB_RNG") != nullptr;
+            s_ramDump = std::getenv("HLB_RAM") != nullptr;
+            if (const char *v = std::getenv("HLB_RAMAT"))
+                for (const char *p = v; *p;)
+                {
+                    char *e;
+                    s_ramAt.push_back(static_cast<uint32_t>(std::strtoul(p, &e, 0)));
+                    p = *e ? e + 1 : e;
+                }
+            s_p1cpu = std::getenv("HLB_P1CPU") ? static_cast<uint32_t>(std::strtoul(std::getenv("HLB_P1CPU"), nullptr, 0)) & 0xFFu : 0u;
             s_shot = std::getenv("HLB_SHOT") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_SHOT"))) : 0u;
             s_maxCalls = std::getenv("HLB_FRAMES") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_FRAMES"))) : 0u;
             s_quit = std::getenv("HLB_QUIT") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_QUIT"))) : 0u;

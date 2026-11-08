@@ -41,6 +41,53 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-08 01:58, noite: bancada contra o PCSX2 (branch `lab/bench-pcsx2`), `rand` do jogo, FPU em corte (em teste)
+
+Rumo novo pedido pelo dono: correto primeiro, no PC, sem o caminho nativo da luta; Android parado até a tabela ficar verde.
+
+- O `~/AndroidStudioProjects/Nominum-Render/docs/LICOES.md` não existe; segui as lições como descritas no pedido (correto
+  primeiro, testar como jogador, nada de atalho, separar recomp de renderizador).
+- No PC o renderizador nativo (`hl_native.cpp`) não existe: só o GS do runtime. Nada a desligar.
+- Estudo do BT4 e do BT2 (só leitura): tabela de diferenças em `docs/plano.md`, "Correto primeiro".
+- **Bancada** (`49810b3`): PCSX2 compilado com gancho em `~/build/pcsx2-bench` (fora do repositório, `HLBench.cpp`) e o
+  mesmo gancho no recomp (`recomp/runtime/hl_bench.cpp`, só com `HLB_OUT`). Os dois gravam, a cada entrada de
+  `0x21E660` (entrada por quadro de cada lutador), os 0xC00 bytes do lutador, 0x280 da câmera, o índice e um hash dos
+  geradores. `tools/hlbench.py diff` casa os registros por lutador e pelo quadro dele e diz o primeiro quadro diferente.
+  Campos que o jogador vê: posição `+0x30/34/38`, vida `+0x6C`, chakra `+0x70`, ação `+0x18E`.
+- **Geradores do jogo:** Mersenne Twister de 64 bits (estado em `0x627D40`, índice em `0x60FF48`, `0x180BA0`) e o `rand`
+  do newlib (`0x17C558`, LCG de 64 bits sobre `*(0x412DD8)+0xA8`). `HLB_RNG=1` iguala os dois no início da luta.
+- **PCSX2 contra PCSX2** (`p2`, `p3`, rota `route_idle`: Naruto x Naruto no lamen, P1 parado, CPU ataca): iguais nas
+  3113 chamadas. A referência é determinística.
+- **O `rand` era um stub** (`std::rand() & 0x7FFF` do host, sem semente): as escolhas da CPU (`BTL 0x6F0E60` etc.) vinham
+  de outra sequência e de outra faixa. `0474692`: `un5.py` tira o `rand` dos stubs; o jogo roda o dele. Comparado: a
+  luta continua diferente do PCSX2 (`r0` antes, `r1` depois), porque a diferença começa antes (quadro 0, ver abaixo).
+  Não marco como corrigido pela comparação; a causa (stub no lugar da função do jogo) é certa pelo código.
+- **Primeira diferença (r1):** quadro 0 da luta. Posição do 2P `75.0000` no PCSX2 e `75.0001` no recomp (16 ulp), um
+  ângulo `-pi/2` com 4 ulp, 150 com 8 ulp; e um campo `+0x000` (53019 contra 53041, parece tempo). A partir daí as
+  ações e a vida se afastam (quadro 195: vida do 1P 0,958 contra 0,863).
+- O recomp gastou 8 números do MT a mais antes da luta (índice 146 contra 138) e chega à luta 88 vsyncs antes (v5218
+  contra v5306); o overlay BTL entra em v2734 contra v2742. Aberto.
+- **FPU e VU0 macro em corte** (patch `0071`): o PCSX2 roda a FPU e a VU com arredondamento para zero, DAZ e FTZ (só o
+  `DIV.S` ao mais próximo) e com a máscara de guarda na soma da FPU. O nosso arredondava ao mais próximo. A `0071`
+  corrige por operação (sem mexer no MXCSR, que no BT3-Recomp quebrou menus), mantendo o expoente 255 como no hardware.
+  - Teste de unidade contra o x86 no modo do PCSX2 (corte, DAZ, FTZ, máscara de guarda), 4 milhões de pares: soma,
+    sub, mul, div da FPU, div da VU, raiz, RSQRT, `CVT.S.W`, soma e mul vetoriais **todos iguais**, fora os resultados que
+    estouram (o PCSX2 prende em ±max, o hardware e nós damos expoente 255; decisão mantida). O primeiro teste achou um
+    defeito meu: perto do menor normal (expoente < 48) o erro exato da `fma` caía abaixo dos denormais e o corte não
+    acontecia; corrigido (produto em double, divisão escalada por 2^64) antes do build.
+  - No jogo (`r2` contra `p2`): a posição inicial do 2P (`75.0001`) e o ângulo `-pi/2` agora saem iguais ao PCSX2. O
+    estado de jogo fica **igual até o quadro 52** de cada lutador (antes: diferente no quadro 0). O jogo carrega, chega
+    à luta e luta normalmente.
+- **Divergência seguinte (aberta):** a passagem da introdução da rodada para a luta (os dois lutadores entram juntos na
+  ação 5, animação `0x5B`) acontece no quadro 59 no PCSX2 e no 53 no recomp; a duração depois é igual (28 quadros). Não
+  é conta: é o gatilho que chega 6 quadros antes. Suspeita: algo assíncrono (voz do locutor por ADX/IOP, leitura de
+  CD instantânea no recomp). Investigando com dumps de RAM nos quadros 1, 30 e 52 (`HLB_RAMAT`).
+- **1P como CPU** (`HLB_P1CPU=0x23`, o byte baixo de `+0x60` do 2P posto no 1P no primeiro quadro): os dois lutadores
+  andam um pouco e ficam parados se encarando a partir do quadro ~460, até o tempo acabar (visto no PCSX2, captura do
+  quadro 1201). Não serve como luta CPU contra CPU; a referência continua sendo 1P parado contra a CPU. Falta achar
+  como o jogo cria um lutador da CPU (talvez no momento da criação, não no primeiro quadro) ou um modo demonstração.
+- GameDB do SLES-55605: `vu0ClampMode 3`, `vu1ClampMode 3`, sem patches de jogo.
+
 ### 2026-11-05 17:46, dia: correção de hora
 
 - A entrada de baixo, marcada 17:52, foi escrita às 17:46.
