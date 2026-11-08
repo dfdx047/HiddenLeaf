@@ -128,6 +128,28 @@ Rumo novo pedido pelo dono: correto primeiro, no PC, sem o caminho nativo da lut
   sai em `0x85AC7` como no PCSX2 (antes `0x110C47`), o IOP acha o `SNDDATA.BIN` em `0x1788A` (real); o jogo carrega e a
   luta continua igual ao PCSX2 do começo ao fim. Base para o tempo do drive, que depende de onde a cabeça está. Falta
   o mesmo no importador do Android (parado).
+- **Tempo do drive** (patch `0075`, `ps2x/iop/hl_cd_drive.h`, liga sozinho; `HL_CD_TIMING=0` desliga): no runtime
+  as leituras do disco terminavam na hora, e a rodada começava 6 quadros antes do PCSX2 (a causa do achado das 03:00).
+  Agora há um modelo do drive, o mesmo do PCSX2 (`cdvdStartSeek`, `cdvdRotationTime`, `cdvdBlockReadTime`), com a
+  cabeça compartilhada entre o EE (`sceCdRead`), o `sceCdRead` do IOP e as leituras de `cdrom0:` pelo ioman do IOP
+  (o driver de som lê o `SNDDATA.BIN` assim):
+  - busca de 30 ms (16 setores ou mais) ou de 100 ms (14764 ou mais), meia volta do disco sem busca, o tempo de
+    cada setor conforme a trilha e a velocidade, e 333 ms para o disco parado girar;
+  - a troca do fuso de 4x CAV (som, `SCECdSpinNom`) para 2x CLV (jogo, `SCECdSpinMax`) custa a mudança de rotação.
+    Foi isso que fez a leitura do quadro 2 da luta levar 270 ms no PCSX2: o som tinha acabado de ler no
+    `SNDDATA.BIN`;
+  - o `sceCdSync(1)` do EE responde ocupado até o vsync em que o drive terminaria (arredondado para cima, como o
+    jogo vê a cada quadro); o `sceCdSync(0)` segue devolvendo na hora (o jogo não o usa na luta).
+
+  Deixado de fora: o buffer de leitura antecipada do drive (tira 1 a 3 ms das leituras contíguas) e a espera das
+  leituras do IOP pelas do EE.
+
+  **Conferido contra o PCSX2:** a leitura do quadro 2 sai em 270,19 ms (PCSX2 270,07 ms) e a seguinte em 123,1 ms
+  (124,7). A luta inteira (3113 chamadas, `r18`) fica **igual em posição, vida, chakra e ação do começo ao fim,
+  sem `HLB_CDBUSY`**. A luta começa agora no v5312 (PCSX2 v5306; antes v5218–5222): o carregamento passou a ter o
+  tempo do disco. Falta:
+  - o mesmo no Android (o importador não grava o `hl_lbn.txt`, e sem ele os setores são os falsos);
+  - medir o tempo dos carregamentos nos aparelhos.
 - **1P como CPU** (`HLB_P1CPU=0x23`, o byte baixo de `+0x60` do 2P posto no 1P no primeiro quadro): os dois lutadores
   andam um pouco e ficam parados se encarando a partir do quadro ~460, até o tempo acabar (visto no PCSX2, captura do
   quadro 1201). Não serve como luta CPU contra CPU; a referência continua sendo 1P parado contra a CPU. Falta achar

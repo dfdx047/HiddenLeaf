@@ -1,0 +1,365 @@
+diff --git a/ps2xIOP/include/ps2x/iop/hl_cd_drive.h b/ps2xIOP/include/ps2x/iop/hl_cd_drive.h
+new file mode 100644
+index 0000000..c0fc2b8
+--- /dev/null
++++ b/ps2xIOP/include/ps2x/iop/hl_cd_drive.h
+@@ -0,0 +1,201 @@
++#pragma once
++
++// Hidden Leaf: how long the disc drive takes for each read.
++//
++// The runtime reads the extracted disc at once, on the EE (sceCdRead is HLE) and on the IOP (cdvdman's sceCdRead). A
++// game that keeps playing while the drive works (Ultimate Ninja 5 loads during the round's opening and polls
++// sceCdSync(1) each frame) then sees its data a few frames sooner than on the console, and the fight takes another
++// course. This is a model of the drive's time, following the one in PCSX2 (CDVD.cpp: cdvdStartSeek,
++// cdvdRotationTime, cdvdBlockReadTime), which is the reference the bench compares against (docs/registro.md,
++// 2026-11-08):
++//   - the head's position is shared by the EE's and the IOP's reads (the sound driver reads SNDDATA.BIN at 4x CAV,
++//     the game at 2x CLV, and every change from CAV to CLV costs the spindle's change of speed);
++//   - a seek of 16 sectors or more takes 30 ms, of 14764 or more (single-layer DVD) 100 ms; a drive that stopped
++//     takes 333 ms to spin up;
++//   - a read that does not seek waits half a turn of the disc, then the sectors pass at the speed of their track.
++// What it leaves out: the drive's read-ahead buffer (it cuts 1 to 3 ms from contiguous reads), and the IOP's reads
++// waiting for the EE's (each read moves the head when it is asked).
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++
++namespace hl_cd
++{
++    constexpr float kIopClock = 36864000.0f;
++    constexpr float kDvdSectors = 2298496.0f; // the length of a single-layer DVD, as PCSX2 counts it
++    constexpr uint32_t kContiguousSectors = 16u;
++    constexpr uint32_t kFastSeekSectors = 14764u;
++    constexpr uint8_t kCav = 0x80u;
++
++    struct Drive
++    {
++        uint32_t sector = 0u;
++        bool spinning = false;
++        uint8_t spindle = 0u;
++        uint32_t rotationCycles = 0u;
++    };
++
++    inline Drive g_drive;
++    inline std::mutex g_mutex;
++
++    // HL_CD_TIMING=0 turns the model off (reads finish at once, as before)
++    inline bool enabled()
++    {
++        static const bool on = []()
++        {
++            const char *v = std::getenv("HL_CD_TIMING");
++            return v == nullptr || v[0] != '0';
++        }();
++        return on;
++    }
++
++    // The drive's speed and spindle for a sceCdRMode's spindlctrl, as Sony's cdvdman sends them in the read command on
++    // a DVD. Seen in PCSX2 with Ultimate Ninja 5: SCECdSpinMax (the game, on the EE) reads at 2x CLV (1.6x in
++    // effect), SCECdSpinNom (the sound driver, on the IOP) at 4x CAV. The other values were not seen; they follow
++    // their names.
++    inline uint8_t spindleFor(uint8_t spindlctrl)
++    {
++        switch (spindlctrl)
++        {
++        case 1u: // SCECdSpinNom
++        case 4u: // SCECdSpinX4
++            return kCav | 3u;
++        case 2u: // SCECdSpinX1
++            return 1u;
++        default: // SCECdSpinMax, SCECdSpinX2 and the rest
++            return 2u;
++        }
++    }
++
++    inline float speedOf(uint8_t spindle)
++    {
++        switch (spindle & 7u)
++        {
++        case 1u:
++            return 1.0f;
++        case 3u:
++            return 4.0f;
++        default:
++            return 2.0f;
++        }
++    }
++
++    // IOP cycles for one turn of the disc with the head at this sector
++    inline uint32_t rotationCycles(uint8_t spindle, uint32_t sector)
++    {
++        float turnsPerSecond;
++        if (spindle & kCav)
++            turnsPerSecond = 1515.0f * speedOf(spindle) / 60.0f;
++        else
++        {
++            const float trackSpeed = (1.0f - (static_cast<float>(sector) / kDvdSectors) * 0.60f) + 0.40f;
++            turnsPerSecond = 1515.0f * std::min(speedOf(spindle), 1.6f) * trackSpeed / 60.0f;
++        }
++        return static_cast<uint32_t>((kIopClock / 1000.0f) * (1000.0f / turnsPerSecond));
++    }
++
++    // IOP cycles for one sector to pass under the head
++    inline uint32_t sectorCycles(uint8_t spindle, uint32_t sector)
++    {
++        if (spindle & kCav)
++        {
++            const float trackSpeed = (static_cast<float>(sector) / kDvdSectors) * 0.60f + 0.40f;
++            return static_cast<uint32_t>(kIopClock / (675.0f * speedOf(spindle) * trackSpeed));
++        }
++        return static_cast<uint32_t>(kIopClock / (675.0f * std::min(speedOf(spindle), 1.6f)));
++    }
++
++    // A read of `sectors` sectors from `lsn` with this spindle: moves the head and returns how long the drive takes,
++    // in IOP cycles, from the command to the last sector
++    inline uint64_t read(uint32_t lsn, uint32_t sectors, uint8_t spindle)
++    {
++        std::lock_guard<std::mutex> lock(g_mutex);
++        Drive &d = g_drive;
++        const uint32_t delta = lsn > d.sector ? lsn - d.sector : d.sector - lsn;
++        const uint32_t oldRotation = d.rotationCycles;
++        const bool toClv = (d.spindle & kCav) && !(spindle & kCav);
++        d.spindle = spindle;
++        d.rotationCycles = rotationCycles(spindle, lsn);
++        uint64_t cycles = 0u;
++        bool seeking = false;
++        if (!d.spinning)
++        {
++            cycles = static_cast<uint64_t>(kIopClock) / 3u;
++            d.spinning = true;
++        }
++        else
++        {
++            if (delta >= kContiguousSectors)
++            {
++                cycles = static_cast<uint64_t>(kIopClock) * (delta >= kFastSeekSectors ? 100u : 30u) / 1000u;
++                seeking = true;
++            }
++            if (toClv && oldRotation != 0u)
++            {
++                const float oldRpm = (kIopClock / static_cast<float>(oldRotation)) * 60.0f;
++                const float newRpm = (kIopClock / static_cast<float>(d.rotationCycles)) * 60.0f;
++                cycles += static_cast<uint64_t>((kIopClock / 1000.0f) * (0.054950495049505f * std::fabs(newRpm - oldRpm)));
++            }
++        }
++        if (delta != 0u && !seeking)
++            cycles += d.rotationCycles / 2u;
++        cycles += static_cast<uint64_t>(sectors) * sectorCycles(spindle, lsn);
++        d.sector = lsn + sectors;
++        return cycles;
++    }
++
++    // The sector where a file of the disc starts (hl_lbn.txt next to the extracted files, from tools/un5.py lbn), by
++    // its host path; 0 when the file is not on the disc or the table is missing
++    inline uint32_t fileSector(const std::filesystem::path &root, const std::filesystem::path &file)
++    {
++        static std::mutex mutex;
++        static std::filesystem::path loadedRoot;
++        static std::unordered_map<std::string, uint32_t> table;
++        static bool loaded = false;
++        const auto lower = [](std::string v)
++        {
++            for (char &c : v)
++                c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
++            return v;
++        };
++        std::lock_guard<std::mutex> lock(mutex);
++        if (!loaded || loadedRoot != root)
++        {
++            loaded = true;
++            loadedRoot = root;
++            table.clear();
++            std::ifstream in(root / "hl_lbn.txt");
++            std::string line;
++            while (std::getline(in, line))
++            {
++                const size_t a = line.find(' ');
++                const size_t b = a == std::string::npos ? a : line.find(' ', a + 1);
++                if (b == std::string::npos)
++                    continue;
++                std::string path = line.substr(b + 1);
++                while (!path.empty() && (path.back() == '\r' || path.back() == '\n'))
++                    path.pop_back();
++                table[lower(path)] = static_cast<uint32_t>(std::strtoul(line.substr(0, a).c_str(), nullptr, 16));
++            }
++        }
++        std::error_code ec;
++        const std::filesystem::path relative = std::filesystem::relative(file, root, ec);
++        if (ec)
++            return 0u;
++        const auto it = table.find(lower(relative.generic_string()));
++        return it == table.end() ? 0u : it->second;
++    }
++
++    // the same in milliseconds
++    inline double readMs(uint32_t lsn, uint32_t sectors, uint8_t spindle)
++    {
++        return static_cast<double>(read(lsn, sectors, spindle)) * 1000.0 / static_cast<double>(kIopClock);
++    }
++}
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+index b80371a..7df1eac 100644
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -10,6 +10,7 @@ bool hlImageResolve(const std::string &guestPath, uint32_t &lbn, uint32_t &size)
+ #include "../core/iop_memory.h"
+ #include "ps2x/iop/iop_host.h"
+ #include "ps2x/iop/ps2_path.h"
++#include "ps2x/iop/hl_cd_drive.h"
+ 
+ #include <algorithm>
+ #include <fstream>
+@@ -238,12 +239,18 @@ namespace ps2x::iop::detail
+             case 6: // sceCdRead
+             {
+                 const bool ok = readSectors(a0, a1, a2);
++                // Hidden Leaf: the read moves the drive's head (ps2x/iop/hl_cd_drive.h); its time is not modelled on the
++                // IOP side yet, only its effect on the EE's next read
++                uint8_t rmode[4] = {};
++                (void)memory.readRam(cpu.gpr[7], rmode, sizeof(rmode));
++                const double ms = hl_cd::enabled() && ok ? hl_cd::readMs(a0, a1, hl_cd::spindleFor(rmode[1])) : 0.0;
+                 // Hidden Leaf: every IOP read with HL_CD_LOG=1, as on the EE side
+                 static const bool s_cdLog = std::getenv("HL_CD_LOG") != nullptr;
+                 if (s_cdLog)
+                 {
+                     std::cerr << "[iop sceCdRead] lsn=0x" << std::hex << a0 << " sectors=0x" << a1 << " buf=0x" << a2
+-                              << " ra=0x" << cpu.gpr[31] << std::dec << (ok ? "" : " FAILED") << std::endl;
++                              << " ra=0x" << cpu.gpr[31] << " spindlctrl=" << unsigned(rmode[1]) << std::dec << " drive_ms=" << ms
++                              << (ok ? "" : " FAILED") << std::endl;
+                 }
+                 if (ok)
+                 {
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.cpp b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+index fbdd946..0324f19 100644
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+@@ -5,6 +5,7 @@
+ #include "../services/iop_rpc.h"
+ 
+ #include "ps2x/iop/iop_host.h"
++#include "ps2x/iop/hl_cd_drive.h"
+ 
+ #include <algorithm>
+ #include <iostream>
+@@ -63,7 +64,13 @@ namespace ps2x::iop::detail
+                 return true;
+             }
+             std::cerr << "[ioman] open " << guestPath << " size " << size << std::endl;
+-            m_files.push_back({handle, 0u, size});
++            // Hidden Leaf: a file of the disc keeps its sector, so its reads move the drive's head (ps2x/iop/hl_cd_drive.h):
++            // UN5's sound driver reads SNDDATA.BIN through cdrom0: as the round starts, and the game's next read pays
++            // the seek and the spindle's change from 4x CAV back to 2x CLV, as on the console
++            uint32_t discSector = 0u;
++            if (hl_cd::enabled() && guestPath.rfind("cdrom", 0) == 0)
++                discSector = hl_cd::fileSector(m_host.hostPath(HostPathKind::CdRoot), hostPath);
++            m_files.push_back({handle, 0u, size, discSector});
+             setV0(kFirstDescriptor + static_cast<uint32_t>(m_files.size() - 1u));
+             return true;
+         }
+@@ -95,6 +102,13 @@ namespace ps2x::iop::detail
+                 setV0(0xFFFFFFFFu);
+                 return true;
+             }
++            if (file->discSector != 0u && bytesRead != 0u)
++            {
++                const uint64_t first = file->position / 2048u;
++                const uint64_t last = (file->position + bytesRead - 1u) / 2048u;
++                (void)hl_cd::read(file->discSector + static_cast<uint32_t>(first), static_cast<uint32_t>(last - first + 1u),
++                                  hl_cd::spindleFor(1u));
++            }
+             file->position += bytesRead;
+             setV0(static_cast<uint32_t>(bytesRead));
+             return true;
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.h b/ps2xIOP/src/emulator/imports/iop_ioman.h
+index 382ca63..37491f1 100644
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.h
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.h
+@@ -37,6 +37,7 @@ namespace ps2x::iop::detail
+             uint64_t handle = 0u;
+             uint64_t position = 0u;
+             uint64_t size = 0u;
++            uint32_t discSector = 0u; // Hidden Leaf: where a cdrom0: file starts on the disc, for the drive's time
+         };
+ 
+         IopHost &m_host;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+index 11930a0..edd0ef7 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+@@ -2,6 +2,8 @@
+ #include "CD.h"
+ #include "MPEG.h"
+ #include "runtime/ee_scheduler.h"
++#include "ps2x/iop/hl_cd_drive.h"
++#include <cmath>
+ 
+ namespace ps2_stubs
+ {
+@@ -313,13 +315,30 @@ namespace ps2_stubs
+             }
+         }
+ 
++        // Hidden Leaf: the drive's time for this read (ps2x/iop/hl_cd_drive.h): sceCdSync(1) answers "busy" until the
++        // vsync in which the drive would finish, as the game sees it on the console and in PCSX2
++        double driveMs = 0.0;
++        uint8_t spindlctrl = 1u;
++        if (ok && hl_cd::enabled())
++        {
++            const uint32_t modeAddr = getRegU32(ctx, 7);
++            if (modeAddr != 0u)
++                spindlctrl = rdram[(modeAddr + 1u) & PS2_RAM_MASK];
++            driveMs = hl_cd::readMs(selected.lbn, selected.sectors, hl_cd::spindleFor(spindlctrl));
++            const EeScheduler::FieldRate rate = EeScheduler::fieldRate();
++            const double frameMs = 1000.0 * static_cast<double>(rate.denominator) / static_cast<double>(rate.numerator);
++            g_cdBusyFromTick = runtime != nullptr ? runtime->eeScheduler().currentVSyncTick() : 0u;
++            g_cdBusyVsyncs = static_cast<uint64_t>(std::ceil(driveMs / frameMs));
++        }
++
+         // Hidden Leaf: every read with HL_CD_LOG=1 (where the game reads the disc, and into what)
+         static const bool s_cdLog = std::getenv("HL_CD_LOG") != nullptr;
+         if (s_cdLog)
+         {
+             std::cerr << "[sceCdRead] lbn=0x" << std::hex << selected.lbn << " sectors=0x" << selected.sectors
+                       << " buf=0x" << selected.buf << " ra=0x" << getRegU32(ctx, 31) << " sp=0x" << getRegU32(ctx, 29)
+-                      << std::dec << " args=" << selected.tag << (ok ? "" : " FAILED") << std::endl;
++                      << std::dec << " args=" << selected.tag << " spindlctrl=" << unsigned(spindlctrl) << " drive_ms=" << driveMs
++                      << " busy_vsyncs=" << g_cdBusyVsyncs << (ok ? "" : " FAILED") << std::endl;
+         }
+ 
+         if (ok)
+@@ -334,6 +353,14 @@ namespace ps2_stubs
+ 
+     void sceCdSync(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        // Hidden Leaf: the non-blocking form (mode 1) says "busy" while the drive model is still reading; the blocking
++        // form returns at once, as before (Ultimate Ninja 5 does not use it while it plays)
++        if (getRegU32(ctx, 4) != 0u && g_cdBusyVsyncs != 0u && runtime != nullptr &&
++            runtime->eeScheduler().currentVSyncTick() - g_cdBusyFromTick < g_cdBusyVsyncs)
++        {
++            setReturnS32(ctx, 1);
++            return;
++        }
+         setReturnS32(ctx, 0); // 0 = completed/not busy
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index 94c996c..c475999 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -30,6 +30,8 @@ namespace
+     uint32_t g_cdStreamingLbn = 0;
+     uint32_t g_cdStreamingEndLbn = 0xFFFFFFFFu;
+     bool g_cdInitialized = false;
++    uint64_t g_cdBusyFromTick = 0;
++    uint64_t g_cdBusyVsyncs = 0;
+ 
+     std::string toLowerAscii(std::string value)
+     {
