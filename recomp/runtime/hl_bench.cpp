@@ -38,6 +38,8 @@ extern std::mutex g_hlGifCapMutex;
 extern std::FILE *g_hlGifCap;
 extern std::FILE *g_hlVuCap;
 
+void hlProfDump(); // recomp/runtime/hl_prof.cpp
+
 namespace
 {
     constexpr uint32_t kFighterInput = 0x21E660u;
@@ -459,6 +461,7 @@ namespace
             std::fprintf(s_txt, "v%u quit\n", s_vsync);
             std::fclose(s_bin);
             std::fclose(s_txt);
+            hlProfDump(); // (HL_PROF: the samples, before the _Exit skips atexit)
             std::_Exit(0);
         }
     }

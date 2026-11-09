@@ -56,6 +56,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 23:15, noite: recomp do PC 7x mais rápido para comparar estado com o PCSX2 (`HL_GS_NODRAW`, `HL_PROF`)
+
+Pedido do desenvolvedor: certo antes de rápido, e o PC rápido para comparar com o PCSX2 em muitos cenários.
+- **Medida:** na luta o executor do PC roda a ~12 fps; `HL_PERF` dá EE 2,7 ms, VU1 3,7, IOP 1,2 e "parse" (o GS por
+  software do runtime) 76 a 84 ms por quadro.
+- **`HL_PROF=1`** (`recomp/runtime/hl_prof.cpp`, novo): amostragem por `ITIMER_PROF` dentro do processo (o gdb não anexa:
+  `ptrace_scope` 1, e não há `perf`), saída `hl_prof.txt` (`HL_PROF_OUT`), lida por `tools/hlprof.py` (addr2line;
+  `--lib` para o executor ou as libs do Android). O bench chama `hlProfDump()` antes do `_Exit`. Serve no aparelho também.
+  Na luta: 93,6% numa thread só, o GS: `DrawTriangleFast` 41%, `DrawSpriteFast` 13%, `SampleTexture` 9%, `UploadImage`
+  5%, `DrawSprite` 5%; a VU1 2%, o IOP 1%; o código recompilado do jogo quase não aparece.
+- **`HL_GS_NODRAW=1`** (`0088`): o `Submit` do GS por software não rasteriza (uploads e transferências seguem). Rota v3 até
+  a vsync 8500: **57 s em vez de 404 s**, ~85 fps sem esperar o relógio (`HL_FAST_UNTIL`), estado das duas lutas
+  igual ao PCSX2 (`hlbench.py diff pv3.bin ndv3.bin`: posição, vida, chakra e ação iguais em todas as chamadas; os 62
+  words do lutador de sempre).
+- Com isso as rotas de estado (muitos cenários e personagens) cabem em minutos. Para imagem o GS por software do PC não
+  serve de referência: não é o caminho do Android (nativo + GS do ARMSX2), e é ele que tem os bugs de widescreen.
+  Próximo: levar a `libbt4gsx` com o `hl_native.cpp` para o Linux do PC (Vulkan), para comparar imagens em 4:3, 16:9 e
+  20:9 com o mesmo desenho do aparelho.
+
 ### 2026-11-09 22:30, noite: interpretador do EE, primeira parte: a luta igual com 8330 funções interpretadas
 
 - `recomp/runtime/hl_interp.cpp` (copiado para o runtime pelo `recomp/build.sh`, como os outros) e o gancho

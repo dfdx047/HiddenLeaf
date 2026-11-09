@@ -1,0 +1,18 @@
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp	2026-11-09 22:08:56.164084661 +0000
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp	2026-11-09 22:08:56.153965330 +0000
+@@ -550,6 +550,15 @@
+     std::lock_guard<std::mutex> lock(m_mutex);
+     if (!m_vram || batch.vertexCount == 0u)
+         return;
++    // Hidden Leaf: HL_GS_NODRAW=1 skips the rasterizer (uploads and transfers still run): for PC routes that compare
++    // only the game state with PCSX2, where drawing is ~90% of the time
++    static const bool s_noDraw = []()
++    {
++        const char *v = std::getenv("HL_GS_NODRAW");
++        return v != nullptr && v[0] == '1';
++    }();
++    if (s_noDraw)
++        return;
+     DrawPrimitive(batch);
+ }
+ 
