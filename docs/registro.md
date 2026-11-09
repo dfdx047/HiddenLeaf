@@ -56,6 +56,42 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 03:45, madrugada: UNPACK V2/V3 do VIF1 como no hardware; partículas a mais vêm da escolha de microcódigo do EE (PC)
+
+Continuação da entrada das 02:45. No PC, `route_v3`, `HLB_RNG=1`, quadro 199 da luta 1.
+
+**Defeito do VIF1, corrigido no PC** (`0079-vif1-v2-v3-unpack-zw.patch`):
+- O `ps2_vif1_interpreter.cpp` deixava em Z e W o que a memória da VU1 tinha, nos dois caminhos (rápido e geral).
+- O hardware, que o PCSX2 segue no `Vif_UnpackSSE.cpp` ("tested on ps2"):
+  - V2 escreve X Y X Y. No V2-32 com os dados numa palavra ímpar do qword do pacote, W fica 0.
+  - V3 lê um 4º componente (o seguinte do fluxo) para W e só o mantém em alguns vetores, pelo índice do vetor e pela
+    posição dos dados no qword. Fora deles, W fica 0.
+- Visto na entrada da VU1 (`HLB_VU1CAP`): o W das partículas valia `0x3F80005F` (1,0 com o Y) no PCSX2 e lixo no recomp
+  (`0xE2000000`, `0xA2800000`). Com a correção, os 26 primeiros inícios do quadro batem, salvo 10 qwords de trabalho.
+- Teste: estado de jogo igual ao PCSX2 nas 607 chamadas, e as 13 capturas iguais às do PCSX2 (`pfx` x `rv2v3`). A
+  contagem de desenhos do quadro 199 não muda (as partículas fora da tela continuam).
+- Limite: o alinhamento sai da posição no buffer. Na cadeia, o TTE põe 8 bytes no meio, o que não muda a paridade
+  (todas as regras, exceto V3-16) mas muda o alinhamento completo do V3-16.
+- **Falta:** o Android. O `core/vif1.cpp` do Nominum (`NOMINUM_VU1=1`) tem o mesmo caminho rápido e precisa da mesma
+  correção. Depois, a rota nos aparelhos.
+
+**As partículas a mais (aberto, só custo):**
+- Trace por instrução da VU1 nos dois lados (`HLB_VU1TRACE`; no PCSX2 com a VU1 no interpretador). O primeiro desvio
+  não é da VU1: o código em `0x0` é outro.
+- Sequência de MPG e inícios (`0xA5` com a 4ª palavra = 3): igual até o 37º evento do quadro. Ali, o PCSX2 sobe um
+  programa de 81 instruções em `0x0` (`MPG` de 162 palavras, 15 vezes no quadro), e o recomp sobe o de 256. Quem
+  escolhe é o EE, então o estado do sistema de partículas do EE difere.
+- Única diferença de ritmo achada: do quadro 0 ao 1 da luta, o recomp leva 1 vsync e o PCSX2 leva 2. Depois são sempre
+  2, mas os quadros do recomp caem em vsyncs ímpares e os do PCSX2 em pares. O vsync do recomp vem do `EeScheduler`
+  (ciclos do EE e relógio do host, na thread do EE). Segurar o EE na bancada não muda nada (tentado e retirado).
+- Hipótese a testar: algum efeito anda por vsync (contador global ou interrupção) e herda essa diferença de fase.
+
+**Ferramentas:**
+- `0078` atualizado (trace, FNV e cópia do código a cada troca) e `0080-bench-vif1-mpg-event.patch` (MPG na captura).
+- `tools/gsbench/vu1trace.py` e o formato da captura no `tools/gsbench/README.md`.
+- No PCSX2 da bancada (fora do repositório): `OnVu1Step`, `OnVu1Exec` e o MPG em `VU1microInterp.cpp`, `VU1micro.cpp`
+  e `Vif_Codes.cpp`.
+
 ### 2026-11-09 02:45, madrugada: jutsu, campanha e partículas fora da tela contra o PCSX2 (PC; partículas em aberto)
 
 Todos os testes no PC, recomp contra PCSX2, `route_v3`, `HLB_RNG=1`.

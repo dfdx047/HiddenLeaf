@@ -1,0 +1,30 @@
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index db5303a..eea5503 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -8,6 +8,9 @@
+ #include "runtime/hl_nominum_vu1.h"
+ #include <chrono>
+ #include <cstdlib>
++#include <mutex>
++extern std::mutex g_hlGifCapMutex;
++extern std::FILE *g_hlVuCap;
+ #include <cstring>
+ #include <iostream>
+ 
+@@ -568,6 +571,15 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+             uint32_t destAddr = (uint32_t)imm * 8u;
+             const uint32_t instructionCount = (num == 0u) ? 256u : static_cast<uint32_t>(num);
+             const uint32_t mpgBytes = instructionCount * 8u;
++            if (g_hlVuCap != nullptr) // HLB_VU1CAP: the MPGs between the starts (PCSX2 bench's 0xA5 record, after == 3)
++            {
++                std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
++                if (g_hlVuCap != nullptr)
++                {
++                    const uint32_t h[6] = {0xA5u, 16u, 0xC0000000u, destAddr, mpgBytes / 4u, 3u};
++                    std::fwrite(h, 4, 6, g_hlVuCap);
++                }
++            }
+             if (m_vu1Code && destAddr < PS2_VU1_CODE_SIZE && mpgBytes > 0)
+             {
+                 uint32_t copyBytes = mpgBytes;
