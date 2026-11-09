@@ -775,3 +775,25 @@ luta que não fazem nada, e faltam coisas pedidas antes. A régua é um port ofi
    cada botão faz, perfis) e explicação visual e em texto de como tudo funciona (tela de ajuda com o desenho dos botões).
 5. **Opções gráficas dentro do menu Options do próprio jogo** (a aba de opções do UN5), não só no launcher e no painel.
 6. **Mi A3:** bugs de imagem e de desempenho relatados (detalhes a levantar no aparelho).
+
+## Relato do desenvolvedor, 2026-11-09 22h30: bugs abertos e nova estratégia
+
+Bugs relatados (alguns de muitos):
+1. **Tela de vitória:** quando o jogador ganha, a imagem fica toda preta e só aparece o nome do personagem (era o item 1
+   dos próximos passos; continua aberto).
+2. **Bugs visuais em outros cenários de luta** (a rota de teste só cobria o lamen e a 2ª área).
+3. **Efeitos faltando:** o modo vermelho do Naruto (chakra quando a vida está no vermelho) não aparece.
+4. **Ougi de um botão:** ficou todo bugado; o pedido é desenhar o aviso no gráfico do próprio jogo, com o botão único
+   parado esperando o toque.
+5. Os pedidos de controle da seção anterior continuam.
+
+Estratégia (pedido do desenvolvedor): **certo antes de rápido.** Testar muito mais do jogo: todos os cenários, mais
+personagens, poderes e seus efeitos, vida baixa, vitória e resultado, campanha, base e mods, sempre com o Nominum.
+Acelerar o recomp do PC para comparar com o PCSX2 em escala (ver as diferenças sem depender do aparelho).
+
+Aparelho de depuração: **Mi A3** (Snapdragon 665, Adreno 610, ARMv8.0, `37b2869d7607`). Meta: renderizador nativo no GS e
+na VU1, pelo menos 2x com o fps nativo do jogo ou 60 fps, mods funcionando, nenhum parâmetro de fora. O Odin 2 Mini fica
+com o build normal para o desenvolvedor jogar.
+
+Interpretador do EE: desligado por padrão (só com `HL_INTERP`); não muda o caminho normal nem o Android. Só entra no
+Android para mods que mudam código, e só depois de validado no PC; até lá a prioridade é a lista acima.
