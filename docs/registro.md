@@ -56,6 +56,28 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:58, manhã: teste real dos botões na tela, na luta (Odin 2 Mini)
+
+- **Montagem** (`build/lab/gest/fight.sh`, saída em `build/lab/gest/fight/`):
+  - a rota só passa os menus (`gest/env_fight.txt`, `HL_SP_LOG=1`);
+  - na luta, toques `adb input` onde o `NinjaPadView` desenha cada botão (`PadDefaults.FIGHT`): tela de 1920 × 1080,
+    densidade 2,31, sem recorte;
+  - uma captura depois de cada passo, e a tela gravada.
+- **Resultado:**
+  - **direcional** segurado à direita: o lutador anda;
+  - **Ataque** (6 toques seguidos): o jogo mostra "Naruto Uzumaki Combo Attack";
+  - **Pulo:** pula;
+  - **Chakra** segurado 2,5 s: carrega;
+  - **Jutsu** (△ ○ num toque): golpe de 6 hits;
+  - **Ougi** (△ △ ○ num toque): o filme não abriu. Pela tela a barra de chakra não estava cheia, que é regra do jogo.
+    Falta um teste com chakra cheio;
+  - **disputa:** 40 toques no Ataque durante uma disputa ("Mash" na tela); o log mostra `[sp] pad 0 answer` e
+    `pad 1 answer` (v7938 e v7950), ou seja, o botão especial respondeu à disputa;
+  - **Item, Defesa, START** (pausa e volta): respondem;
+  - **Voltar:** abre o menu do jogo sobre a luta.
+- **Adaptação a ver:** os botões Item (0,725; 0,86) e Defesa (0,955; 0,87) ficam sobre a barra de itens do HUD do jogo
+  (L1/R1, x∞), embaixo. Em 16:9, subir os dois uns 4% deixaria o HUD livre.
+
 ### 2026-11-09 08:50, manhã: campanha no Odin 2 Mini (widescreen e medida) e a tela de carga dela
 
 - **Gravação e medida** (`rec/o2_camp_w`, `hl_env_camp_m.txt`, `HL_PERF_FROM=8200`, andando na vila):
