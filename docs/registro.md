@@ -56,6 +56,17 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 21:40, noite: Odin 2 Mini sem conseguir desligar o mod; build normal para o desenvolvedor testar
+
+- **Causa:** `modlib/mods.txt`, `un5_mods.txt` e `un5_settings.txt` tinham sido gravados pelo adb (dono uid 2000, o
+  shell) em testes anteriores; o app (uid 10120) não podia regravá-los: "Aplicando mods" falhava com EACCES, e o A35
+  ficava ligado. **Correção no aparelho:** os três recriados pelo próprio app (`run-as`), com o mesmo conteúdo das
+  configurações; A35 desligado (a pasta dele já tinha sido apagada pelo "remover"). **Regra para os testes:** nunca gravar
+  arquivo nos dados do app pelo adb direto; usar `run-as com.dfdx047.hiddenleaf` (ou apagar e deixar o app recriar).
+- O `hl_env.txt` do Odin tinha uma `HL_PADROUTE` (botões automáticos) e `HL_PERF=1`: guardado em
+  `build/lab/odin2mini_hl_env.txt` e apagado, para o desenvolvedor jogar o build normal (o APK de 21:00, sem o
+  interpretador, com o `0086`).
+
 ### 2026-11-09 21:00, noite: Mi A3 (ARMv8.0) e ISO conferida por SHA-256
 
 - **Mi A3 (Snapdragon 665, Adreno 610, ARMv8.0):** a `libun5.so` (`-march=armv8.2-a`) caía na abertura com SIGILL em

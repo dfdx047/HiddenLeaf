@@ -760,3 +760,18 @@ Desenho:
    VU0 em macro (`lqc2 sqc2 vsub vadd vmul vdiv vwaitq qmtc2.ni qmfc2.ni`…). Raros: `ll sc scd sync cache mfc0 mtc0 ei`.
 5. **Custo:** o interpretador fica dezenas de vezes mais lento que o código gerado. Se as funções novas do A35 pesarem na
    luta, o passo seguinte é um JIT para ARM64 dessas funções, também dentro da `libun5.so`.
+
+## Controles por toque e opções no jogo: pedido de 2026-11-09 21h30 (pendente)
+
+O desenvolvedor reprovou o que existe: os gestos nos menus não são como um jogo oficial de Android, há botões na tela da
+luta que não fazem nada, e faltam coisas pedidas antes. A régua é um port oficial (memória `touch-controls-standard`).
+
+1. **Menus: os dois (decidido):** toque direto no item nas telas principais (título, menu, seleção de personagem,
+   opções, pausa, resultado), lendo da RAM do jogo a tela e o cursor; e o controle virtual (direcional, ○ × △ □, START)
+   também nos menus, como apoio em todas as telas. Voltar do Android = cancelar. Sai o controle por gestos.
+2. **Luta:** nenhum botão sem função; cada botão visível testado por toque.
+3. **Botões de especial separados:** ↓↓○ e ↑↑○ num toque cada (o "Ougi de um botão" que era só a fazer).
+4. **Controles de luta adaptados ao toque,** com toda a personalização necessária (posição, tamanho, opacidade, o que
+   cada botão faz, perfis) e explicação visual e em texto de como tudo funciona (tela de ajuda com o desenho dos botões).
+5. **Opções gráficas dentro do menu Options do próprio jogo** (a aba de opções do UN5), não só no launcher e no painel.
+6. **Mi A3:** bugs de imagem e de desempenho relatados (detalhes a levantar no aparelho).
