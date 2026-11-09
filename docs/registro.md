@@ -56,6 +56,26 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 16:05 (horário do relógio), tarde: o PC não estava travado; heap igual até o bloco 3650
+
+- **Correção da entrada abaixo** (escrita às 15:52, título "16:00"): o executor do PC **não** trava. Eu passava os botões
+  em `HLB_ROUTE`, que só o PCSX2 lê; o recomp lê `HL_PADROUTE` (`~/build/pcsx2-bench/runrc.sh`, `docs/plano.md`, "A
+  bancada"). Sem o ✕ do v650, o jogo espera numa tela de aviso. Monitor, som e `gdb` não tinham nada a ver.
+- **Luta do Kakashi no PC com o pool no lugar** (`route_v3`, `HLB_RNG=1`, contra `pv3`): o estado do jogo é **igual em
+  todas as 1445 chamadas**, como antes. As diferenças que sobram são as mesmas (cores `0x80xxxxxx`, `+0x000`).
+- **O lutador mudou de lugar:** `0xd6a080` (antes `0xd6a000`, igual ao PCSX2); `mti` na entrada da luta 131 (antes 143;
+  PCSX2 138). O alinhamento de -0x10 escondia por sorte a diferença abaixo.
+- **Heap do jogo comparado bloco a bloco** (RAM na primeira chamada da luta: `pv3ram_ram01.bin` na bancada,
+  `rv3ram_ram01.bin` no rascunho; cabeçalho de bloco `+0` anterior, `+4` próximo, `+8` tamanho, `+0xC` marca, a partir de
+  `0x928910`):
+  - os **3650 primeiros blocos são idênticos** nos dois (endereço, tamanho, marca), até `0xbd4260`;
+  - dali em diante são 1596 trechos diferentes, quase todos blocos do mesmo tamanho em **ordem** diferente;
+  - exemplo: o par 0x1410 + 0xc10 que o PCSX2 aloca em `0xbd5a30`/`0xbd6e40`, antes de um bloco de 0xe10, sai no
+    nosso só mais tarde, em `0xbec670`/`0xbedae0`;
+  - é a ordem em que as cargas (threads de leitura) terminam, ou seja, o tempo do CD e das threads (item 5 da tabela
+    "Correto primeiro" do `plano.md`), que segue aberto. Não afeta o estado da luta medido.
+- Ferramenta: `tools/heapwalk.py <ram do pcsx2> <ram do recomp>` (primeiro bloco diferente e os trechos que diferem).
+
 ### 2026-11-09 16:00, tarde: o pool no endereço do PS2 também no PC; o executor do PC parou de chegar ao logo
 
 - **Horários:** as duas entradas anteriores ("15:10" e "15:50") foram escritas entre 15:05 e 15:14. Os títulos estão
