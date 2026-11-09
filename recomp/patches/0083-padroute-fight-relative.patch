@@ -1,5 +1,5 @@
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
-index 850a7c3..5faa6a7 100644
+index 850a7c3..e6cb82e 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
 @@ -9,6 +9,10 @@
@@ -13,7 +13,7 @@ index 850a7c3..5faa6a7 100644
  namespace ps2_stubs
  {
      namespace
-@@ -281,25 +285,53 @@ namespace ps2_stubs
+@@ -281,25 +285,58 @@ namespace ps2_stubs
              {
                  lastCheck = tick;
                  // HL_PADROUTE="750:CROSS,1750:START": the same buttons by vsync, so a route does not depend on how
@@ -66,6 +66,11 @@ index 850a7c3..5faa6a7 100644
 +                        const uint64_t start = g_hlFightStart ? g_hlFightStart(step.fight) : 0u;
 +                        if (start == 0u)
 +                            break;
++                        if (g_hlFightStart(step.fight + 1u) != 0u)
++                        {
++                            ++routeNext; // (the next fight began: a step of this one is dropped)
++                            continue;
++                        }
 +                        due += start;
 +                    }
 +                    if (due > tick)

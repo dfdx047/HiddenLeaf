@@ -56,6 +56,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:25, manhã: duas lutas com vitória do jogador e WINNER e resultado em widescreen (Odin 2 Mini)
+
+- **Rota** `build/lab/hl_env_v3w2.txt`:
+  - a v3 relativa (`hl_env_v3r.txt`) com `HL_CPU_HP=@1+450,@1+900,@1+1400,@2+500,@2+900,@2+1400`;
+  - várias baixas, porque o jogo repõe a vida perto do começo e um golpe nem sempre acerta logo;
+  - gravação em `rec/o2_w3`.
+- **Luta 1:** KO, WINNER "Naruto Uzumaki", resultado (Health 63, Time 96, Bonus 562, 721 Ryo), seleção, VS.
+- **Luta 2:**
+  - Ougi do jogador com "Reversal" e o Ougi da CPU (filme da Kyuubi), depois KO no tempo 80;
+  - WINNER e resultado: Health 13, Time 80, Bonus 471, 564 Ryo, total 1285 (721 + 564).
+- **Widescreen:** WINNER e o resultado (Ninja Song) ocupam a tela inteira, com o texto e o retrato na proporção. Isso
+  fecha as telas de menu da rota de luta, salvo os filmes, que ficam em 4:3.
+- **Defeito da rota, corrigido:**
+  - a terceira baixa da luta 1 (`@1+1400`) ficou pendente, porque a luta acabou antes, e disparou no começo da luta 2;
+  - agora um passo da luta N é descartado quando a luta N+1 já começou;
+  - vale no `HL_CPU_HP` (`hl_game.cpp`) e no `HL_PADROUTE` (`0083` atualizado).
+- **Em seguida:** Alpha 1.1X no Odin 2 Mini (`modlib/un6-a11x`, 934 MB copiados por `run-as`), com a rota relativa
+  `hl_env_a11x_r.txt` (menus da `hl_env_n3_v3_c.txt`).
+
 ### 2026-11-09 08:20, manhã: menus em widescreen no Odin 2 Mini (16:9, "Tela cheia")
 
 - **Correção da hora:** a entrada abaixo diz 09:00, mas foi escrita às 08:05.

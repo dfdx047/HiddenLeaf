@@ -675,6 +675,9 @@ namespace
                     c = *end == ',' ? end + 1 : end;
                 }
         }
+        // (a step of a fight that is over already, the next one having begun, is dropped)
+        while (s_next < s_at.size() && s_at[s_next].fight != 0u && fightStart(s_at[s_next].fight + 1u) != 0u)
+            ++s_next;
         if (s_next >= s_at.size() || (read32(f + kFighterKind) & 0x1E0u) == 0u)
             return;
         uint64_t due = s_at[s_next].at;
