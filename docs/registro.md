@@ -56,6 +56,17 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 05:16, madrugada: campanha em 20:9 no RP5 (`wm size 2400x1080`)
+
+- O Odin 3 está fora da rede, então o 20:9 foi forçado no RP5 (`wm size 2400x1080`, gravação em 2400x1080, `wm size
+  reset` no fim). Rota de campanha (`rec/pc3_rp5_209camp`), a mesma das 04:50: chegou ao v12427 com o painel de
+  pausa. O "Sair do jogo" não rodou: o fim em v12400 vem antes do `QUIT_AT` no laço do `recfull2.sh`.
+- **`ana.py`:** a vila, os diálogos, a troca de área e o menu START ocupam a largura toda. As faixas reais são as das
+  telas de carga ("NOW LOADING", em 4:3, ~4 s cada), o item 4 (menus em 16:9) já anotado na tabela. As outras
+  marcações (60–67 s, 132–135 s, 147–150 s) são bordas escuras do cenário e o tutorial escurecido, vistos quadro a
+  quadro.
+- Fica como estava na tabela ("parcial"). Falta o Odin 3 de verdade.
+
 ### 2026-11-09 05:10, madrugada: A35 com 3D preto na luta (código do mod velho); refeito, luta e Ougi de volta (RP5)
 
 - **Defeito:** com a `libun5_un6_a35.so` refeita às 04:51 só com os patches novos, a luta do A35 desenhava o primeiro
