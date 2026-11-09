@@ -415,6 +415,12 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
     g_settings = {scale4, filter, aspectMilli, fpsMode};
     applyVideo();
 }
+// The game menu's Controls tab: the one-tap special and what a tap is worth where the game asks to press repeatedly, at once
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetAssist(JNIEnv *, jclass, jint specialOne, jint mashPercent)
+{
+    hl_game::g_specialOn.store(specialOne != 0, std::memory_order_relaxed);
+    hl_game::g_mashPercent.store(mashPercent, std::memory_order_relaxed);
+}
 // HL_PERF's line of the last second: "" when it is off
 extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePerfLine(JNIEnv *env, jclass) { return env->NewStringUTF(hl_perf::line()); }
 

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game menu (engine/GamePanel.kt) -->
+<resources>
+    <string name="gp_tab_graphics">Gráficos</string>
+    <string name="gp_tab_controls">Controles</string>
+    <string name="gp_tab_layout">Diseño</string>
+    <string name="gp_resolution_hint">Las 448 líneas de la PS2 por el factor: 8x supera el 4K. Vale la próxima vez que se abra el juego.</string>
+    <string name="gp_filter_hint">Bilineal nítido y CAS dejan el 2D más definido; FXAA suaviza los bordes del 3D.</string>
+    <string name="gp_shape">Formato de pantalla</string>
+    <string name="gp_fps">Cuadros por segundo</string>
+    <string name="gp_fps_hint">50 es la tasa del juego (25 imágenes por segundo, PAL). 60, 90 y 120 se dibujan entre ellas, en la pelea y en la campaña; los menús quedan en la tasa del juego. Esta pantalla muestra hasta %1$.0f Hz: por encima las imágenes de más no se ven, pero el dispositivo aún las dibuja (sirve para medir).</string>
+    <string name="gp_counter">Contador (depuración)</string>
+    <string name="gp_fight">Pelea</string>
+    <string name="gp_tip_attack">Ataque. Toques seguidos hacen el combo; con una dirección, otros golpes.</string>
+    <string name="gp_tip_jump">Salto. Dos toques: doble salto.</string>
+    <string name="gp_tip_chakra">Chakra. Mantén para llenar la barra azul.</string>
+    <string name="gp_tip_item">Objeto: lanza el objeto elegido.</string>
+    <string name="gp_tip_guard">Defensa: mantén para bloquear.</string>
+    <string name="gp_tip_items">Cambian el objeto elegido.</string>
+    <string name="gp_tip_awaken">Despertar: con poca vida, algunos personajes se transforman.</string>
+    <string name="gp_tip_jutsu">Jutsu: △ y luego ○, en un solo toque (gasta chakra).</string>
+    <string name="gp_tip_ougi">Jutsu supremo (Ougi): △ △ ○ en un solo toque. En la película, toca el botón que pida el juego.</string>
+    <string name="gp_assists">Ayudas táctiles</string>
+    <string name="gp_special_one_hint">Un toque del botón especial hace el Jutsu o el Ougi según el chakra, y responde a los botones que el juego pide en pantalla.</string>
+    <string name="gp_mash">Choques y escenas de pulsar repetido: cada toque vale</string>
+    <string name="gp_mash_hint" formatted="false">Al 200%, cada toque cuenta como dos pulsaciones.</string>
+    <string name="gp_campaign">Campaña</string>
+    <string name="gp_tip_stick">Stick: apoya el dedo en cualquier punto de la mitad izquierda.</string>
+    <string name="gp_tip_select">El SELECT del juego, arriba en la pantalla.</string>
+    <string name="gp_menus">Menús (sin botones en pantalla)</string>
+    <string name="gp_tip_tap">Toque: ✕ (OK).</string>
+    <string name="gp_tip_slide">Desliza: mueve el cursor. Mantén fuera del sitio para repetir.</string>
+    <string name="gp_tip_hold">Mantén quieto: ○.</string>
+    <string name="gp_tip_two">Toque con dos dedos: △ (volver).</string>
+    <string name="gp_tip_two_slide">Dos dedos deslizando a los lados: L1 / R1.</string>
+    <string name="gp_tip_two_hold">Dos dedos quietos: □.</string>
+    <string name="gp_tip_three">Tres dedos: START (START también está arriba).</string>
+    <string name="gp_controls_hint">Un mando físico funciona a la vez: mientras se usa, los botones en pantalla se ocultan hasta volver a tocar la pantalla.</string>
+    <string name="gp_touch_mode">Botones en pantalla</string>
+    <string name="gp_touch_auto">Automático</string>
+    <string name="gp_touch_always">Siempre</string>
+    <string name="gp_touch_mode_hint">Automático: botones en la pelea y en la campaña, gestos en los menús, y se ocultan cuando se usa un mando físico.</string>
+    <string name="gp_style">Estilo</string>
+    <string name="gp_style_ink">Tinta</string>
+    <string name="gp_style_glass">Cristal</string>
+    <string name="gp_opacity">Opacidad</string>
+    <string name="gp_size">Tamaño</string>
+    <string name="gp_touch_more">Táctil</string>
+    <string name="gp_menu_touch">Menús por gestos</string>
+    <string name="gp_menu_touch_hint">Desactivado, los menús vuelven a tener cruceta y botones en pantalla.</string>
+    <string name="gp_float_stick">Stick flotante</string>
+    <string name="gp_haptics">Vibración</string>
+    <string name="gp_edit_layout">Mover y redimensionar botones</string>
+    <string name="on">Activado</string>
+</resources>

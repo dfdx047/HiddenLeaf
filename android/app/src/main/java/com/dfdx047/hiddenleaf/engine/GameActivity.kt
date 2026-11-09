@@ -64,8 +64,8 @@ class GameActivity : SDLActivity() {
             val lang = when (resources.configuration.locales[0].language) { "pt" -> 1; "es" -> 2; else -> 0 }
             if (es.get(EngineSettings.LANG, -1) != lang) es.set(EngineSettings.LANG, lang)
             orientation = es.get(EngineSettings.ORIENTATION, 0)
-            // 120 chosen on another screen, or before the option was limited: 60 here (DisplayCaps.offers120)
-            if (es.get(EngineSettings.FPS_MODE, 50) == 120 && !DisplayCaps.offers120(this)) es.set(EngineSettings.FPS_MODE, 60)
+            // (90 and 120 are offered on every screen now: above the panel's rate the extra pictures are not seen, but the
+            // player can measure how far the device goes; GamePanel's hint says so)
         }
         requestedOrientation = orientationFlag()
         store = TouchStore(paths.root)
@@ -137,9 +137,17 @@ class GameActivity : SDLActivity() {
         val es = EngineSettings(paths.settings)
         val p = GamePanel(
             this, es,
+            touch = { pad?.config ?: store.load() },
+            setTouch = { c ->
+                pad?.config = c
+                store.save(c)
+            },
             onApply = { applyVideo(es) },
             onMeter = { meterLevel = it },
-            onControls = { showOptions() },
+            onEditLayout = {
+                pad?.editing = true
+                panel?.visibility = View.GONE // the editor is under the panel otherwise; it comes back with Done or the back key
+            },
             onResume = { closePanel() },
             onQuit = { quitToApp() },
         )
@@ -169,7 +177,7 @@ class GameActivity : SDLActivity() {
 
             override fun onMenu() = openPanel()
 
-            override fun onOptions() = showOptions()
+            override fun onOptions() = openPanel()
 
             override fun onConfigChanged(config: TouchConfig) = store.save(config)
 
@@ -194,68 +202,6 @@ class GameActivity : SDLActivity() {
         handler.removeCallbacks(watchMenu)
         TouchBridge.setPad(0, 128, 128, 128, 128)
         super.onPause()
-    }
-
-    /** The controller's own quick menu: look, opacity, layout editing, shown or not. */
-    private fun showOptions() {
-        val view = pad ?: return
-        var c = view.config
-        val dp = resources.displayMetrics.density
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((20 * dp).toInt(), (8 * dp).toInt(), (20 * dp).toInt(), 0)
-        }
-        box.addView(TextView(this).apply { setText(R.string.touch_skin) })
-        val skins = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-        PadSkin.entries.forEachIndexed { i, s ->
-            skins.addView(RadioButton(this).apply {
-                id = 1000 + i
-                setText(skinName(s))
-                isChecked = c.skin == s
-            })
-        }
-        skins.setOnCheckedChangeListener { _, id ->
-            c = c.copy(skin = PadSkin.entries[id - 1000])
-            view.config = c
-            store.save(c)
-        }
-        box.addView(skins)
-        val opacityLabel = TextView(this).apply { text = getString(R.string.touch_opacity_n, c.opacity) }
-        box.addView(opacityLabel)
-        box.addView(SeekBar(this).apply {
-            max = 90
-            progress = c.opacity - 10
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    c = c.copy(opacity = p + 10)
-                    opacityLabel.text = getString(R.string.touch_opacity_n, c.opacity)
-                    view.config = c
-                }
-
-                override fun onStartTrackingTouch(sb: SeekBar) {}
-                override fun onStopTrackingTouch(sb: SeekBar) = store.save(c)
-            })
-        })
-        AlertDialog.Builder(this)
-            .setTitle(R.string.touch_controls)
-            .setView(box)
-            .setPositiveButton(R.string.touch_edit_layout) { _, _ ->
-                view.editing = true
-                panel?.visibility = View.GONE // the editor is under the panel otherwise; it comes back with Done or the back key
-            }
-            .setNeutralButton(if (c.mode == TouchMode.OFF) R.string.touch_show_controls else R.string.touch_hide_controls) { _, _ ->
-                c = c.copy(mode = if (c.mode == TouchMode.OFF) TouchMode.AUTO else TouchMode.OFF)
-                view.config = c
-                store.save(c)
-            }
-            .setNegativeButton(R.string.close, null)
-            .show()
-    }
-
-    private fun skinName(s: PadSkin): Int = when (s) {
-        PadSkin.PLAYSTATION -> R.string.skin_playstation
-        PadSkin.XBOX -> R.string.skin_xbox
-        PadSkin.NINTENDO -> R.string.skin_nintendo
     }
 
     /** A physical controller in use: the on-screen one hides (automatic mode) until the screen is touched again. */

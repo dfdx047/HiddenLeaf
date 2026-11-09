@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game menu (engine/GamePanel.kt) -->
+<resources>
+    <string name="gp_tab_graphics">Graphics</string>
+    <string name="gp_tab_controls">Controls</string>
+    <string name="gp_tab_layout">Layout</string>
+    <string name="gp_resolution_hint">The PS2\'s 448 lines times the factor: 8x is beyond 4K. In effect the next time the game opens.</string>
+    <string name="gp_filter_hint">Sharp bilinear and CAS make the 2D crisper; FXAA smooths the edges of the 3D.</string>
+    <string name="gp_shape">Screen shape</string>
+    <string name="gp_fps">Frames per second</string>
+    <string name="gp_fps_hint">50 is the game\'s own rate (25 pictures a second, PAL). 60, 90 and 120 are drawn in between, in fights and in the campaign; menus stay at the game\'s rate. This screen shows up to %1$.0f Hz: above that the extra pictures are not seen, but the device still draws them (useful to measure).</string>
+    <string name="gp_counter">Counter (debugging)</string>
+    <string name="gp_fight">Fight</string>
+    <string name="gp_tip_attack">Attack. Taps in a row make the combo; with a direction, other moves.</string>
+    <string name="gp_tip_jump">Jump. Two taps: double jump.</string>
+    <string name="gp_tip_chakra">Chakra. Hold to fill the blue bar.</string>
+    <string name="gp_tip_item">Item: throws the chosen item.</string>
+    <string name="gp_tip_guard">Guard: hold to block.</string>
+    <string name="gp_tip_items">Change the chosen item.</string>
+    <string name="gp_tip_awaken">Awakening: on low health, some characters transform.</string>
+    <string name="gp_tip_jutsu">Jutsu: △ then ○, in one tap (uses chakra).</string>
+    <string name="gp_tip_ougi">Ultimate jutsu (Ougi): △ △ ○ in one tap. In its film, tap the button the game asks for.</string>
+    <string name="gp_assists">Touch helpers</string>
+    <string name="gp_special_one_hint">One tap of the special button does the Jutsu or the Ougi depending on the chakra, and answers the buttons the game asks for on screen.</string>
+    <string name="gp_mash">Clashes and press-repeatedly scenes: each tap is worth</string>
+    <string name="gp_mash_hint" formatted="false">At 200%, each tap counts as two presses.</string>
+    <string name="gp_campaign">Campaign</string>
+    <string name="gp_tip_stick">Stick: put your finger anywhere on the left half.</string>
+    <string name="gp_tip_select">The game\'s SELECT, at the top of the screen.</string>
+    <string name="gp_menus">Menus (no buttons on screen)</string>
+    <string name="gp_tip_tap">Tap: ✕ (OK).</string>
+    <string name="gp_tip_slide">Slide: moves the cursor. Hold away to repeat.</string>
+    <string name="gp_tip_hold">Hold still: ○.</string>
+    <string name="gp_tip_two">Two-finger tap: △ (back).</string>
+    <string name="gp_tip_two_slide">Two fingers sliding sideways: L1 / R1.</string>
+    <string name="gp_tip_two_hold">Two fingers held: □.</string>
+    <string name="gp_tip_three">Three fingers: START (START is also at the top).</string>
+    <string name="gp_controls_hint">A physical controller works alongside: while it is used, the on-screen buttons hide until the screen is touched again.</string>
+    <string name="gp_touch_mode">On-screen buttons</string>
+    <string name="gp_touch_auto">Automatic</string>
+    <string name="gp_touch_always">Always</string>
+    <string name="gp_touch_mode_hint">Automatic: buttons in fights and in the campaign, gestures in menus, hidden while a physical controller is used.</string>
+    <string name="gp_style">Style</string>
+    <string name="gp_style_ink">Ink</string>
+    <string name="gp_style_glass">Glass</string>
+    <string name="gp_opacity">Opacity</string>
+    <string name="gp_size">Size</string>
+    <string name="gp_touch_more">Touch</string>
+    <string name="gp_menu_touch">Menus by gestures</string>
+    <string name="gp_menu_touch_hint">Off, the menus get the D-pad and buttons on screen again.</string>
+    <string name="gp_float_stick">Floating stick</string>
+    <string name="gp_haptics">Vibration</string>
+    <string name="gp_edit_layout">Move and resize buttons</string>
+    <string name="on">On</string>
+</resources>

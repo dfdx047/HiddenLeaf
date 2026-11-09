@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game menu (engine/GamePanel.kt) -->
+<resources>
+    <string name="gp_tab_graphics">Gráficos</string>
+    <string name="gp_tab_controls">Controles</string>
+    <string name="gp_tab_layout">Layout</string>
+    <string name="gp_resolution_hint">As 448 linhas do PS2 vezes o fator: 8x passa de 4K. Vale na próxima vez que o jogo abrir.</string>
+    <string name="gp_filter_hint">Bilinear nítido e CAS deixam o 2D mais definido; FXAA suaviza as bordas do 3D.</string>
+    <string name="gp_shape">Formato da tela</string>
+    <string name="gp_fps">Quadros por segundo</string>
+    <string name="gp_fps_hint">50 é a taxa do jogo (25 imagens por segundo, PAL). 60, 90 e 120 são desenhados entre elas, na luta e na campanha; os menus ficam na taxa do jogo. Esta tela mostra até %1$.0f Hz: acima disso as imagens a mais não aparecem, mas o aparelho ainda as desenha (serve para medir).</string>
+    <string name="gp_counter">Contador (depuração)</string>
+    <string name="gp_fight">Luta</string>
+    <string name="gp_tip_attack">Ataque. Toques seguidos fazem o combo; com uma direção, outros golpes.</string>
+    <string name="gp_tip_jump">Pulo. Dois toques: pulo duplo.</string>
+    <string name="gp_tip_chakra">Chakra. Segure para encher a barra azul.</string>
+    <string name="gp_tip_item">Item: arremessa o item escolhido.</string>
+    <string name="gp_tip_guard">Defesa: segure para bloquear.</string>
+    <string name="gp_tip_items">Trocam o item escolhido.</string>
+    <string name="gp_tip_awaken">Despertar: com pouca vida, alguns personagens se transformam.</string>
+    <string name="gp_tip_jutsu">Jutsu: △ e depois ○, num toque só (gasta chakra).</string>
+    <string name="gp_tip_ougi">Jutsu supremo (Ougi): △ △ ○ num toque só. No filme, toque o botão que o jogo pedir.</string>
+    <string name="gp_assists">Ajudas do toque</string>
+    <string name="gp_special_one_hint">Um toque no botão especial faz o Jutsu ou o Ougi conforme o chakra, e responde aos botões que o jogo pede na tela.</string>
+    <string name="gp_mash">Disputas e cenas de apertar repetido: cada toque vale</string>
+    <string name="gp_mash_hint" formatted="false">Em 200%, cada toque conta como dois apertos.</string>
+    <string name="gp_campaign">Campanha</string>
+    <string name="gp_tip_stick">Analógico: encoste o dedo em qualquer ponto da metade esquerda.</string>
+    <string name="gp_tip_select">O SELECT do jogo, no topo da tela.</string>
+    <string name="gp_menus">Menus (sem botões na tela)</string>
+    <string name="gp_tip_tap">Toque: ✕ (OK).</string>
+    <string name="gp_tip_slide">Deslize: move o cursor. Segure fora do lugar para repetir.</string>
+    <string name="gp_tip_hold">Segure parado: ○.</string>
+    <string name="gp_tip_two">Toque com dois dedos: △ (voltar).</string>
+    <string name="gp_tip_two_slide">Dois dedos deslizando para os lados: L1 / R1.</string>
+    <string name="gp_tip_two_hold">Dois dedos parados: □.</string>
+    <string name="gp_tip_three">Três dedos: START (o START também fica no topo).</string>
+    <string name="gp_controls_hint">Um controle físico funciona junto: com ele em uso, os botões da tela somem até a tela ser tocada de novo.</string>
+    <string name="gp_touch_mode">Botões na tela</string>
+    <string name="gp_touch_auto">Automático</string>
+    <string name="gp_touch_always">Sempre</string>
+    <string name="gp_touch_mode_hint">Automático: botões na luta e na campanha, gestos nos menus, e somem quando um controle físico é usado.</string>
+    <string name="gp_style">Estilo</string>
+    <string name="gp_style_ink">Tinta</string>
+    <string name="gp_style_glass">Vidro</string>
+    <string name="gp_opacity">Opacidade</string>
+    <string name="gp_size">Tamanho</string>
+    <string name="gp_touch_more">Toque</string>
+    <string name="gp_menu_touch">Menus por gestos</string>
+    <string name="gp_menu_touch_hint">Desligado, os menus voltam a ter direcional e botões na tela.</string>
+    <string name="gp_float_stick">Analógico flutuante</string>
+    <string name="gp_haptics">Vibração</string>
+    <string name="gp_edit_layout">Mover e redimensionar botões</string>
+    <string name="on">Ligado</string>
+</resources>
