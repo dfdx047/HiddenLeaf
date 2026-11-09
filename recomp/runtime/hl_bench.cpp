@@ -101,6 +101,8 @@ namespace
     uint32_t s_gifCapV = 0;
     // HLB_RAMV=V,V,...: the runtime's hl_ram dump (EE RAM, GS VRAM, VU1 data in hl_frames/) at these vsyncs
     std::vector<uint32_t> s_ramV;
+    // HLB_SHOTV=V,V,...: the runtime's hl_shot at these vsyncs ("v.. shotv" in the txt; the frame lands in hl_frames/)
+    std::vector<uint32_t> s_shotV;
     // HLB_TRAPV=V: raise SIGTRAP at vsync V (to stop under gdb at a known point)
     uint32_t s_trapV = 0;
 
@@ -314,6 +316,12 @@ namespace
         if (std::find(s_ramV.begin(), s_ramV.end(), s_vsync) != s_ramV.end())
             if (FILE *t = std::fopen("hl_ram", "w"))
                 std::fclose(t);
+        if (std::find(s_shotV.begin(), s_shotV.end(), s_vsync) != s_shotV.end())
+        {
+            if (FILE *t = std::fopen("hl_shot", "w"))
+                std::fclose(t);
+            std::fprintf(s_txt, "v%u shotv\n", s_vsync);
+        }
         if (s_gifCapV != 0 && s_vsync == s_gifCapV && s_gifCapLeft == 0)
         {
             std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
@@ -504,6 +512,13 @@ namespace
                 }
             s_p1cpu = std::getenv("HLB_P1CPU") ? static_cast<uint32_t>(std::strtoul(std::getenv("HLB_P1CPU"), nullptr, 0)) & 0xFFu : 0u;
             s_trapV = std::getenv("HLB_TRAPV") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_TRAPV"))) : 0u;
+            if (const char *v = std::getenv("HLB_SHOTV"))
+                for (const char *p = v; *p;)
+                {
+                    char *e;
+                    s_shotV.push_back(static_cast<uint32_t>(std::strtoul(p, &e, 0)));
+                    p = *e ? e + 1 : e;
+                }
             if (const char *v = std::getenv("HLB_RAMV"))
                 for (const char *p = v; *p;)
                 {

@@ -56,6 +56,20 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 04:05, madrugada: Ougi igual ao PCSX2 no PC
+
+- **Hora (correção):** a entrada de baixo, marcada 03:45, foi escrita às 03:38 (`date` do commit `1a944ff`).
+- **Como sai o Ougi:** com a `route_v3` e △ △ ○ no quadro 100 (`HLB_FROUTE="100:TRIANGLE TRIANGLE CIRCLE"`), o golpe
+  conecta no quadro 115–116. A cena roda do v5620 ao v5918 no PCSX2 e do v5647 ao v5945 no recomp: a mesma duração,
+  27 vsyncs depois. Nos quadros 88, 95 e 105 o golpe erra.
+- **Resultado:**
+  - estado de jogo igual nas 236 + 46 chamadas (antes e depois da cena);
+  - 28 capturas da cena lado a lado (`HLB_SHOTV`, novo no recomp; deslocamento de 27): os mesmos planos, clones,
+    fumaça, letras de impacto e contador de golpes;
+  - GS na metade da cena (PCSX2 v5760 x recomp v5787, 4 quadros): nenhum desenho só no PCSX2. Só no recomp, os mesmos
+    lotes de partícula fora da tela da luta (TS, PSMT8/PSMT4, alpha fixo `0x44`).
+- **`hl_bench.cpp`:** `HLB_SHOTV=V,V,...` (o `hl_shot` nesses vsyncs, "v.. shotv" no txt).
+
 ### 2026-11-09 03:45, madrugada: UNPACK V2/V3 do VIF1 como no hardware; partículas a mais vêm da escolha de microcódigo do EE (PC)
 
 Continuação da entrada das 02:45. No PC, `route_v3`, `HLB_RNG=1`, quadro 199 da luta 1.
