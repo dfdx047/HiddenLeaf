@@ -133,11 +133,22 @@ def main():
             if k >= first + count:
                 break
             if k >= first:
-                gs.out.append(('--packet', k, p, size))
-                parse(data, gs)
+                if p == 0xFF:
+                    gs.out.append(('--vsync', k))
+                elif p == 0xFE:
+                    pass
+                else:
+                    gs.out.append(('--packet', k, p, size))
+                    parse(data, gs)
             k += 1
     last = None
     for o in gs.out:
+        if o[0] == '--vsync':
+            if last:
+                show(last)
+                last = None
+            print('---- vsync (packet %d)' % o[1])
+            continue
         if o[0] == '--packet':
             if not runs:
                 print('packet %d path %d %d bytes' % o[1:])

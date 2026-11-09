@@ -4,6 +4,8 @@
   gsdump.py info FILE...          header (state version, serial, crc, screenshot) and the packets: transfers per path,
                                   vsyncs, ReadFIFO2, registers; stops with an error where the stream does not parse
   gsdump.py shot FILE PNG         the screenshot of the header (what was on screen when the dump started)
+  gsdump.py gif FILE OUT          the transfers as an hl_gif.bin for gifprims.py ([u32 path][u32 size][data]; a vsync is
+                                  path 0xFF with size 0, the registers packets path 0xFE with their 0x2000 bytes)
 
 The format is GSDump.h's: [0xFFFFFFFF][header size][GSDumpHeader, serial, screenshot, provenance][state][PRIVREGS 0x2000]
 then packets: 0 transfer [path u8][size u32][data], 1 vsync [field u8], 2 ReadFIFO2 [size u32], 3 registers [0x2000].
@@ -108,6 +110,33 @@ def info(path):
     return error is None
 
 
+def gif(path, out):
+    s = Stream(path)
+    header(s)
+    n = 0
+    with open(out, 'wb') as o:
+        while True:
+            t = s.read(1)
+            if not t:
+                break
+            t = t[0]
+            if t == 0:
+                path_index, size = struct.unpack('<BI', s.exact(5, 'transfer'))
+                o.write(struct.pack('<II', path_index, size) + s.exact(size, 'transfer data'))
+            elif t == 1:
+                s.exact(1, 'vsync')
+                o.write(struct.pack('<II', 0xFF, 0))
+            elif t == 2:
+                s.exact(4, 'readfifo')
+            elif t == 3:
+                o.write(struct.pack('<II', 0xFE, PRIVREGS) + s.exact(PRIVREGS, 'registers'))
+            else:
+                break
+            n += 1
+    s.close()
+    print(f'{n} packets into {out}')
+
+
 def shot(path, png):
     from PIL import Image
     s = Stream(path)
@@ -124,6 +153,9 @@ if __name__ == '__main__':
     if len(sys.argv) >= 3 and sys.argv[1] == 'info':
         ok = all([info(p) for p in sys.argv[2:]])
         sys.exit(0 if ok else 1)
+    if len(sys.argv) == 4 and sys.argv[1] == 'gif':
+        gif(sys.argv[2], sys.argv[3])
+        sys.exit(0)
     if len(sys.argv) == 4 and sys.argv[1] == 'shot':
         shot(sys.argv[2], sys.argv[3])
         sys.exit(0)

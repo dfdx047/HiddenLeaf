@@ -56,6 +56,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:50, manhã: campanha no Odin 2 Mini (widescreen e medida) e a tela de carga dela
+
+- **Gravação e medida** (`rec/o2_camp_w`, `hl_env_camp_m.txt`, `HL_PERF_FROM=8200`, andando na vila):
+  - `RESULT` 50,0 fps, 1% low 45,6, 0,0% dos pares acima de 44 ms, pior par de 42,6 ms;
+  - tempos: EE 6,3 ms, VU1 9,0 ms, GS 6,8 ms, 11,8 ms ociosos;
+  - o 3D da campanha sai largo, e as caixas de fala e as dicas ficam na proporção (HUD do nativo).
+- **NOW LOADING da campanha** (`HL_GS_DUMP=campanha_cortina`, `tools/gsdump.py gif` e `gifprims.py`):
+  - vsyncs 11 a 131 do dump: 78 primitivas por quadro;
+  - o fundo é preto, de um quadro inteiro, e não é apertado;
+  - por cima vêm engrenagens decorativas (tiras de 366 × 128) e o pergaminho em 4 linhas × 2 colunas, de x 60,6 a 497,8;
+  - o pergaminho não chega às bordas: no 4:3 a borda rasgada já fica sobre o preto. Apertado, ele fica centrado e o
+    preto se estende dos lados;
+  - **é o desenho do jogo, não defeito.**
+- **Ferramentas:**
+  - `tools/gsdump.py gif FILE OUT` exporta as transferências de um dump PCSX2 para o formato do `gifprims.py`;
+  - nesse formato, o vsync é o caminho 0xFF e os registradores o 0xFE;
+  - o `gifprims.py` marca os vsyncs.
+
 ### 2026-11-09 08:40, manhã: Alpha 1.1X no Odin 2 Mini, com menus em widescreen e rota relativa
 
 - **Montagem** (`rec/o2_a11x`):
