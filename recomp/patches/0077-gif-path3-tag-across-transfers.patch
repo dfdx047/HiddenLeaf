@@ -1,0 +1,126 @@
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index a7544e6..a9f0a78 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -4,7 +4,10 @@
+ #include "runtime/gs/hl_gs_live.h"
+ #endif
+ #include <algorithm>
++#include <cstdio>
++#include <cstdlib>
+ #include <cstring>
++#include <mutex>
+ 
+ GifArbiter::GifArbiter(ProcessPacketFn processFn)
+     : m_processFn(std::move(processFn))
+@@ -37,6 +40,92 @@ void GifArbiter::submit(GifPathId pathId, const uint8_t *data, uint32_t sizeByte
+     m_queue.push_back(std::move(pkt));
+ }
+ 
++namespace
++{
++    // A GIF tag's data may come in the path's next transfer: sceGsExecLoadImage sends the setup and the IMAGE tag in one
++    // normal-mode DMA and the pixels in a second one, as the GIF keeps each path's tag across transfers. The GS walks each
++    // packet from a tag, so per path: an unfinished tag is held for the path's next packet, and IMAGE data still owed gets
++    // a tag of its own (the GS keeps the transfer's position). PATH3 only: the runtime's PATH2 packets (VIF DIRECT) end
++    // with stray qwords that read as unfinished tags, and holding them swallowed every later PATH2 packet.
++    struct PathCarry
++    {
++        std::vector<uint8_t> hold;
++        uint32_t imageLeft = 0; // qwords
++    };
++    std::mutex g_carryMutex;
++    PathCarry g_carry[4];
++    std::vector<uint8_t> g_join;
++    const bool g_carryLog = std::getenv("HL_GIFCARRY_LOG") != nullptr;
++}
++
++static void deliverCarried(const GifArbiter::ProcessPacketFn &process, GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
++{
++    if (pathId != GifPathId::Path3)
++    {
++        process(data, sizeBytes);
++        return;
++    }
++    std::lock_guard<std::mutex> lock(g_carryMutex);
++    PathCarry &c = g_carry[static_cast<uint8_t>(pathId) & 3u];
++    if (c.imageLeft != 0u)
++    {
++        const uint32_t q = std::min<uint32_t>(c.imageLeft, sizeBytes / 16u);
++        if (q != 0u)
++        {
++            std::vector<uint8_t> img(16u + q * 16u);
++            const uint64_t tag = static_cast<uint64_t>(q) | (2ull << 58);
++            std::memcpy(img.data(), &tag, 8);
++            std::memset(img.data() + 8, 0, 8);
++            std::memcpy(img.data() + 16, data, q * 16u);
++            process(img.data(), static_cast<uint32_t>(img.size()));
++            c.imageLeft -= q;
++            data += q * 16u;
++            sizeBytes -= q * 16u;
++        }
++        if (sizeBytes < 16u)
++            return;
++    }
++    if (!c.hold.empty())
++    {
++        g_join.assign(c.hold.begin(), c.hold.end());
++        g_join.insert(g_join.end(), data, data + sizeBytes);
++        c.hold.clear();
++        data = g_join.data();
++        sizeBytes = static_cast<uint32_t>(g_join.size());
++    }
++    uint32_t off = 0;
++    while (off + 16u <= sizeBytes)
++    {
++        uint64_t lo = 0;
++        std::memcpy(&lo, data + off, 8);
++        const uint64_t nloop = lo & 0x7FFFu;
++        const uint32_t flg = static_cast<uint32_t>((lo >> 58) & 3u);
++        const uint64_t nreg = ((lo >> 60) & 0xFu) ? ((lo >> 60) & 0xFu) : 16u;
++        const uint64_t payload = flg == 0u ? nloop * nreg * 16u : flg == 1u ? ((nloop * nreg + 1u) & ~1ull) * 8u : nloop * 16u;
++        if (off + 16u + payload <= sizeBytes)
++        {
++            off += static_cast<uint32_t>(16u + payload);
++            continue;
++        }
++        const uint32_t have = sizeBytes - off - 16u;
++        if (g_carryLog)
++            std::fprintf(stderr, "[gifcarry] path %u size %u: tag at %u flg %u nloop %u, %u of %u bytes\n", static_cast<unsigned>(pathId),
++                         sizeBytes, off, flg, static_cast<unsigned>(nloop), have, static_cast<unsigned>(payload));
++        if (flg >= 2u && have >= 16u)
++        {
++            c.imageLeft = static_cast<uint32_t>(nloop - have / 16u);
++            process(data, sizeBytes - have % 16u);
++            return;
++        }
++        std::vector<uint8_t> tail(data + off, data + sizeBytes);
++        if (off != 0u)
++            process(data, off);
++        c.hold = std::move(tail);
++        return;
++    }
++    process(data, sizeBytes);
++}
++
+ void GifArbiter::processNow(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
+ {
+     if (!data || sizeBytes < 16 || !m_processFn)
+@@ -45,7 +134,7 @@ void GifArbiter::processNow(GifPathId pathId, const uint8_t *data, uint32_t size
+     hl_gslive::transfer(static_cast<int>(pathId), data, sizeBytes);
+ #endif
+     hl_perf::Scope parse(hl_perf::kGifParse);
+-    m_processFn(data, sizeBytes);
++    deliverCarried(m_processFn, pathId, data, sizeBytes);
+ }
+ 
+ void GifArbiter::drain()
+@@ -76,7 +165,7 @@ void GifArbiter::drain()
+             hl_gslive::transfer(static_cast<int>(pkt.pathId), pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+ #endif
+             hl_perf::Scope parse(hl_perf::kGifParse);
+-            m_processFn(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
++            deliverCarried(m_processFn, pkt.pathId, pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+         }
+     }
+     m_queue.clear();

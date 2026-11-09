@@ -31,6 +31,11 @@
 #include <string>
 #include <vector>
 
+#include <csignal>
+#include <mutex>
+extern std::mutex g_hlGifCapMutex;
+extern std::FILE *g_hlGifCap;
+
 namespace
 {
     constexpr uint32_t kFighterInput = 0x21E660u;
@@ -59,6 +64,7 @@ namespace
     // takes time to seek and read would
     constexpr uint32_t kCdRead = 0x174308u, kCdSync = 0x1738D0u;
     uint32_t s_cdBusy = 0, s_cdReadVsync = 0;
+    bool s_cdLog = false; // HLB_CDLOG=1: "v.. cdread lbn .. sectors .." at each EE sceCdRead, as the PCSX2 side's HLB_CDLOG
     // HLB_RNGLOG=F,T: every call of the Mersenne Twister and of rand in frames F..T
     constexpr uint32_t kMtNext = 0x180BA0u, kRand = 0x17C558u;
     // and the game's helpers on top of it: a float in [0, f12) (0x1810D0), an int in [0, a0] (0x181020), a word (0x180FF0)
@@ -73,6 +79,15 @@ namespace
     PS2Runtime::RecompiledFunction s_mtOriginal = nullptr, s_randOriginal = nullptr;
     PS2Runtime::RecompiledFunction s_cdReadOriginal = nullptr, s_cdSyncOriginal = nullptr;
     void (*s_prevVsync)(PS2Runtime *, uint64_t) = nullptr;
+    // HLB_GIFCAP=F[,N]: the GIF packets of N vsyncs (6) from frame F of the first fighter of fight 1, in <prefix>_gif.cap
+    // (the HL_GSCAP format, a 0xFF record at each vsync: tools/gscap.py); the writer is in the runtime's ps2_memory.cpp
+    uint32_t s_gifCapAt = 0, s_gifCapN = 6, s_gifCapLeft = 0;
+    // HLB_GIFCAPV=V,N: the same from vsync V (for the loading before a fight)
+    uint32_t s_gifCapV = 0;
+    // HLB_RAMV=V,V,...: the runtime's hl_ram dump (EE RAM, GS VRAM, VU1 data in hl_frames/) at these vsyncs
+    std::vector<uint32_t> s_ramV;
+    // HLB_TRAPV=V: raise SIGTRAP at vsync V (to stop under gdb at a known point)
+    uint32_t s_trapV = 0;
 
     inline uint32_t rd32(uint32_t a)
     {
@@ -137,6 +152,8 @@ namespace
             std::snprintf(name, sizeof(name), "_ram%02u_f%05u.bin", s_fight, s_frame);
             if (FILE *r = std::fopen((s_prefix + name).c_str(), "wb"))
                 std::fwrite(s_ram, 1, 0x2000000u, r), std::fclose(r);
+            if (FILE *t = std::fopen("hl_ram", "w")) // and the runtime's dump of the EE RAM and the GS VRAM, next vsync
+                std::fclose(t);
         }
         if (s_p1cpu != 0 && s_frame == 1 && f == s_first)
         {
@@ -153,6 +170,13 @@ namespace
             std::fwrite(s_ram + (f & 0x1FFFFFFu), 1, kFighterBytes, s_bin);
             static uint8_t zero[kCameraBytes];
             std::fwrite(cam >= 0x100000u && cam < 0x2000000u ? s_ram + cam : zero, 1, kCameraBytes, s_bin);
+            if (s_gifCapAt != 0 && s_fight == 1 && f == s_first && s_frame == s_gifCapAt && s_gifCapLeft == 0)
+            {
+                std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
+                g_hlGifCap = std::fopen((s_prefix + "_gif.cap").c_str(), "wb");
+                s_gifCapLeft = s_gifCapN;
+                std::fprintf(s_txt, "v%u gifcap fight %u frame %u\n", s_vsync, s_fight, s_frame);
+            }
             if (s_shot != 0 && f == s_first && (s_frame % s_shot) == 1u)
             {
                 if (FILE *t = std::fopen("hl_shot", "w"))
@@ -161,6 +185,17 @@ namespace
             }
         }
         s_inputOriginal(rdram, ctx, runtime);
+    }
+
+    // HLB_FNLOG=addr,addr,... (up to 8): "fn v.. addr ra .. a0 .. a1 .." at each entry; the PCSX2 side has the same
+    uint32_t s_fnAddr[8] = {}, s_fnCount = 0;
+    PS2Runtime::RecompiledFunction s_fnOriginal[8] = {};
+    template <int I>
+    void fnLog(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        std::fprintf(s_txt, "fn v%u %x ra %x a0 %x a1 %x a2 %x\n", s_vsync, s_fnAddr[I], GPR_U32(ctx, 31), GPR_U32(ctx, 4),
+                     GPR_U32(ctx, 5), GPR_U32(ctx, 6));
+        s_fnOriginal[I](rdram, ctx, runtime);
     }
 
     void cdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -243,6 +278,30 @@ namespace
         if (s_prevVsync)
             s_prevVsync(runtime, tick);
         s_vsync = static_cast<uint32_t>(tick);
+        if (s_trapV != 0 && s_vsync == s_trapV)
+            std::raise(SIGTRAP);
+        if (std::find(s_ramV.begin(), s_ramV.end(), s_vsync) != s_ramV.end())
+            if (FILE *t = std::fopen("hl_ram", "w"))
+                std::fclose(t);
+        if (s_gifCapV != 0 && s_vsync == s_gifCapV && s_gifCapLeft == 0)
+        {
+            std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
+            g_hlGifCap = std::fopen((s_prefix + "_gif.cap").c_str(), "wb");
+            s_gifCapLeft = s_gifCapN;
+            std::fprintf(s_txt, "v%u gifcap\n", s_vsync);
+        }
+        if (s_gifCapLeft != 0)
+        {
+            std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
+            const uint32_t h[2] = {0xFFu, s_vsync};
+            if (g_hlGifCap != nullptr)
+                std::fwrite(h, 4, 2, g_hlGifCap);
+            if (--s_gifCapLeft == 0 && g_hlGifCap != nullptr)
+            {
+                std::fclose(g_hlGifCap);
+                g_hlGifCap = nullptr;
+            }
+        }
         if (s_ram == nullptr)
         {
             s_ram = runtime->memory().getRDRAM();
@@ -270,6 +329,18 @@ namespace
                     if ((s_helperOriginal[i] = runtime->lookupFunction(kRandHelpers[i])) != nullptr)
                         runtime->registerFunction(kRandHelpers[i], hooks[i]);
                 std::fprintf(s_txt, "v%u rng log frames %u..%u: %d\n", s_vsync, s_rngFrom, s_rngTo, s_mtOriginal != nullptr);
+            }
+            {
+                const PS2Runtime::RecompiledFunction fh[8] = {fnLog<0>, fnLog<1>, fnLog<2>, fnLog<3>,
+                                                              fnLog<4>, fnLog<5>, fnLog<6>, fnLog<7>};
+                for (uint32_t i = 0; i < s_fnCount; ++i)
+                    if ((s_fnOriginal[i] = runtime->lookupFunction(s_fnAddr[i])) != nullptr)
+                        runtime->registerFunction(s_fnAddr[i], fh[i]);
+            }
+            if (s_cdLog && s_cdBusy == 0u)
+            {
+                if ((s_cdReadOriginal = runtime->lookupFunction(kCdRead)) != nullptr)
+                    runtime->registerFunction(kCdRead, cdRead);
             }
             if (s_cdBusy != 0u)
             {
@@ -323,6 +394,14 @@ namespace
                 s_rngFrom = static_cast<uint32_t>(std::strtoul(v, &e, 0));
                 s_rngTo = *e ? static_cast<uint32_t>(std::strtoul(e + 1, nullptr, 0)) : s_rngFrom;
             }
+            s_cdLog = std::getenv("HLB_CDLOG") != nullptr;
+            if (const char *v = std::getenv("HLB_FNLOG"))
+                for (const char *p = v; *p && s_fnCount < 8;)
+                {
+                    char *e;
+                    s_fnAddr[s_fnCount++] = static_cast<uint32_t>(std::strtoul(p, &e, 0));
+                    p = *e ? e + 1 : e;
+                }
             s_cdBusy = std::getenv("HLB_CDBUSY") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_CDBUSY"))) : 0u;
             if (const char *v = std::getenv("HLB_RAMAT"))
                 for (const char *p = v; *p;)
@@ -332,6 +411,28 @@ namespace
                     p = *e ? e + 1 : e;
                 }
             s_p1cpu = std::getenv("HLB_P1CPU") ? static_cast<uint32_t>(std::strtoul(std::getenv("HLB_P1CPU"), nullptr, 0)) & 0xFFu : 0u;
+            s_trapV = std::getenv("HLB_TRAPV") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_TRAPV"))) : 0u;
+            if (const char *v = std::getenv("HLB_RAMV"))
+                for (const char *p = v; *p;)
+                {
+                    char *e;
+                    s_ramV.push_back(static_cast<uint32_t>(std::strtoul(p, &e, 0)));
+                    p = *e ? e + 1 : e;
+                }
+            if (const char *v = std::getenv("HLB_GIFCAPV"))
+            {
+                char *e;
+                s_gifCapV = static_cast<uint32_t>(std::strtoul(v, &e, 0));
+                if (*e)
+                    s_gifCapN = static_cast<uint32_t>(std::strtoul(e + 1, nullptr, 0));
+            }
+            if (const char *v = std::getenv("HLB_GIFCAP"))
+            {
+                char *e;
+                s_gifCapAt = static_cast<uint32_t>(std::strtoul(v, &e, 0));
+                if (*e)
+                    s_gifCapN = static_cast<uint32_t>(std::strtoul(e + 1, nullptr, 0));
+            }
             s_shot = std::getenv("HLB_SHOT") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_SHOT"))) : 0u;
             s_maxCalls = std::getenv("HLB_FRAMES") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_FRAMES"))) : 0u;
             s_quit = std::getenv("HLB_QUIT") ? static_cast<uint32_t>(std::atoi(std::getenv("HLB_QUIT"))) : 0u;

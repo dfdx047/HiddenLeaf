@@ -1,0 +1,34 @@
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 040f432..189e0ba 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -20,6 +20,20 @@
+ #include <algorithm>
+ #include <string>
+ #include <vector>
++#include <mutex>
++
++// Hidden Leaf bench (lab): hl_bench's HLB_GIFCAP writes the GIF packets of a few vsyncs in the HL_GSCAP format
++std::mutex g_hlGifCapMutex;
++std::FILE *g_hlGifCap = nullptr;
++void hlGifCapWrite(uint32_t path, const uint8_t *data, uint32_t size)
++{
++    std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
++    if (g_hlGifCap == nullptr)
++        return;
++    const uint32_t h[2] = {path, size};
++    std::fwrite(h, 4, 2, g_hlGifCap);
++    std::fwrite(data, 1, size, g_hlGifCap);
++}
+ 
+ namespace
+ {
+@@ -2063,6 +2077,8 @@ void PS2Memory::submitGifPacket(GifPathId pathId, const uint8_t *data, uint32_t
+         return;
+     if (hl_vifdump::active())
+         hl_vifdump::gif(static_cast<int>(pathId), data, sizeBytes, path2DirectHl);
++    if (g_hlGifCap != nullptr)
++        hlGifCapWrite(static_cast<uint32_t>(pathId), data, sizeBytes);
+ 
+     // Hidden Leaf: HL_GIF_LOG=N prints the first N packets (path, size, PATH3 mask, first GIFtag);
+     // HL_GIF_LOG=N@S starts S seconds after the first packet and also writes the packets whole to hl_gif.bin

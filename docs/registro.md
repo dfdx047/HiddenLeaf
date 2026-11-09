@@ -51,9 +51,43 @@ chamadas. O 1P fica parado contra a CPU.
 | Neji x Naruto, 2 rodadas | lamen | `route_v2` (`pv2` x `rv2`) | `e0beedf` | 2013 + 714 | igual | idem |
 | Kakashi x Naruto, 2 rodadas | lamen e a 2ª área | `route_v3` (`pv3` x `rv3`) | `e0beedf` | 1445 + 1301 | igual | idem; heap no mesmo lugar |
 
-Falta: imagem (capturas nos mesmos quadros dos dois lados), outros cenários, Ougi, campanha, a CPU nos dois lados.
+Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`, iguais depois do `0077` e das funções de
+imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-09 01:25, madrugada: fumaça, poeira e clarão de volta no PC (corrigido no PC, falta a rota nos aparelhos)
+
+Continuação da entrada de 2026-11-08 08:24. **Causa em duas partes, as duas medidas:**
+1. **A subida de textura do jogo era trocada pela do runtime.** Gancho de DMA na bancada do PCSX2 (`HLB_DMALOG=V0,V1`,
+   novo): os 532 inícios de DMA do GIF entre v1400 e v1470 vêm de `0x150B20` (`sceGsExecLoadImage`), chamado por
+   `0x10FA70` (cabeçalho da textura: `+0x14` dbp, `+0x16` dbw, `+0x17` dpsm). Gancho de entrada de função nos dois lados
+   (`HLB_FNLOG=addr,...`, novo no recomp e no PCSX2): **as mesmas 266 chamadas** nos dois. Só que o analisador do
+   PS2Recomp põe `sceGsExecLoadImage` (e `SetDefLoadImage`, `ExecStoreImage`, `SetDefStoreImage`) na lista de stubs, e o
+   stub do runtime (`GS.cpp`) remonta o pacote e devolve -1 para `PSMT8H/4HL/4HH` (`bytesForPixels` 0): nada era enviado.
+   **Correção:** `tools/un5.py` (`UNSTUB`) recompila as quatro do próprio jogo, que mandam dois DMAs normais (A+D com a
+   tag `IMAGE`, depois os pixels).
+2. **O GS do runtime não guardava a tag GIF entre transferências.** Com o código do jogo, as 266 subidas saem iguais às
+   do PCSX2, cabeçalho e dados (`tools/gsbench/imgs.py`), mas a VRAM não: os pixels vêm no segundo DMA, sem tag, e o
+   `GS::processGIFPacket` lê cada pacote a partir de uma tag. **Correção:** `0077-gif-path3-tag-across-transfers.patch`
+   (`ps2_gif_arbiter.cpp`): no PATH3, uma tag que termina incompleta fica guardada para o próximo pacote do path, e os
+   dados `IMAGE` ainda devidos ganham uma tag própria. Só o PATH3: no PATH2 (VIF DIRECT) os pacotes do runtime terminam
+   com qwords soltos que parecem tag incompleta, e guardá-los engolia todos os pacotes seguintes do path (o jogo travou
+   entre os ticks 1560 e 2521, esperando SIGNAL/FINISH; visto com `HL_GIFCARRY_LOG=1`, novo). Esses qwords soltos do
+   PATH2 ficam como suspeita aberta. No Android o fluxo cru do ARMSX2 (`hl_gslive::transfer`) não muda.
+
+**Teste (PC, recomp contra PCSX2, `route_v3`, `HLB_RNG=1`, capturas a cada 25 quadros, `pfx` x `rfx2`):** a nuvem da
+substituição, a poeira no chão e o clarão branco e roxo dos golpes aparecem nos mesmos quadros que no PCSX2 (12 pares).
+VRAM depois das subidas: os bytes altos das páginas `0x70`–`0x16F` iguais ao PCSX2, salvo 57 páginas no Z (`0x01000000`
+no recomp, 0 no PCSX2: medido em momentos próximos, não iguais; a conferir). Estado de jogo igual ao PCSX2 em todas as
+chamadas (`hlbench.py diff`). Sem trava até o v6000.
+
+**Não testado:** Android (o código gerado muda para os dois: as quatro funções passam a ser do jogo), outros cenários,
+Ougi, campanha. Nada disso conta como corrigido antes da rota nos aparelhos.
+
+**Ferramentas:** `0076-bench-gif-capture.patch` (o escritor do `HLB_GIFCAP` no `ps2_memory.cpp`, antes editado à mão);
+`hl_bench.cpp` com `HLB_GIFCAP`, `HLB_GIFCAPV`, `HLB_RAMV`, `HLB_CDLOG`, `HLB_TRAPV`, `HLB_FNLOG`; os leitores em
+`tools/gsbench/` (README lá). No `HLBench.cpp` do PCSX2 da bancada (fora do repositório): `HLB_DMALOG`, `HLB_FNLOG`.
 
 ### 2026-11-08 08:24, manhã: falta fumaça, poeira e clarão nas lutas do PC; as texturas deles nunca chegam à VRAM (aberto)
 

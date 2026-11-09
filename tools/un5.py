@@ -705,7 +705,13 @@ STUB_AT = {
 # its srand at 0x17C540) that gives 31 bits. The runtime's stub gave the host's std::rand() & 0x7FFF and ignored the seed:
 # the CPU's choices (BTL 0x6F0E60, 0x6F1260, 0x6F1720) and rand()/2^31 (0x192830) came out of another sequence and range
 # (docs/registro.md, 2026-11-08).
-UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin|rand")
+# libgraph's image transfers (sceGsSetDefLoadImage, sceGsExecLoadImage and the Store pair): the game's own fill the
+# sceGsLoadImage block and send it with two normal-mode GIF DMAs, as on the PS2. The runtime's rebuilt the packet from its
+# own reading of the block, gave -1 for the PSMT8H, 4HL and 4HH textures (bytesForPixels 0), so the smoke, dust and hit
+# flash textures (high bytes of the frame and Z pages) were never sent, and took its packets from its own heap
+# (docs/registro.md, 2026-11-09).
+UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin|rand"
+                    r"|sceGs(SetDef|Exec)(Load|Store)Image")
 # HL_SDR=0 at build time leaves the three libsdr calls as stubs (no sound in the logos and films)
 if os.environ.get("HL_SDR", "1") != "0":
     UNSTUB = re.compile(UNSTUB.pattern + r"|sceSdRemoteInit|sceSdRemote|sceSdTransToIOP")
