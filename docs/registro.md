@@ -75,6 +75,16 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
   - é a ordem em que as cargas (threads de leitura) terminam, ou seja, o tempo do CD e das threads (item 5 da tabela
     "Correto primeiro" do `plano.md`), que segue aberto. Não afeta o estado da luta medido.
 - Ferramenta: `tools/heapwalk.py <ram do pcsx2> <ram do recomp>` (primeiro bloco diferente e os trechos que diferem).
+- **Onde a ordem se separa** (`HLB_FNLOG=0x118e60,0x1181b0`, alocar e liberar, nos dois lados até a luta; 152829 chamadas
+  no PCSX2, 149761 no recomp; comparadas por função e chamador):
+  - as 29 primeiras são iguais;
+  - na 30ª (boot: v247 no PCSX2, v50 no recomp), o PCSX2 faz uma alocação (`ra 0x1187d4`, 0x4f0) numa thread com pilha
+    em `0xc68aa0`, antes de a thread com pilha em `0xb62f70` liberar `0xbd4b80` (`ra 0x1d58c4`). No recomp, a liberação
+    vem primeiro;
+  - é uma troca de thread em outro momento, ainda no carregamento do boot. É por ela que começar quando o tempo das
+    threads e do CD for atacado;
+  - o `a1` dessas chamadas também mostra o topo do pool: `0x1ff5f40` no PCSX2, `0x1effe40` no recomp (o pool ~1 MB
+    menor).
 
 ### 2026-11-09 16:00, tarde: o pool no endereço do PS2 também no PC; o executor do PC parou de chegar ao logo
 
