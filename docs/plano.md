@@ -732,3 +732,31 @@ Do template do Dragon Rage: tema (laranja do Naruto, índigo e roxo do Sasuke, v
 cena do campo de treino (troncos, shurikens que cravam, folhas caindo), importador da base com SHA-256 do ELF e dos
 overlays, mods por ISO (compara com a base, guarda só o que difere, um mod de código por vez), drivers, controles,
 texturas, depuração e atualização. Sem o online e as trapaças do BT3.
+
+## Mods sem pacote de código: interpretador do EE (desde 2026-11-09 21h)
+
+Decidido com o desenvolvedor: o APK leva só o motor do jogo base (`libun5.so`, e a `libun5_v80.so` para ARMv8.0); cada um
+importa a própria ISO, do base e de cada mod, conferida pelo SHA-256 da imagem inteira (`KnownVersions`); nada de motor
+baixado por fora. Os pacotes de código dos mods (`libun5_<id>.so`) saem do APK **depois** que o interpretador rodar o A35.
+
+Desenho:
+1. **Onde entra:** toda chamada e salto entre funções passa por `dispatchGuestBranch` → `lookupFunction`, que pergunta ao
+   `g_ps2OverlayResolver` quando a tabela gerada não tem a função. O interpretador é uma `RecompiledFunction` que roda a
+   partir de `ctx->pc`, com o mesmo contrato do código gerado: chamada (`jal`/`jalr`) pelo `dispatchGuestBranch`,
+   salto e retorno saem com `ctx->pc` no destino, desvio para trás passa pelo `eeCheckpointDue`. Ele pode ser retomado em
+   qualquer instrução (o despachante procura `ctx->pc` de novo).
+2. **O que ele roda:** (a) endereço sem função recompilada (código novo do mod, como o 1 MB a mais de BSS do A35);
+   (b) função recompilada cujos bytes na RAM diferem dos do ELF europeu (o ELF do base está em `runtime/data`): ao
+   carregar o ELF do mod, compara função a função e troca as diferentes (`replaceFunction`, todas as entradas da faixa);
+   (c) overlays (`PRG/`) do mod: o resolvedor compara por função, não pelo overlay inteiro (o `BTL` do mod é quase todo
+   igual ao europeu e precisa seguir nativo).
+3. **Semântica:** cada instrução com as mesmas macros de `ps2_runtime_macros.h` que o tradutor do PS2Recomp emite
+   (`instruction_translator`, `fpu_translator`, `mmi_translator`, `vu_translator`), para dar o mesmo resultado do
+   código gerado. Teste no PC: o A35 com o pacote contra o A35 pelo interpretador, mesma rota (`HL_PADROUTE`), estado
+   da luta igual (`tools/hlbench.py diff`).
+4. **Ordem das instruções:** pelo uso no A35 (`build/lab/a35_ops.txt`, do comentário de desmontagem do código gerado):
+   1628 funções mudadas ou novas (983 novas), 188 715 instruções, 158 mnemônicos. Os mais usados: `addiu lw jal daddu
+   lui sw b lwc1 beqz mtc1 swc1 ori sq lq`; FPU (`add.s mul.s c.lt.s cvt.s.w div.s madd.s`…), MMI (`lq sq pcpyld`),
+   VU0 em macro (`lqc2 sqc2 vsub vadd vmul vdiv vwaitq qmtc2.ni qmfc2.ni`…). Raros: `ll sc scd sync cache mfc0 mtc0 ei`.
+5. **Custo:** o interpretador fica dezenas de vezes mais lento que o código gerado. Se as funções novas do A35 pesarem na
+   luta, o passo seguinte é um JIT para ARM64 dessas funções, também dentro da `libun5.so`.
