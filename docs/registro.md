@@ -56,6 +56,31 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 18:00, tarde: ordem das threads no boot (tentativa, revertida; aberto)
+
+- **Medida** (`HLB_FNLOG` com alocar, liberar e os stubs de syscall `CreateThread 0x15e8a0`, `StartThread 0x15e8c0`,
+  `SleepThread 0x15e9c0`, `WakeupThread 0x15e9d0`, `ChangeThreadPriority 0x15e930` (0x29), `SuspendThread 0x15ea10`
+  (0x37), nos dois lados até v400). O FNLOG do recomp aceita no máximo 8 endereços; a primeira tentativa passou disso.
+- **O que difere do PCSX2:**
+  1. o `InitThread` da libkernel (`0x15F878`) é stub do runtime, que só devolve o id da thread principal. No PS2 ele
+     cria um semáforo e uma thread auxiliar de **prioridade 0** (id 2, função `0x15f7a0`, pilha `0x61e3c0`, 0x400),
+     então as threads do jogo começam no id 3. No recomp começavam no 2;
+  2. o runtime recusa prioridade 0 (`EeScheduler::createThread` e `changePriority`: `< 1`); o PS2 aceita;
+  3. o `StartThread` da libkernel (`0x15FBE0`) também é stub;
+  4. no boot (v192 no PCSX2), `ChangeThreadPriority(4, 0x10)` com a principal em 0x78 passa a vez à thread 4 na hora
+     (o `SleepThread` dela em seguida); no recomp a principal segue criando threads.
+- **Tentativa:**
+  - `InitThread` e `StartThread` como código real (`UNSTUB` do `un5.py`) e prioridade 0 aceita (patch guardado fora do
+    repositório, `0086-thread-priority-zero`);
+  - a ordem bateu com o PCSX2 nos 17 primeiros eventos (antes, 2), com os mesmos ids de thread;
+  - a troca na hora do item 4 não veio, nem com o pedido de troca marcando o checkpoint fora de interrupção
+    (`requestPreemptionIfHigher`);
+  - **o jogo parou no primeiro filme** (`LOGO_C.PSS`: o `sceCdStRead` segue lendo e nenhum overlay carrega até v9500),
+    com `InitThread`+`StartThread`+`iWakeupThread`+`iRotateThreadReadyQueue` reais e também só com os dois primeiros.
+- **Revertido:** `un5.py` e o patch voltaram ao estado do `9f1f61e` e o código foi gerado de novo.
+- **Próximo passo:** separar o que trava o filme (só o `InitThread` com o `0086`, ou o `StartThread`), olhando a
+  thread auxiliar de prioridade 0 no escalonador do runtime: ela fica esperando o semáforo e pode estar tomando o EE.
+
 ### 2026-11-09 17:00, tarde: o heap vai até a pilha principal, como no PS2 (`0085`); o pool do jogo do mesmo tamanho
 
 - **Causa do pool ~1 MB menor:**
