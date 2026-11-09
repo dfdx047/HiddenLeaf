@@ -745,8 +745,53 @@ def cmd_stubfix(a):
             continue
         text = re.sub(r"^(stubs = \[\s*\n)", lambda s: s.group(1) + '  "%s",\n' % entry, text, count=1, flags=re.M)
         moved.append("0x%x -> %s" % (addr, handler))
+    if a.elf and a.base:
+        text = unstub_changed(text, a.elf, a.base, a.base_config, moved)
     open(a.config, "w").write(text)
     print("stubs: " + (", ".join(moved) if moved else "nothing to change"))
+
+
+# A mod that changes the code of an SDK function the runtime stubs: its change would never run (the stub is the runtime's
+# C++). The UN6 A35 hooks sceSifSendCmd (0x161E10: jal 0x17B1E4 in place of jal _sceSifSendCmd) with a small code engine
+# that writes its table of (address, value) at each command: one entry, the main camera's x scale (0xC3EF14) = 0.75. Stubbed,
+# the title's background came out 4/3 wider than on PCSX2 (docs/registro.md, 2026-11-09). Each stub whose bytes differ from
+# the base ELF's (up to the next function the analyzer knows in either ELF: the A35's engine sits over the base's memcpy,
+# right after an unchanged memcmp) runs as the mod's own code; the calls it makes still reach
+# the runtime's stubs.
+def unstub_changed(text, elf, base, base_config, moved):
+    def segments(path):
+        d = open(path, "rb").read()
+        ph, n = struct.unpack_from("<I", d, 0x1C)[0], struct.unpack_from("<H", d, 0x2C)[0]
+        return d, [struct.unpack_from("<6I", d, ph + i * 32) for i in range(n)]
+
+    def read(img, addr, n):
+        d, segs = img
+        for _t, off, va, _pa, fs, _ms in segs:
+            if va <= addr and addr + n <= va + fs:
+                return d[off + addr - va:off + addr - va + n]
+        return None
+
+    mod, ref = segments(elf), segments(base)
+    known = text + (open(base_config).read() if base_config else "")
+    starts = sorted({int(x, 16) for x in re.findall(r'"\w+@(0x[0-9A-Fa-f]+)"', known)})
+    block = re.search(r"^stubs = \[\s*\n(.*?)^\]", text, re.M | re.S)
+    keep, own = [], []
+    for line in block.group(1).splitlines(keepends=True):
+        m = re.match(r'\s*"(\w+)@(0x[0-9A-Fa-f]+)"', line)
+        if m:
+            addr = int(m.group(2), 16)
+            nxt = [x for x in starts if x > addr]
+            n = min((nxt[0] if nxt else addr + 0x40) - addr, 0x400)
+            x, y = read(mod, addr, n), read(ref, addr, n)
+            if x is not None and y is not None and x != y:
+                own.append('  "%s@%s",\n' % (m.group(1), m.group(2)))
+                moved.append("%s changed by the mod: recompiled" % m.group(1))
+                continue
+        keep.append(line)
+    if own:
+        text = text[:block.start(1)] + "".join(keep) + text[block.end(1):]
+        text = re.sub(r"^(entry_points = \[\s*\n)", lambda s: s.group(1) + "".join(own), text, count=1, flags=re.M)
+    return text
 
 
 def main():
@@ -760,7 +805,9 @@ def main():
     s = sub.add_parser("unpack"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_unpack)
     s = sub.add_parser("prepelf"); s.add_argument("elf"); s.add_argument("out"); s.set_defaults(fn=cmd_prepelf)
     s = sub.add_parser("ovlelf"); s.add_argument("ovl"); s.add_argument("out"); s.add_argument("--from", nargs="*", dest="callers"); s.set_defaults(fn=cmd_ovlelf)
-    s = sub.add_parser("stubfix"); s.add_argument("config"); s.set_defaults(fn=cmd_stubfix)
+    s = sub.add_parser("stubfix"); s.add_argument("config")
+    s.add_argument("--elf", help="a mod's ELF: its stubs whose code differs from --base run as its own code")
+    s.add_argument("--base"); s.add_argument("--base-config"); s.set_defaults(fn=cmd_stubfix)
     s = sub.add_parser("fnmap"); s.add_argument("elf"); s.add_argument("output"); s.add_argument("map"); s.add_argument("--also", nargs="*"); s.set_defaults(fn=cmd_fnmap)
     a = ap.parse_args()
     sys.exit(a.fn(a) or 0)

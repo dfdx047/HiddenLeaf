@@ -85,7 +85,7 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 - **Ferramentas novas:**
   - `HL_CAM_LOG=1`: cada chamada do setter, com o chamador da inicialização; e cada mudança do `+0x274` vista pelo
     gancho;
-  - `HL_CAM_NOWRITE=1`: o gancho não escreve 1,0 fora das cenas largas;
+  - `HL_CAM_NOWRITE=1`: o gancho não escreve 1,0 fora das cenas largas (saiu às 15:10);
   - `HL_DISP_LOG=1` (`hl_native.cpp`): os registros de exibição, a cada mudança;
   - na bancada (fora do repositório): `f12` e `f18` no `HLB_FNLOG`.
 - **Atenção:** a troca para 4:3 pelo menu do jogo fica salva no `un5_settings.txt`. Voltei o Odin para "Tela cheia".

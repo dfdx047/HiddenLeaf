@@ -56,7 +56,7 @@ if [ "$iso" = "--mod" ]; then
     python3 "$here/tools/un5.py" prepelf "$M/disc/$boot" "$M/gen/un5_split.elf"
     say "4. the runtime's sources"
     rsync -a --delete --exclude /build-tools/ --exclude /build-rt/ --exclude /.git/ "$B/PS2Recomp/" "$M/PS2Recomp/"
-    B_DISC="$M/disc"; B_GEN="$M/gen"; RT="$M/PS2Recomp/ps2xRuntime"
+    B_DISC="$M/disc"; B_GEN="$M/gen"; RT="$M/PS2Recomp/ps2xRuntime"; MOD_ELF="$M/disc/$boot"
 fi
 B_DISC=${B_DISC:-$B/disc}; B_GEN=${B_GEN:-$B/gen}; RT=${RT:-$B/PS2Recomp/ps2xRuntime}
 if [ "$iso" != "--mod" ]; then
@@ -101,7 +101,7 @@ say "5. analyzer and recompiler"
 cd "$B_GEN"
 "$B/PS2Recomp/build-tools/ps2xAnalyzer/ps2_analyzer" un5_split.elf un5_config.toml > analyzer.log 2>&1
 sed -i 's|^output = .*|output = "./output/"|' un5_config.toml
-python3 "$here/tools/un5.py" stubfix un5_config.toml
+python3 "$here/tools/un5.py" stubfix un5_config.toml ${MOD_ELF:+--elf "$MOD_ELF" --base "$B/disc/SLES_556.05" --base-config "$B/gen/un5_config.toml"}
 rm -rf output
 "$B/PS2Recomp/build-tools/ps2xRecomp/ps2_recomp" un5_config.toml > recomp.log 2>&1
 # second pass: plus the functions only reached through pointers in the data (constructors, vtables, callbacks)

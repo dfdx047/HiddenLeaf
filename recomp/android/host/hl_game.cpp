@@ -146,12 +146,13 @@ namespace
                 std::fprintf(stderr, "[cam] v%llu camera 0x%x +0x274 was %g, now %g\n", static_cast<unsigned long long>(g_tick), camera, before, scale);
             }
         }
-        static const bool s_noWrite = std::getenv("HL_CAM_NOWRITE") != nullptr; // (the game's own scale left alone outside the wide scenes)
-        if (s_noWrite && scale == 1.0f)
-            return;
-        std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
-        // (the cameras the fight made wide: a picture may be built later from one of them without coming back here)
+        // Outside the wide scenes the game's own scale stays: 1.0 in the base game, 0.75 in the UN6 A35 (its anamorphic 16:9,
+        // kept by its code table). Writing 1.0 there gave the A35's title a background 4/3 wider than on PCSX2
+        // (docs/registro.md, 2026-11-09). Only the cameras made wide get their own value back, below.
+        // (the cameras the fight made wide, with the game's value: a picture may be built later from one of them without
+        // coming back here)
         static uint32_t s_cameras[16];
+        static float s_own[16];
         static uint32_t s_count = 0u;
         if (scale != 1.0f)
         {
@@ -159,7 +160,11 @@ namespace
             for (uint32_t i = 0; i < s_count; ++i)
                 known = known || s_cameras[i] == camera;
             if (!known && s_count < 16u)
+            {
+                std::memcpy(&s_own[s_count], rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), 4);
                 s_cameras[s_count++] = camera;
+            }
+            std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
         }
         else if (s_count != 0u)
         {
@@ -190,11 +195,11 @@ namespace
                 std::memcpy(&now, field, 4);
                 if (now == wide)
                 {
-                    std::memcpy(field, &scale, 4);
+                    std::memcpy(field, &s_own[i], 4);
                     ++back;
                 }
             }
-            std::fprintf(stderr, "[cam] v%llu %u of %u cameras back to 1 (%u cameras live)\n", static_cast<unsigned long long>(g_tick), back,
+            std::fprintf(stderr, "[cam] v%llu %u of %u cameras back to the game's scale (%u cameras live)\n", static_cast<unsigned long long>(g_tick), back,
                          s_count, liveCount);
             s_count = 0u;
         }
@@ -345,6 +350,83 @@ namespace
                          GPR_U32(ctx, 4), ctx->f[12], GPR_U32(ctx, 31), read32(GPR_U32(ctx, 29) + 0x40u));
         }
         g_camSetOriginal(rdram, ctx, runtime);
+    }
+
+    // The game's pool, at the address newlib gives on the PS2. At boot (0x118CA0) the game asks malloc for all the RAM
+    // from its ELF's end to its stack (0x118D34, then 0x100 less each time until it gets it: 0x118D50) and keeps its own heap
+    // in it, bottom up. newlib gives end + 0x10 (PCSX2: 0x928910 for the base, 0xA28910 for the UN6 A35); the runtime's
+    // heap gives end, so every object of the game sat 0x10 lower than on the PS2. The UN6 A35's code table writes absolute
+    // addresses (the main camera's x scale at 0xC3EF14) and hit the wrong field (docs/registro.md, 2026-11-09). The pool
+    // is 0x10 further up, as on the PS2. (It is still ~1 MB smaller: the runtime keeps 0x1F00000 and up for its callback
+    // stacks.) HL_CAM_LOG prints the mallocs.
+    PS2Runtime::RecompiledFunction g_mallocOriginal = nullptr;
+    void gameMalloc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t size = GPR_U32(ctx, 4), ra = GPR_U32(ctx, 31);
+        const bool pool = ra == 0x118D3Cu || ra == 0x118D58u;
+        if (pool)
+            SET_GPR_U32(ctx, 4, size + 0x10u);
+        g_mallocOriginal(rdram, ctx, runtime);
+        if (pool && GPR_U32(ctx, 2) != 0u)
+            SET_GPR_U32(ctx, 2, GPR_U32(ctx, 2) + 0x10u);
+        static const bool s_log = std::getenv("HL_CAM_LOG") != nullptr;
+        static int s_n = 0;
+        if (s_log && (s_n++ < 4 || GPR_U32(ctx, 2) != 0u))
+            std::fprintf(stderr, "[malloc] v%llu size 0x%x ra 0x%x -> 0x%x\n", static_cast<unsigned long long>(g_tick), size, ra, GPR_U32(ctx, 2));
+    }
+
+    // A mod's code table in sceSifSendCmd. The UN6 A35 calls 0x17B1E4 at 0x161E10 in place of _sceSifSendCmd: a small engine
+    // (lui/ori $t4 = its header) that writes a table of (address << 7 | kind, value) at each SIF command, then goes on to
+    // _sceSifSendCmd. The header is (table << 7 | entries - 1); the kind is how far back from the header its store is
+    // (sb, sh or sw, alone or in a branch's delay slot). Its one entry keeps the main camera's x scale at 0.75 (0xC3EF14),
+    // after 0x1843D0 sets 1.0. Here sceSifSendCmd runs as the mod's code (tools/un5.py stubfix), but the RPCs are the
+    // runtime's and never reach it: the table is written before each sceSifCallRpc and sceSifBindRpc, as on the PS2.
+    constexpr uint32_t kSifSendCmdCall = 0x161E10u, kSifSendCmdOriginal = 0x161CB0u;
+    uint32_t g_codeHeader = 0u; // 0: not looked at yet; 1: none
+    void modCodeTable()
+    {
+        if (g_codeHeader == 0u)
+        {
+            g_codeHeader = 1u;
+            const uint32_t jal = read32(kSifSendCmdCall);
+            const uint32_t target = (jal & 0x03FFFFFFu) << 2;
+            if ((jal >> 26) == 3u && target != kSifSendCmdOriginal && (read32(target) & 0xFFFF0000u) == 0x3C0C0000u &&
+                (read32(target + 4u) & 0xFFFF0000u) == 0x358C0000u)
+            {
+                g_codeHeader = (read32(target) << 16) | (read32(target + 4u) & 0xFFFFu);
+                std::fprintf(stderr, "[codes] the mod's code table at 0x%x (engine 0x%x)\n", g_codeHeader, target);
+            }
+        }
+        if (g_codeHeader == 1u)
+            return;
+        const uint32_t header = read32(g_codeHeader);
+        uint32_t entry = (header >> 7) & 0x1FFFFFFu;
+        for (uint32_t n = (header & 0x7Fu) + 1u; n != 0u; --n, entry += 8u)
+        {
+            const uint32_t where = read32(entry), value = read32(entry + 4u);
+            uint32_t store = read32(g_codeHeader - (where & 0x7Fu));
+            if ((store & 0xFFFF0000u) == 0x10000000u) // b: the store is in its delay slot
+                store = read32(g_codeHeader - (where & 0x7Fu) + 4u);
+            uint8_t *p = g_rdram + ((where >> 7) & 0x1FFFFFFu);
+            switch (store >> 26)
+            {
+            case 0x28: *p = static_cast<uint8_t>(value); break;
+            case 0x29: { const uint16_t v = static_cast<uint16_t>(value); std::memcpy(p, &v, 2); break; }
+            case 0x2B: std::memcpy(p, &value, 4); break;
+            default: break;
+            }
+        }
+    }
+    PS2Runtime::RecompiledFunction g_callRpcOriginal = nullptr, g_bindRpcOriginal = nullptr;
+    void sifCallRpc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        modCodeTable();
+        g_callRpcOriginal(rdram, ctx, runtime);
+    }
+    void sifBindRpc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        modCodeTable();
+        g_bindRpcOriginal(rdram, ctx, runtime);
     }
 
     void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1097,6 +1179,12 @@ namespace
                 runtime->registerFunction(kCameraMatrices, cameraMatrices);
             if (std::getenv("HL_CAM_LOG") != nullptr && (g_camSetOriginal = runtime->lookupFunction(0x10EED0u)) != nullptr)
                 runtime->registerFunction(0x10EED0u, cameraSetScale);
+            if ((g_mallocOriginal = runtime->lookupFunction(0x17A610u)) != nullptr)
+                runtime->registerFunction(0x17A610u, gameMalloc);
+            if ((g_callRpcOriginal = runtime->lookupFunction(0x1629E8u)) != nullptr)
+                runtime->registerFunction(0x1629E8u, sifCallRpc);
+            if ((g_bindRpcOriginal = runtime->lookupFunction(0x162808u)) != nullptr)
+                runtime->registerFunction(0x162808u, sifBindRpc);
             g_inputOriginal = runtime->lookupFunction(kFighterInput);
             ::g_hlFightStart = &fightStart;
             if (g_inputOriginal != nullptr)
