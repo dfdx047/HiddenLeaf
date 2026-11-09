@@ -56,6 +56,63 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 07:50, manhã: menus por gestos, novo menu do jogo, 2D dos menus no formato da tela, 90/120 em toda tela
+
+- **Menus por toque** (`NinjaPadView.menuGesture`, `6a3229d`):
+  - na cena de menu, nenhum botão na tela além de ≡ (menu do jogo) e START (título, entrada do 2P);
+  - gestos:
+    - toque = ✕ (OK);
+    - deslizar = direção, e segurar fora do lugar repete (380 ms e depois 150 ms);
+    - segurar parado = ○;
+    - dois dedos = △ (voltar);
+    - dois dedos deslizando para os lados = L1/R1;
+    - dois dedos parados = □;
+    - três dedos = START;
+  - a tela de seleção confirma o mapa do jogo europeu: ✕ OK, △ Back, ○ Random, L1 cor;
+  - `TouchConfig.menuTouch` (ligado por padrão) volta aos botões;
+  - SCENE e OPTIONS saíram da barra de cima, e o conteúdo deles foi para a aba Layout;
+  - **teste no Odin 2 Mini** (`build/lab/gest/run.sh`, `adb input`): deslizar para cima levou o cursor de ENGLISH a
+    ITALIANO e um toque confirmou (entraram os logos). O START na tela do idioma não faz nada: lá o jogo quer ✕.
+- **Menu do jogo** (`GamePanel.kt` reescrito, `e3f0d17`):
+  - desenho próprio nas cores dos menus do jogo (papel, tinta marrom, laranja), sem arte do jogo;
+  - à esquerda, um trilho com as abas Gráficos, Controles e Layout, e Continuar e Sair embaixo;
+  - **Gráficos:**
+    - resolução 1x, 2x, 3x, 4x, 6x e 8x (8x = 4096 × 3584, acima de 4K);
+    - filtro, formato da tela, contador (depuração);
+    - quadros por segundo 30, 50, 60, 90 e 120, em qualquer tela; a dica mostra até quantos Hz o painel vai;
+  - **Controles:**
+    - o que cada botão faz na luta e na campanha, e os gestos dos menus;
+    - ajudas: especial de um toque e quanto vale um toque nas disputas. Valem na hora, pelo JNI
+      `nativeSetAssist`; antes só valiam no próximo início;
+  - **Layout:**
+    - botões na tela (automático, sempre, desligado), visual, estilo, opacidade e tamanho;
+    - menus por gestos, analógico flutuante, vibração;
+    - "Mover e redimensionar botões" abre o editor;
+  - o diálogo antigo (`showOptions`) saiu; textos em `values*/strings_panel.xml` (pt, en, es).
+- **2D dos menus no formato da tela** (`hl_native::widen2d`, chamado pelo `hl_gsx.cpp` com o nativo desligado e a
+  câmera do jogo não larga; `13256aa`):
+  - cada primitiva desenhada no quadro mostrado é apertada para o meio por `hudScale` ((4/3) ÷ formato). Esticada
+    para a tela, volta à proporção dela;
+  - o que cobre 90% ou mais da largura (fundo, limpeza, fade) fica como está e enche a tela;
+  - uma tira (strip) ou leque segue a decisão do primeiro triângulo;
+  - o SCISSOR de um painel é apertado junto com o que ele recorta;
+  - desenho fora da tela (FBW diferente do `DISPFB2`) não é tocado;
+  - a largura vem do `DISPLAY2`/`DISPFB2` (pacote de registradores);
+  - `HL_WIDE2D_OFF=1` desliga;
+  - o host manda `Bt4Gsx_WideCamera` a cada vsync;
+  - base: `tools/gifprims.py` sobre o `hl_gif.bin` da seleção, capturado no PC (`HL_GIF_LOG=6000@96`). Fundo em
+    sprites de 93 a 100% da largura; os dois painéis de personagem em strips de 50% cada, com SCISSOR por painel
+    (18-233 e 278-493); tudo na textura `0x3c00`, por isso a textura não serve para agrupar;
+  - **ainda não testado no aparelho** (a matriz ocupa o Odin 2 Mini).
+- **90 e 120 em toda tela** (`b17cc94`):
+  - o painel e o launcher oferecem 90 e 120 mesmo num painel de 60 Hz, para medir;
+  - o `GameActivity` pede o modo mais rápido da tela (`preferredDisplayModeId`) quando o fps passa de 60;
+  - o 16:10 saiu do launcher: caía no Stretch com a câmera ajustada para 1,6.
+- **Medida:**
+  - `build/lab/matrix.sh` mede resolução × fps × filtro na luta fixa (rota v3, ○ de +500 a +2700);
+  - as linhas `[present]` (com `HL_PERF`) contam as imagens por segundo do interpolador;
+  - `HL_FILTER` escolhe o filtro pelo env.
+
 ### 2026-11-09 07:09, manhã: rota relativa ao começo de cada luta (`@N+vsyncs`), Odin 2 Mini
 
 - **`0083-padroute-fight-relative.patch`** (`Pad.cpp` do runtime):
