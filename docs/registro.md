@@ -56,6 +56,16 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:49, manhã: térmica de 4x/120 no Odin 2 Mini e correção de horários
+
+- **Correção de horários:** as entradas "08:50" (campanha) e "08:58" (botões na tela) foram escritas antes das 08:49 reais.
+  O relógio do PC é a referência; a ordem das entradas está certa.
+- **Térmica** (`build/lab/matrix/o2t.tsv`):
+  - seis rodadas seguidas de 4x/120 (`COOL=1`, ~20 min de luta), no carregador;
+  - em todas: 50,0 fps, 1% low de 42,4 a 43,2, pares acima de 44 ms de 0,1 a 0,3%, pior par de 57 a 63 ms;
+  - imagens por segundo de 111 a 117; a temperatura máxima ficou entre 70 e 77 °C;
+  - **sem perda por calor**: 4x/120 aguenta sessões longas no Odin 2 Mini.
+
 ### 2026-11-09 08:58, manhã: teste real dos botões na tela, na luta (Odin 2 Mini)
 
 - **Montagem** (`build/lab/gest/fight.sh`, saída em `build/lab/gest/fight/`):
