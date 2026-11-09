@@ -56,6 +56,23 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 04:50, madrugada: RP5 com a `libun5.so` nova: campanha completa e Ougi
+
+Mesmo APK da entrada das 04:30 (`af8ed28`), com o `hl_lbn.txt` no aparelho.
+- **Campanha (`rec/pc3_rp5_camp`, `hl_env_camp.txt`, `PAUSE_AT=11000`, `QUIT_AT=12300`):**
+  - percurso: logos → título → New Game → diálogos → "Act 1 Naruto Returns Home" → vila → troca de área (carga) →
+    menu START e tutorial → painel de pausa (4:3, tela cheia, continuar) → "Sair do jogo" → launcher;
+  - de 49,6 a 50,3 fps de v6000 a v12446, fora a amostra de 0,8 no painel de pausa (com o jogo parado);
+  - som presente, sem `missing-target`, sem barras no 16:9.
+- **Ougi (`rec/pc3_rp5_ougi`, `hl_env_pc3o.txt`: a `route_v3` do PC e △ △ ○ a cada 90 vsyncs de v5610 a v6690):**
+  - "Unleash Ultimate Jutsu" e a cena do Ougi (céu, Naruto voando contra Kakashi) desenhadas pelo nativo;
+  - na volta à luta, clones, fumaça, Great Ball Rasengan, letras de impacto e contadores;
+  - de 49,5 a 50 fps, com uma amostra de 46,7 em v6545.
+- **Falta para dar como corrigido:**
+  - os outros aparelhos: o Cube sem a base, o Odin 3 fora da rede, o Odin 2 Mini bloqueado;
+  - o 20:9;
+  - os mods.
+
 ### 2026-11-09 04:25, madrugada: as partículas a mais vêm do relógio das partículas, adiantado no recomp (PC)
 
 - **Hora (correção):** a entrada de baixo, marcada 04:30, foi escrita às 04:05 (`af8ed28`). O Odin 2 Mini
