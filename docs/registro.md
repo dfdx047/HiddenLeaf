@@ -56,6 +56,62 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 09:00, manhã: matriz de desempenho do Odin 2 Mini (resolução × fps × filtro) e o menu do jogo no aparelho
+
+**Matriz** (`build/lab/matrix.sh 192.168.1.206:5555 o2m`, `build/lab/matrix/o2m.tsv`):
+- **Cena e medida:**
+  - luta 1 da rota v3, Naruto x Naruto, com ○ contínuo, sem mod;
+  - `HL_PERF_FROM=6500`: 10 s de aquecimento e 30 s de medida;
+  - 30 s de descanso entre as rodadas;
+  - o aparelho estava no carregador, com tela de 60 Hz.
+- **Colunas:**
+  - **jogo:** fps do jogo;
+  - **1% low:** fps nos 1% piores quadros;
+  - **pares:** % de pares de vsync acima de 44 ms;
+  - **pior:** o pior par, em ms;
+  - **imagens/s:** imagens apresentadas por segundo, contadas pelas linhas `[present]` (só no modo interpolado);
+  - **°C:** a zona térmica mais quente.
+
+| escala | fps pedido | jogo | 1% low | pares | pior | imagens/s | °C |
+|---|---|---|---|---|---|---|---|
+| 1x | 50 / 60 / 120 | 50,0 | 42,4 a 43,3 | 0,1 a 0,3% | 58 a 64 | – / 59 / 118 | 69 a 72 |
+| 2x | 50 / 60 / 120 | 50,0 | 42,3 a 43,1 | 0,1 a 0,3% | 56 a 61 | – / 59 / 118 | 67 a 68 |
+| 3x | 50 / 60 / 120 | 50,0 | 42,7 a 42,9 | 0,1 a 0,3% | 61 a 63 | – / 58 / 118 | 68 a 70 |
+| 4x | 50 / 60 / 120 | 50,0 | 42,4 a 43,1 | 0,1% | 58 a 63 | – / 59 / 112 | 70 a 76 |
+| 6x | 50 | 50,0 | 36,1 | 0,3% | 113 | – | 76 |
+| 6x | 60 | 50,0 | 34,5 | 0,5% | 90 | 54 | 80 |
+| 6x | 120 | 50,0 | 30,8 | 1,2% | 94 | 97 | 78 |
+| 8x | 50 | 49,9 | 26,6 | 0,3% | 244 | – | 83 |
+| 8x | 60 | 47,1 | 11,1 | 8,4% | 239 | 50 | 81 |
+| 8x | 120 | 47,2 | 11,3 | 8,8% | 241 | 64 | 82 |
+| 2x, 240 | | 50,0 | 43,2 | 0,3% | 59 | 203 | 68 |
+| 4x, 240 | | 50,0 | 42,7 | 0,1% | 59 | 155 | 73 |
+| 8x, 240 | | 47,0 | 11,1 | 8,9% | 241 | 72 | 80 |
+| 2x, 60, filtros | | 50,0 | 42,1 a 42,9 | 0,1 a 0,3% | 57 a 62 | 59 | 71 a 75 |
+
+**Filtros:** bilinear nítido, FXAA e CAS não custam nada que apareça na medida.
+
+- **O que o Odin 2 Mini aguenta:**
+  - até 4x (1792p) a luta fica cravada em 50 fps, com 118 imagens/s a 120;
+  - a 4x e 240, ainda são 155 imagens/s;
+  - a 2x e 240, são 203 imagens/s;
+  - o EE e a VU1 gastam ~5 ms cada (de 20 ms por vsync): a CPU sobra em todas as escalas;
+  - **o limite é a GPU:**
+    - 6x ainda dá 50 fps, mas o 1% low cai para 31–36;
+    - 8x (4096 × 3584, acima de 4K) perde vsyncs (47 fps, 8–9% de pares lentos) e esquenta a 81–83 °C;
+    - a 8x, 120 não passa de 64 imagens/s.
+- **Recomendação para o aparelho:** 4x com 120 é o máximo estável. Numa tela de 60 Hz, 60 interpolado a 2x–4x é o
+  que se vê.
+- **Faltou medir:** a campanha, os menus e uma rodada longa em 4x/120 (térmica).
+
+**Menu do jogo no aparelho** (`build/lab/gest/panel.sh`):
+- o Back abre o menu sobre o jogo; as três abas aparecem e o Continuar fecha;
+- capturas em `build/lab/gest/p1..p5`:
+  - Gráficos com 1x a 8x · 4K e 30/50/60/90/120;
+  - Controles com os botões e as dicas;
+  - Layout com os botões na tela, o visual, o estilo e a opacidade;
+- os mods foram restaurados depois.
+
 ### 2026-11-09 07:50, manhã: menus por gestos, novo menu do jogo, 2D dos menus no formato da tela, 90/120 em toda tela
 
 - **Menus por toque** (`NinjaPadView.menuGesture`, `6a3229d`):
