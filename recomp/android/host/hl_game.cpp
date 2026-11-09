@@ -9,6 +9,8 @@
 #include "runtime/ee_scheduler.h"
 
 #include <algorithm>
+#include <array>
+#include <utility>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -51,6 +53,9 @@ namespace hl_game
 extern PS2Runtime::RecompiledFunction un5_btl_table[] __attribute__((weak));
 extern const uint32_t un5_btl_base __attribute__((weak));
 extern const uint32_t un5_btl_slots __attribute__((weak));
+extern PS2Runtime::RecompiledFunction un5_adv_table[] __attribute__((weak));
+extern const uint32_t un5_adv_base __attribute__((weak));
+extern const uint32_t un5_adv_slots __attribute__((weak));
 
 namespace
 {
@@ -502,6 +507,62 @@ namespace
             SET_GPR_U32(ctx, 2, 1u);
     }
 
+    // HL_FNCOUNT=ADDR,... (hex, ADV.BIN's functions, debugging): how many times each ran, a line every 50 vsyncs ("[fn]"),
+    // for finding which of them run in one state of the game and not in another (docs/registro.md 2026-11-09)
+    constexpr int kCountMax = 64;
+    PS2Runtime::RecompiledFunction g_countOriginal[kCountMax] = {};
+    uint32_t g_countAddress[kCountMax] = {}, g_countCalls[kCountMax] = {};
+    int g_countUsed = 0;
+    template <int I>
+    void countCall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        ++g_countCalls[I];
+        g_countOriginal[I](rdram, ctx, runtime);
+    }
+    template <int... I>
+    constexpr std::array<PS2Runtime::RecompiledFunction, sizeof...(I)> countCalls(std::integer_sequence<int, I...>) { return {&countCall<I>...}; }
+    void hookCounts()
+    {
+        static bool s_done = false;
+        const char *list = std::getenv("HL_FNCOUNT");
+        if (s_done || list == nullptr || &un5_adv_table == nullptr)
+            return;
+        s_done = true;
+        static constexpr auto kCalls = countCalls(std::make_integer_sequence<int, kCountMax>{});
+        for (const char *p = list; *p && g_countUsed < kCountMax;)
+        {
+            char *e;
+            const uint32_t addr = static_cast<uint32_t>(std::strtoul(p, &e, 16));
+            p = *e ? e + 1 : e;
+            const uint32_t slot = (addr - un5_adv_base) >> 2;
+            if (addr < un5_adv_base || slot >= un5_adv_slots || un5_adv_table[slot] == nullptr)
+            {
+                std::fprintf(stderr, "[fn] %x is not an ADV function\n", addr);
+                continue;
+            }
+            g_countOriginal[g_countUsed] = un5_adv_table[slot];
+            g_countAddress[g_countUsed] = addr;
+            un5_adv_table[slot] = kCalls[g_countUsed];
+            ++g_countUsed;
+        }
+        std::fprintf(stderr, "[fn] counting %d ADV functions\n", g_countUsed);
+    }
+    void logCounts(uint64_t tick)
+    {
+        if (g_countUsed == 0 || tick % 50u != 0u)
+            return;
+        std::string line;
+        for (int i = 0; i < g_countUsed; ++i)
+            if (g_countCalls[i] != 0u)
+            {
+                char item[32];
+                std::snprintf(item, sizeof(item), " %x:%u", g_countAddress[i], g_countCalls[i]);
+                line += item;
+                g_countCalls[i] = 0u;
+            }
+        std::fprintf(stderr, "[fn] v%llu%s\n", static_cast<unsigned long long>(tick), line.c_str());
+    }
+
     // BTL.BIN's functions are in its own table (recomp/overlays.py), which answers only while it is the one in memory.
     void hookOverlay()
     {
@@ -950,6 +1011,7 @@ namespace
             if (g_sequenceOriginal != nullptr)
                 runtime->registerFunction(kSequenceStep, sequenceStep);
             hookOverlay();
+            hookCounts();
 #if defined(HL_WATCH_BUILD)
             if (const char *f = std::getenv("HL_FREECHECK"))
                 g_freeCheck = std::atoi(f);
@@ -984,6 +1046,7 @@ namespace
         }
         g_tick = tick;
         hl_game::g_vsync.store(static_cast<uint32_t>(tick), std::memory_order_relaxed);
+        logCounts(tick);
         dumpTick(tick);
         // HL_PRIV_LOG=1: the GS's display registers, a line each time one changes (for screens the display reads wrong)
         static const bool s_privLog = std::getenv("HL_PRIV_LOG") != nullptr;

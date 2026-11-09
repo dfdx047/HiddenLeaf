@@ -56,6 +56,19 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 10:00, manhã: diálogo da campanha, funções do ADV que leem o pad (aberto)
+
+- **Ferramenta nova:** `HL_FNCOUNT=ADDR,...` (`hl_game.cpp`, só depuração).
+  - Troca até 64 funções do ADV na tabela do overlay (`un5_adv_table`) por contadores;
+  - loga as chamadas a cada 50 vsyncs (`[fn] vN addr:n ...`).
+- **Teste** (`hl_env_camp_fn.txt`, `ramd/fn/log.txt`): as 40 funções do ADV que carregam o ponteiro do pad
+  (`lw -0x3F4($gp)`, `0x617AFC`) contadas na rota da campanha. Diálogo de v6600 a v8000, caminhada depois.
+  - Só cinco rodam: `76e130` e `7b76b0` (25/s), `7bdd90` (~450–550/s), `7be480` (~525/s), `7edf30` (200/s);
+  - as contagens são **iguais no diálogo e andando**, então nenhuma delas é a leitura que move o personagem.
+- **Próximo passo:** o personagem do ADV deve ler o pad por um ponteiro guardado no objeto dele, como os lutadores do
+  BTL (`+0x24`, depois `+0x64`). O caminho é procurar quem lê `pad+0x64`/`+0x68` por um ponteiro de objeto, ou um
+  campo do analógico do pad.
+
 ### 2026-11-09 09:50, manhã: botões escondidos nos diálogos da campanha (tentativa, revertida; aberto)
 
 - **Objetivo:** nos diálogos da campanha, esconder os botões de luta, que tapam o texto, e um toque avançar a fala
