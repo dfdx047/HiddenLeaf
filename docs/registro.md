@@ -15,7 +15,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Som dos logos e da abertura (filme) | funciona | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | `f1_*_film`: `[snd]`, `[snd-on]`, `[mpeg-pic]` | começos de som e quadros nos mesmos vsyncs nos 4; fila de 77 ms (mín. 45); pico 0,98; `NARUTO10` (44,1 kHz) com o som 170 ms antes do arquivo, a conferir no PCSX2 |
 | Título e menus | funciona | `2fee126` | RP5, Cube | rota fixa, prints, `[snd]` | som em título, Mode Select, Options, Shop, Collection, seleções, VS |
 | Luta | parcial | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada (`f1_*_v3`), contact sheet, trechos pretos medidos | 50 fps; 3 lutas sem salto (`0068`); Ougi do GS com SCANMSK sai escuro e listrado (não visto nesta noite); quadros pretos com HUD de 1–5 s (Ougi "Linked" da CPU, cargas), na mesma quantidade de antes |
-| Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção (não conferido no PCSX2) |
+| Tela de vitória / resultado | parcial | `f00dd5b` | RP5, Cube, Odin 3 (16:9 e 20:9) | rota v3 gravada | WINNER, resultado e menu nas duas lutas; fantasma da luta 2 corrigido (SCANMSK, `3d79104`). Falta a rota completa (campanha, pausa, sair) e os mods. Vitória da CPU vai direto à seleção, igual ao PCSX2 (11-09 06:09) |
 | Campanha (Master Mode) | parcial | `good-20261105-1` (`HiddenLeaf-20261105-*.apk`) | RP5, Cube, Odin 3 (16:9 e 20:9) | rota de campanha gravada (`f1_*_camp`), pausa e saída | Odin 50; Cube 49,6/50/42,2; RP5 43,7/46,4/36,7 (VU1). Abaixo de 50 fps o som seca (fila até 0,1 ms no RP5 e no Cube): o jogo produz menos som que o tempo real |
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | não testado | | | | câmera larga ligada pelo `ADV` |
@@ -55,6 +55,24 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-09 06:09, manhã: vitória da CPU vai à seleção também no PCSX2; luta 1 igual ao PCSX2 até v9400 (PC)
+
+- **Vitória da CPU:** a rota `route_v3` seguida de ✕ a cada 150 vsyncs leva a luta 1 até a vitória da CPU, e
+  `HLB_SHOTV` tirou um quadro a cada 200 vsyncs nos dois lados (recomp +27). O PCSX2 também vai direto à seleção de
+  personagem, sem WINNER nem resultado. O recomp faz igual: não é defeito. A observação "(não conferido no PCSX2)" da
+  tabela fica respondida.
+- **Divergência na mesma corrida:**
+  - Os quadros eram iguais até o tempo 75; no 73, a CPU do recomp faz um Ougi que a do PCSX2 não faz.
+  - O `hlbench.py diff` aponta o quadro 882 da "luta 2" da bancada (a parte depois do Ougi, que a bancada conta como
+    luta nova, com o RNG igual nos dois lados: `mti 354`, `mt dac20b1d`). A CPU começa a ação 8 no recomp (chakra 15 →
+    12) e fica na 0 no PCSX2. As chamadas do RNG só divergem no quadro 912.
+- **Causa: a rota, não o recomp.**
+  - Os ✕ depois do KO eram por vsync absoluto (a partir de v9000), mas a luta do recomp anda 27 vsyncs atrás. Esse ✕
+    cai no quadro ~876 no recomp e ~889 no PCSX2, e a CPU reage ao botão do jogador.
+  - Sem esses ✕ (corridas `pnx`/`rnx`), o estado de jogo (posição, vida, chakra e ação dos dois) é igual em todas as
+    2208 chamadas até v9400.
+  - Regra para a bancada: botões dentro da luta, só por quadro (`HLB_FROUTE`), nunca por vsync.
 
 ### 2026-11-09 05:16, madrugada: campanha em 20:9 no RP5 (`wm size 2400x1080`)
 
