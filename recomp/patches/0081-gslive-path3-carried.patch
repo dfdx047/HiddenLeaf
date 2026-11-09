@@ -1,0 +1,42 @@
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index a9f0a78..061f071 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -58,8 +58,16 @@ namespace
+     const bool g_carryLog = std::getenv("HL_GIFCARRY_LOG") != nullptr;
+ }
+ 
+-static void deliverCarried(const GifArbiter::ProcessPacketFn &process, GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
++static void deliverCarried(const GifArbiter::ProcessPacketFn &processGs, GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
+ {
++    // (the Android GS, hl_gslive, gets the same pieces: whole tags, an IMAGE's later data with a tag of its own)
++    const auto process = [&processGs, pathId](const uint8_t *d, uint32_t n)
++    {
++#if defined(PS2X_HEADLESS_HOST)
++        hl_gslive::transfer(static_cast<int>(pathId), d, n);
++#endif
++        processGs(d, n);
++    };
+     if (pathId != GifPathId::Path3)
+     {
+         process(data, sizeBytes);
+@@ -130,9 +138,6 @@ void GifArbiter::processNow(GifPathId pathId, const uint8_t *data, uint32_t size
+ {
+     if (!data || sizeBytes < 16 || !m_processFn)
+         return;
+-#if defined(PS2X_HEADLESS_HOST)
+-    hl_gslive::transfer(static_cast<int>(pathId), data, sizeBytes);
+-#endif
+     hl_perf::Scope parse(hl_perf::kGifParse);
+     deliverCarried(m_processFn, pathId, data, sizeBytes);
+ }
+@@ -161,9 +166,6 @@ void GifArbiter::drain()
+         auto &pkt = m_queue[i];
+         if (!pkt.data.empty())
+         {
+-#if defined(PS2X_HEADLESS_HOST)
+-            hl_gslive::transfer(static_cast<int>(pkt.pathId), pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+-#endif
+             hl_perf::Scope parse(hl_perf::kGifParse);
+             deliverCarried(m_processFn, pkt.pathId, pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
+         }

@@ -56,6 +56,33 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 04:30, madrugada: as correções do PC no Android (RP5: rota do PC até a luta e o KO)
+
+**`libun5.so` nova**, com tudo o que entrou no PC desde 5/11: `0071`–`0082`, o unstub de `un5.py` e os setores reais.
+Dois consertos para compilar e rodar no Android:
+- **`0082-vmul-error-fma-on-arm.patch`:** o `0071` usava `_mm_fmadd_ps` no aarch64, e o shim SSE→NEON não tem essa
+  função; o Android não compilava desde o `0071`. Agora é `vfmaq_f32(-r, a, b)`, a mesma conta fundida.
+- **`0081-gslive-path3-carried.patch`:** o `hl_gslive::transfer` (GS do ARMSX2 e renderizador nativo) recebia o
+  pacote cru. Com o unstub, o jogo manda a tag `IMAGE` num DMA e os pixels em outro, e o `trimLastTag` reescreveria essa
+  tag com NLOOP 0 e EOP. Os pixels chegariam sem tag e seriam lidos como tags. Agora o `deliverCarried` (`0077`) entrega
+  os mesmos pedaços remendados ao GS do runtime e ao `hl_gslive`. O renderizador nativo continua a subida aberta pelo
+  `TRXDIR` com cada `IMAGE` seguinte, então a continuação encaixa. No PC nada muda (`PS2X_HEADLESS_HOST`).
+- O VIF1 do Nominum (`NOMINUM_VU1=1`, desligado por padrão) não tem a correção do V2/V3 (`0079`): o repositório dele é
+  só leitura daqui. Fica anotado.
+
+**Aparelhos:**
+- `hl_lbn.txt` posto à mão em `files/runtime/data/` no RP5 e no Odin 2 Mini. O importador ainda não o grava.
+- **RP5 (`rec/pc3_rp5`, `hl_env_pc3.txt`: a `route_v3` do PC, ✕ a cada 150 vsyncs depois, `HL_FAST_UNTIL=5300`):**
+  - menus, seleção, carga e luta até o KO, depois a seleção (a CPU vence);
+  - nativo ligado do v5429 ao v9506;
+  - na luta, a nuvem da substituição, a poeira, os clarões e os golpes;
+  - som tocando, ~50 vsyncs/s, sem trava até o v9897.
+- **Cube:** sem a base do jogo (a pasta `files/` não existe). Precisa importar a ISO no app.
+- **Odin 3:** fora da rede (o `192.168.1.134` não responde).
+
+**Não é a rota completa** (falta a campanha, a pausa e a saída), nem passou nos 3 aparelhos e no 20:9. Nada disto
+conta como corrigido.
+
 ### 2026-11-09 04:05, madrugada: Ougi igual ao PCSX2 no PC
 
 - **Hora (correção):** a entrada de baixo, marcada 03:45, foi escrita às 03:38 (`date` do commit `1a944ff`).
