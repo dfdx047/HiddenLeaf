@@ -108,11 +108,10 @@ data class Placement(val x: Float, val y: Float, val scale: Float = 1f, val visi
 
 /** Which controls each scene has, and where they start. A control missing from a scene is not on screen in it. */
 object PadDefaults {
+    // (the scene and the controller's options are in the game menu's Layout tab now: only the menu and START up here)
     private val top = listOf(
-        Ctl.SCENE to Placement(0.37f, 0.075f),
-        Ctl.MENU to Placement(0.47f, 0.075f),
-        Ctl.OPTIONS to Placement(0.53f, 0.075f),
-        Ctl.START to Placement(0.63f, 0.075f),
+        Ctl.MENU to Placement(0.44f, 0.075f),
+        Ctl.START to Placement(0.56f, 0.075f),
     )
 
     val FIGHT: Map<Ctl, Placement> = linkedMapOf(
@@ -186,6 +185,7 @@ data class TouchConfig(
     val autoMode: Boolean = true,   // the scene follows the game (the SCENE button still overrides)
     val classicPlaces: Map<String, Placement> = emptyMap(), // the classic layout's own moved controls (by ClassicCtl name)
     val macros: List<Macro> = emptyList(),
+    val menuTouch: Boolean = true,  // the game's menus by gestures, no buttons on screen (NinjaPadView.menuGesture)
 ) {
     fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
@@ -201,6 +201,7 @@ data class TouchConfig(
         put("places", JSONObject().apply { places.forEach { (k, p) -> put(k, p.json()) } })
         put("layout", layout.name)
         put("autoMode", autoMode)
+        put("menuTouch", menuTouch)
         put("classicPlaces", JSONObject().apply { classicPlaces.forEach { (n, p) -> put(n, p.json()) } })
         put("macros", JSONArray().apply {
             macros.forEach { m ->
@@ -258,6 +259,7 @@ data class TouchConfig(
                 autoMode = o.optBoolean("autoMode", true),
                 classicPlaces = classic,
                 macros = macros,
+                menuTouch = o.optBoolean("menuTouch", true),
             )
         }
 

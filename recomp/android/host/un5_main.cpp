@@ -592,6 +592,8 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         g_settings.aspectMilli = std::atoi(wide);
     if (const char *f = std::getenv("HL_FPS_MODE"))
         g_settings.fpsMode = std::atoi(f);
+    if (const char *f = std::getenv("HL_FILTER")) // (0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS: the measurement matrix)
+        g_settings.filter = std::atoi(f);
     const float upscale = static_cast<float>(g_settings.scale4) / 4.0f;
     static const std::string gsxRoot = root + "/gsx", ini = gsxRoot + "/un5.ini";
     writeIni(ini, upscale);

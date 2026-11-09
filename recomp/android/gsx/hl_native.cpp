@@ -2212,6 +2212,9 @@ void main()
 		if (ms >= 1000)
 		{
 			s_presentRate.store(static_cast<int>(s_presents * 1000 / ms), std::memory_order_relaxed);
+			static const bool s_log = std::getenv("HL_PERF") != nullptr;
+			if (s_log) // (the measurement matrix, build/lab/matrix.sh, reads these)
+				std::fprintf(stderr, "[present] v%llu %u pictures in %lld ms\n", static_cast<unsigned long long>(s_vsync), s_presents, static_cast<long long>(ms));
 			s_presents = 0u;
 			s_presentsFrom = now;
 		}

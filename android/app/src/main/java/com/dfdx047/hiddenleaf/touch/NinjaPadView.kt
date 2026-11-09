@@ -158,7 +158,10 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             val cy = (insetT + p.y * safeH).coerceIn(insetT + my, height - insetB - my)
             els += El(key, ctl, macro, kind, cx, cy, w, h, p.scale, p.visible, p.opacity)
         }
+        val gestures = scene == PadScene.MENU && config.menuTouch
         for (c in Ctl.entries) {
+            if (c == Ctl.SCENE || c == Ctl.OPTIONS) continue
+            if (gestures && c != Ctl.MENU && c != Ctl.START) continue // (START: the title screen and the 2P join)
             val p = config.placeOf(scene, c) ?: continue
             place("${scene.name}.${c.name}", c, null, c.kind, c.size, p)
         }
@@ -266,6 +269,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     private fun releaseAll() {
+        handler.removeCallbacks(gRepeat); handler.removeCallbacks(gHold); gActive = false; gDir = 0; gPulse = 0
         tracks.clear()
         pressed.clear()
         dpadBits = 0
@@ -303,6 +307,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             return true
         }
         if (editing) return editTouch(ev)
+        if (scene == PadScene.MENU && config.menuTouch && menuGesture(ev)) return true
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = ev.actionIndex
@@ -319,6 +324,112 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     private fun shown(e: El) = editing || e.visible
+
+    // ---- the game's menus by touch (no buttons on screen; the Controls tab of the game menu lists these)
+    //  tap ✕ (OK) · slide: the direction, held: it repeats · hold still: ○ · two fingers: △ (back) · two fingers
+    //  sliding left/right: L1/R1 · two fingers held: □ · three fingers: START
+    private var gDownX = 0f
+    private var gDownY = 0f
+    private var gFingers = 0
+    private var gDir = 0
+    private var gDone = false   // this gesture already pressed something (a slide, a hold)
+    private var gActive = false
+    private var gPulse = 0
+    private val gRelease = Runnable { gPulse = 0; recomputeMenu() }
+    private val gRepeat = object : Runnable {
+        override fun run() {
+            if (gDir == 0) return
+            pulse(gDir)
+            handler.postDelayed(this, MENU_REPEAT_MS)
+        }
+    }
+    private val gHold = Runnable {
+        if (gDone || gDir != 0) return@Runnable
+        gDone = true
+        pulse(if (gFingers >= 2) Ps2.SQUARE else Ps2.CIRCLE)
+    }
+
+    private fun recomputeMenu() {
+        val packed = (gPulse.toLong() shl 16) or (128L shl 8) or 128L
+        if (packed != lastSent) {
+            lastSent = packed
+            listener?.onPad(gPulse, 128, 128, 128, 128)
+        }
+    }
+
+    /** One press of [bits] long enough for the game's menus to see (they read the pad once a frame, 25 or 50 a second). */
+    private fun pulse(bits: Int) {
+        handler.removeCallbacks(gRelease)
+        gPulse = bits
+        buzz()
+        recomputeMenu()
+        handler.postDelayed(gRelease, MENU_PRESS_MS)
+    }
+
+    private fun menuGesture(ev: MotionEvent): Boolean {
+        val slide = 26 * dp
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // the menu button and START stay buttons
+                if (find(ev.x, ev.y, 1.2f, setOf(CtlKind.SYSTEM, CtlKind.PILL)) != null) return false
+                gActive = true; gDownX = ev.x; gDownY = ev.y; gFingers = 1; gDir = 0; gDone = false
+                handler.postDelayed(gHold, MENU_HOLD_MS)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (!gActive) return false
+                gFingers = maxOf(gFingers, ev.pointerCount)
+                gDownX = (0 until ev.pointerCount).map { ev.getX(it) }.average().toFloat()
+                gDownY = (0 until ev.pointerCount).map { ev.getY(it) }.average().toFloat()
+                handler.removeCallbacks(gHold)
+                handler.postDelayed(gHold, MENU_HOLD_MS)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!gActive) return false
+                val x = (0 until ev.pointerCount).map { ev.getX(it) }.average().toFloat()
+                val y = (0 until ev.pointerCount).map { ev.getY(it) }.average().toFloat()
+                val dx = x - gDownX
+                val dy = y - gDownY
+                if (gFingers >= 2) {
+                    if (!gDone && abs(dx) > slide * 1.5f && abs(dx) > abs(dy)) {
+                        gDone = true
+                        handler.removeCallbacks(gHold)
+                        pulse(if (dx < 0) Ps2.L1 else Ps2.R1)
+                    }
+                } else if (hypot(dx, dy) > slide) {
+                    val dir = if (abs(dx) > abs(dy)) (if (dx < 0) Ps2.LEFT else Ps2.RIGHT) else (if (dy < 0) Ps2.UP else Ps2.DOWN)
+                    handler.removeCallbacks(gHold)
+                    if (dir != gDir) {
+                        // a new direction: one step now, then steps while the finger stays out
+                        gDir = dir; gDone = true
+                        handler.removeCallbacks(gRepeat)
+                        pulse(dir)
+                        handler.postDelayed(gRepeat, MENU_REPEAT_FIRST_MS)
+                    }
+                    // back over the start: one more slide starts again from here
+                } else if (gDir != 0) {
+                    gDir = 0
+                    handler.removeCallbacks(gRepeat)
+                    gDownX = x; gDownY = y
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {}
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (!gActive) return false
+                gActive = false
+                handler.removeCallbacks(gHold)
+                handler.removeCallbacks(gRepeat)
+                gDir = 0
+                if (!gDone && ev.actionMasked == MotionEvent.ACTION_UP) {
+                    pulse(when {
+                        gFingers >= 3 -> Ps2.START
+                        gFingers == 2 -> Ps2.TRIANGLE
+                        else -> Ps2.CROSS
+                    })
+                }
+            }
+        }
+        return true
+    }
 
     private fun find(x: Float, y: Float, slack: Float = 1.12f, kinds: Set<CtlKind>? = null): El? =
         els.filter { shown(it) && (kinds == null || it.kind in kinds) && it.hit(x, y, slack) }.minByOrNull { hypot(x - it.cx, y - it.cy) }
@@ -1050,6 +1161,10 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     companion object {
         private const val SCENE_HOLD_MS = 500L
         private const val SCENE_LEAVE_MS = 2500L
+        private const val MENU_PRESS_MS = 90L          // (2 to 4 of the game's frames)
+        private const val MENU_HOLD_MS = 550L
+        private const val MENU_REPEAT_FIRST_MS = 380L
+        private const val MENU_REPEAT_MS = 150L
         private val ORANGE = Color.rgb(255, 122, 26)
         private val AMBER = Color.rgb(255, 177, 59)
         private val SASUKE_LIGHT = Color.rgb(169, 182, 255)
