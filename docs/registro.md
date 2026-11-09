@@ -56,6 +56,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 13:47, tarde: o A35 (NTSC) 21 linhas acima do PCSX2, corrigido (`0084`, `3d5bdb2`); conversas na Alpha 1.1X
+
+- **Imagem do A35:** o A35 é a versão americana (`SLUS_556.06`, NTSC). No Odin, o título e os menus saíam 21 linhas
+  acima do PCSX2: faixa preta de 51 px embaixo, topo cortado ("Selecionar modo", a borda da lista de saves). O
+  PCSX2 da bancada (`run.sh`, `HLB_SHOTV`, ISO `UN6 A35.iso`) mostra o título inteiro. Causa: o `SMODE1` ficava em 0, e
+  a saída usava o valor PAL fixo do `hl_gs_live` (`0051`). O jogo pede o modo pelo `sceGsResetGraph` do runtime, que não
+  escrevia o `SMODE1`. `0084`: `sceGsResetGraph` e `SetGsCrt` põem o valor do BIOS para o modo pedido (CMOD 2 NTSC,
+  3 PAL). Depois disso, 0 linhas pretas no título do A35 e a lista de saves inteira. Na base, nada muda: modo 3,
+  50 Hz, título sem faixa.
+- **`libun5_un6_a35.so` estava velha** (05:06, sem o gancho das conversas e as mudanças do dia): refeita.
+- **Conversas da campanha:** na Alpha 1.1X (roda com a `libun5` da base, ADV igual), o mesmo teste da base: um toque
+  de 10 ms no Ataque perto do Jiraiya, conversa sem botões de luta, toques no meio passam as falas, e os controles da
+  campanha voltam no fim. O A35 não tem campanha: no menu de modos só há Combate Livre, Praticar e Opções. A função
+  `0x723970` do ADV do A35 é igual à da base.
+- **Menus do A35 por toque** (jogando, sem rota): carregar o save, Sim, Ok, girar a roda de modos deslizando, entrar
+  na seleção, voltar com dois dedos (△). Dois dedos de verdade pelo `sendevent` no `hyn_ts`
+  (`build/lab/gest/two.sh`; o `TRACKING_ID` vai só até 5).
+- **Aberto:** na seleção do A35 a grade de rostos termina cortada à direita nos dois lados. Não comparei com o PCSX2.
+
 ### 2026-11-09 10:10, manhã: conversas da campanha com os controles dos menus, e toque mínimo de 80 ms
 
 - **Correção de horários:** as entradas "09:50" e "10:00" foram escritas às 09:39 e às 09:43 (relógio do PC).
