@@ -102,7 +102,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text(stringResource(R.string.aspect), style = MaterialTheme.typography.titleSmall)
             ChipRow(
                 options = listOf(
-                    "4:3" to 1333, "16:10" to 1600, "16:9" to 1778, "20:9" to 2222, stringResource(R.string.aspect_screen) to 0,
+                    "4:3" to 1333, "16:9" to 1778, "20:9" to 2222, stringResource(R.string.aspect_screen) to 0,
                 ),
                 selected = get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT),
                 onSelect = { vm.setting(EngineSettings.ASPECT, it) },
@@ -124,8 +124,8 @@ fun SettingsScreen(vm: AppViewModel) {
             ChipRow(
                 options = listOf(
                     "30" to 30, stringResource(R.string.panel_fps_50) to 50,
-                    stringResource(R.string.panel_fps_60) to 60, stringResource(R.string.panel_fps_120) to 120,
-                ).filter { it.second != 120 || com.dfdx047.hiddenleaf.engine.DisplayCaps.offers120(context) },
+                    stringResource(R.string.panel_fps_60) to 60, "90" to 90, stringResource(R.string.panel_fps_120) to 120,
+                ), // (90 and 120 on every screen: above the panel's rate the extra pictures are drawn but not seen)
                 selected = get(EngineSettings.FPS_MODE, 50),
                 onSelect = { vm.setting(EngineSettings.FPS_MODE, it) },
             )
