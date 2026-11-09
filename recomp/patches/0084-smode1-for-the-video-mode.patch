@@ -1,0 +1,29 @@
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -819,6 +819,11 @@
+             if (runtime)
+             {
+                 runtime->eeScheduler().setVideoMode(omode);
++                // SMODE1 as the BIOS sets it for this mode (CMOD 2 NTSC, 3 PAL): the output's window follows it
++                if (omode == 2u)
++                    runtime->memory().gs().smode1 = 0x0000000740834504ull;
++                else if (omode == 3u)
++                    runtime->memory().gs().smode1 = 0x0000000740836504ull;
+             }
+             g_gparam.ffmode = static_cast<uint8_t>(ffmode & 0x1);
+             writeGsGParamToScratch(runtime);
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -17,6 +17,12 @@
+                 ((static_cast<uint64_t>(frameMode) & 0x1ull) << 1);
+ 
+             gs.smode2 = smode2;
++            // What the BIOS writes to SMODE1 for the mode asked: CMOD 2 for NTSC, 3 for PAL. The display window comes from it;
++            // left at 0 the output takes PAL's, and an NTSC game (the A35, SLUS-55606) shows 21 lines too high.
++            if (videoMode == 2)
++                gs.smode1 = 0x0000000740834504ull;
++            else if (videoMode == 3)
++                gs.smode1 = 0x0000000740836504ull;
+             runtime->eeScheduler().setVideoMode(static_cast<uint32_t>(videoMode));
+ 
+             // Keep CRT1 enabled after the BIOS syscall selects a display mode.
