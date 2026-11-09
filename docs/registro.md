@@ -56,6 +56,23 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:40, manhã: Alpha 1.1X no Odin 2 Mini, com menus em widescreen e rota relativa
+
+- **Montagem** (`rec/o2_a11x`):
+  - `un5_mods.txt` = `modlib/un6-a11x/disc`, sem `modlib/mods.txt`;
+  - o log diz `mod program …/un6-a11x`;
+  - rota `build/lab/hl_env_a11x_r.txt`;
+  - no fim, voltou o A35 (`mods.txt` `1|un6-a35`, `un5_mods.txt`).
+- **Menus:** o título da Alpha (idiomas em português), Mode Select, Select Character com Linked Mode, NOW LOADING e
+  "Start Battle" ocupam a tela inteira, na proporção.
+- **Luta 1:**
+  - 49,8 a 49,9 fps (`ana.py`);
+  - Ougi do jogador com o filme "Linked" (Naruto e Sakura);
+  - KO, WINNER "Naruto Uzumaki", resultado (Health 70, Time 94, Bonus 1161, 176 Ryo), seleção.
+- **Luta 2:** a CPU venceu, embora a vida dela tenha baixado três vezes (a CPU acertou o jogador antes). O jogo voltou
+  direto à seleção, igual ao PCSX2 (06:09).
+- **Linha da tabela "UN6 Alpha 1.1X":** agora com a rota inteira gravada no Odin 2 Mini, incluindo WINNER e resultado.
+
 ### 2026-11-09 08:25, manhã: duas lutas com vitória do jogador e WINNER e resultado em widescreen (Odin 2 Mini)
 
 - **Rota** `build/lab/hl_env_v3w2.txt`:
