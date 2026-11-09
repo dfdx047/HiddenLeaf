@@ -13,6 +13,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Handler
+import android.os.SystemClock
 import android.os.Looper
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -189,6 +190,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     private var ly = 128
     private var lastSent = -1L
     private val pressed = HashSet<El>()
+    private val pressedAt = HashMap<El, Long>() // when each button went down (for MIN_HOLD_MS)
     private val players = HashMap<String, Player>()
     private val handler = Handler(Looper.getMainLooper())
 
@@ -258,7 +260,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                     android.util.Log.i("un5", "touch: scene $s")
                     releaseAll()
                     scene = when (s) {
-                        1 -> PadScene.MENU
+                        1, 4 -> PadScene.MENU // (4: a conversation of the campaign, the player held)
                         3 -> PadScene.CAMPAIGN
                         else -> PadScene.FIGHT
                     }
@@ -445,7 +447,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         if (e == null) return
         when (e.kind) {
             CtlKind.BUTTON, CtlKind.SHOULDER, CtlKind.PILL, CtlKind.SYSTEM -> {
-                pressed += e; buzz(); recompute()
+                pressed += e; pressedAt[e] = SystemClock.uptimeMillis(); buzz(); recompute()
             }
             CtlKind.DPAD -> {
                 dpadBits = dpadDir(e, x, y); buzz(); recompute()
@@ -498,7 +500,16 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val e = t.el ?: return
         when (e.kind) {
             CtlKind.BUTTON, CtlKind.SHOULDER, CtlKind.PILL -> {
-                if (tracks.values.none { it.el === e }) pressed -= e
+                // a quick tap stays down MIN_HOLD_MS: the campaign reads the pad every other vsync, and a tap shorter than
+                // that was lost (talking to Jiraiya, docs/registro.md 2026-11-09)
+                val left = MIN_HOLD_MS - (SystemClock.uptimeMillis() - (pressedAt[e] ?: 0L))
+                if (left > 0L) {
+                    handler.postDelayed({
+                        if (tracks.values.none { it.el === e } && pressed.remove(e)) recompute()
+                    }, left)
+                } else if (tracks.values.none { it.el === e }) {
+                    pressed -= e
+                }
                 recompute()
             }
             CtlKind.DPAD -> {
@@ -1161,6 +1172,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     companion object {
         private const val SCENE_HOLD_MS = 500L
         private const val SCENE_LEAVE_MS = 2500L
+        private const val MIN_HOLD_MS = 80L           // (a button down at least this long: 2 vsyncs and a margin)
         private const val MENU_PRESS_MS = 90L          // (2 to 4 of the game's frames)
         private const val MENU_HOLD_MS = 550L
         private const val MENU_REPEAT_FIRST_MS = 380L

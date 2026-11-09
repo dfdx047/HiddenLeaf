@@ -56,7 +56,7 @@ object TouchBridge {
     private var logged = false
 
     fun scene(): Int = if (nativeMissing) 0 else try {
-        nativeScene().coerceIn(0, 3)
+        nativeScene().coerceIn(0, 4)
     } catch (t: Throwable) {
         // (the launcher's own process has no engine: ask once, not three times a second with an error each time)
         if (t is UnsatisfiedLinkError) nativeMissing = true

@@ -56,6 +56,32 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 10:10, manhã: conversas da campanha com os controles dos menus, e toque mínimo de 80 ms
+
+- **Correção de horários:** as entradas "09:50" e "10:00" foram escritas às 09:39 e às 09:43 (relógio do PC).
+- **O sinal "jogador com controle" no ADV:** `HL_FNCOUNT=<as 7032 funções do ADV>` com
+  `HL_FNCOUNT_WIN=6800:7600,8300:8900` (`ramd/fnstand`, rota até v8100, jogador parado) e
+  `6800:7600,8200:8800` (`ramd/fnwalk`, andando).
+  - Onze funções rodam uma vez por quadro de lógica (300 em 600 vsyncs) parado **e** andando, e nunca no diálogo:
+    `723970`, `723c20`, `755a20`, `755f20`, `7562a0`, `7b9630`, `7b9d20`, `7ba270`, `7ba7c0`, `7c4750`, `7c47c0`.
+  - A tabela do ADV tem 511.209 entradas, porque guarda também o meio das funções. A lista certa sai dos nomes
+    `gen/ovl/modules/adv_sub_*`; o teto da contagem subiu para 8192.
+- **Uso** (`hl_game.cpp`):
+  - `0x723970` vira gancho na tabela do ADV (`advFree`, guarda o vsync);
+  - na campanha, se ela não roda há mais de 15 vsyncs, `hl_game::scene()` responde **4** e o launcher põe os
+    controles dos menus em 0,5 s (`NinjaPadView`: 4 → `PadScene.MENU`; `TouchBridge.scene` aceita 0 a 4);
+  - um toque vira ✕ e avança a fala;
+  - só vale depois que a função rodou uma vez, para que um mod com outro ADV fique como antes. Por isso a primeira
+    conversa da campanha, antes de o jogador andar, ainda mostra os botões de campanha;
+  - `HL_TALK_OFF=1` desliga.
+- **Toque mínimo:** um toque curto no ○ (Talk) se perdia na campanha, que lê o pad a cada 2 vsyncs. Botões, gatilhos e
+  pílulas agora ficam apertados **pelo menos 80 ms** (`MIN_HOLD_MS`).
+- **Teste real** (`gest/talk2.sh 1612 800`, `HOLD=10`, `gest/talk2/sheet.png`):
+  - a rota passa a primeira conversa e deixa o jogador parado, com os controles de campanha na tela;
+  - um toque de 10 ms no Ataque abre "Well, let's go see Tsunade…" **sem os botões de luta** (só MENU e START);
+  - os toques no meio da tela avançam a conversa, e os controles de campanha voltam no fim.
+  - Antes: com 10 ms nada acontecia, e com 250 ms a fala abria, mas os botões só saíam depois de 2,5 s.
+
 ### 2026-11-09 10:00, manhã: diálogo da campanha, funções do ADV que leem o pad (aberto)
 
 - **Ferramenta nova:** `HL_FNCOUNT=ADDR,...` (`hl_game.cpp`, só depuração).

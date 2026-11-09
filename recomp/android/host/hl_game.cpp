@@ -507,9 +507,10 @@ namespace
             SET_GPR_U32(ctx, 2, 1u);
     }
 
-    // HL_FNCOUNT=ADDR,... (hex, ADV.BIN's functions, debugging): how many times each ran, a line every 50 vsyncs ("[fn]"),
-    // for finding which of them run in one state of the game and not in another (docs/registro.md 2026-11-09)
-    constexpr int kCountMax = 64;
+    // HL_FNCOUNT=ADDR,... or all (hex, ADV.BIN's functions, debugging): how many times each ran, a line every 50 vsyncs
+    // ("[fn]"), for finding which of them run in one state of the game and not in another (docs/registro.md 2026-11-09).
+    // HL_FNCOUNT_WIN=A0:A1,B0:B1 (vsyncs) instead: the functions that ran only in window A or only in window B, at B1.
+    constexpr int kCountMax = 8192;
     PS2Runtime::RecompiledFunction g_countOriginal[kCountMax] = {};
     uint32_t g_countAddress[kCountMax] = {}, g_countCalls[kCountMax] = {};
     int g_countUsed = 0;
@@ -529,6 +530,18 @@ namespace
             return;
         s_done = true;
         static constexpr auto kCalls = countCalls(std::make_integer_sequence<int, kCountMax>{});
+        if (std::strcmp(list, "all") == 0)
+        {
+            for (uint32_t slot = 0; slot < un5_adv_slots && g_countUsed < kCountMax; ++slot)
+                if (un5_adv_table[slot] != nullptr)
+                {
+                    g_countOriginal[g_countUsed] = un5_adv_table[slot];
+                    g_countAddress[g_countUsed] = un5_adv_base + slot * 4u;
+                    un5_adv_table[slot] = kCalls[g_countUsed];
+                    ++g_countUsed;
+                }
+            list = "";
+        }
         for (const char *p = list; *p && g_countUsed < kCountMax;)
         {
             char *e;
@@ -549,7 +562,35 @@ namespace
     }
     void logCounts(uint64_t tick)
     {
-        if (g_countUsed == 0 || tick % 50u != 0u)
+        if (g_countUsed == 0)
+            return;
+        static uint64_t s_win[4] = {};
+        static const bool s_windows = [] {
+            const char *w = std::getenv("HL_FNCOUNT_WIN");
+            unsigned long long v[4];
+            if (w == nullptr || std::sscanf(w, "%llu:%llu,%llu:%llu", &v[0], &v[1], &v[2], &v[3]) != 4)
+                return false;
+            for (int i = 0; i < 4; ++i)
+                s_win[i] = v[i];
+            return true;
+        }();
+        if (s_windows)
+        {
+            static uint32_t s_a[kCountMax];
+            if (tick == s_win[0] || tick == s_win[2])
+                std::fill(g_countCalls, g_countCalls + g_countUsed, 0u);
+            else if (tick == s_win[1])
+                std::copy(g_countCalls, g_countCalls + g_countUsed, s_a);
+            else if (tick == s_win[3])
+            {
+                for (int i = 0; i < g_countUsed; ++i)
+                    if ((s_a[i] == 0u) != (g_countCalls[i] == 0u))
+                        std::fprintf(stderr, "[fn] only %s %x: %u calls\n", s_a[i] != 0u ? "A" : "B", g_countAddress[i], s_a[i] + g_countCalls[i]);
+                std::fprintf(stderr, "[fn] windows done\n");
+            }
+            return;
+        }
+        if (tick % 50u != 0u)
             return;
         std::string line;
         for (int i = 0; i < g_countUsed; ++i)
@@ -563,9 +604,31 @@ namespace
         std::fprintf(stderr, "[fn] v%llu%s\n", static_cast<unsigned long long>(tick), line.c_str());
     }
 
+    // ADV.BIN (the campaign): 0x723970 runs once a frame of the game's logic while the player can move (standing or walking)
+    // and never while a conversation, its tutorials or a cut scene hold the player; ten more do the same (0x723C20, 0x755A20,
+    // 0x7B9630...). Found with HL_FNCOUNT_WIN over every ADV function: dialog v6800-7600 against standing (v8300-8900) and
+    // walking (v8200-8800) on the campaign route (docs/registro.md 2026-11-09).
+    constexpr uint32_t kAdvFree = 0x723970u;
+    PS2Runtime::RecompiledFunction g_advFreeOriginal = nullptr;
+    uint64_t g_advFreeTick = 0;
+    void advFree(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        g_advFreeTick = g_tick;
+        g_advFreeOriginal(rdram, ctx, runtime);
+    }
+
     // BTL.BIN's functions are in its own table (recomp/overlays.py), which answers only while it is the one in memory.
     void hookOverlay()
     {
+        if (&un5_adv_table != nullptr && g_advFreeOriginal == nullptr && kAdvFree >= un5_adv_base)
+        {
+            const uint32_t slot = (kAdvFree - un5_adv_base) >> 2;
+            if (slot < un5_adv_slots && un5_adv_table[slot] != nullptr)
+            {
+                g_advFreeOriginal = un5_adv_table[slot];
+                un5_adv_table[slot] = advFree;
+            }
+        }
         if (&un5_btl_table == nullptr || g_promptOriginal != nullptr)
             return;
         const uint32_t slot = (kPromptPressed - un5_btl_base) >> 2;
@@ -1190,5 +1253,12 @@ int hl_game::scene()
     }
     else if (s_scene != 1 && (now - s_lastOn > (s_scene == 2 ? 2000u : 8000u) || (s_scene == 2 ? mode != 1 : mode != 2)))
         s_scene = 1;
+    // In the campaign, while the player cannot move (a conversation, a tutorial's box, a cut scene) the touch controls are the
+    // menu's: the fight's buttons leave the text alone and a tap is ✕, which moves the conversation on. Only once the game
+    // has shown it is the ADV this knows (the player moved at least once): a mod whose ADV is another keeps the campaign's
+    // controls. HL_TALK_OFF=1 keeps them too.
+    static const bool s_talkOff = std::getenv("HL_TALK_OFF") != nullptr;
+    if (s_scene == 3 && mode == 2 && !s_talkOff && g_advFreeTick != 0u && tick - g_advFreeTick > 15u)
+        return 4; // (the launcher takes it as the menu's controls, at once: no wait for a loading screen's flicker)
     return s_scene;
 }
