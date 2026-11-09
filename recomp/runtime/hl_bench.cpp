@@ -33,8 +33,10 @@
 
 #include <csignal>
 #include <mutex>
+#include <fstream>
 extern std::mutex g_hlGifCapMutex;
 extern std::FILE *g_hlGifCap;
+extern std::FILE *g_hlVuCap;
 
 namespace
 {
@@ -65,6 +67,18 @@ namespace
     constexpr uint32_t kCdRead = 0x174308u, kCdSync = 0x1738D0u;
     uint32_t s_cdBusy = 0, s_cdReadVsync = 0;
     bool s_cdLog = false; // HLB_CDLOG=1: "v.. cdread lbn .. sectors .." at each EE sceCdRead, as the PCSX2 side's HLB_CDLOG
+    // HLB_FROUTE="[fight.]frame:WORDS,...": buttons by the first fighter's frame (fight 1 by default), as the PCSX2 side's
+    struct FStep
+    {
+        uint32_t fight, frame;
+        std::string word;
+    };
+    std::vector<FStep> s_froute;
+    // HLB_OROUTE="ovl.off:WORDS,...": buttons off vsyncs after overlay ovl first appears; HLB_OSHOT=ovl,step,count: a shot
+    // (hl_shot) every step vsyncs from it, "v.. oshot N" (the PCSX2 side's)
+    std::vector<FStep> s_oroute;
+    uint32_t s_oshotOvl = 0, s_oshotStep = 0, s_oshotCount = 0, s_ovlSeen[64] = {};
+
     // HLB_RNGLOG=F,T: every call of the Mersenne Twister and of rand in frames F..T
     constexpr uint32_t kMtNext = 0x180BA0u, kRand = 0x17C558u;
     // and the game's helpers on top of it: a float in [0, f12) (0x1810D0), an int in [0, a0] (0x181020), a word (0x180FF0)
@@ -82,6 +96,7 @@ namespace
     // HLB_GIFCAP=F[,N]: the GIF packets of N vsyncs (6) from frame F of the first fighter of fight 1, in <prefix>_gif.cap
     // (the HL_GSCAP format, a 0xFF record at each vsync: tools/gscap.py); the writer is in the runtime's ps2_memory.cpp
     uint32_t s_gifCapAt = 0, s_gifCapN = 6, s_gifCapLeft = 0;
+    uint32_t s_vuCapAt = 0, s_vuCapN = 0, s_vuCapLeft = 0; // HLB_VU1CAP=F,N: each VU1 start in N vsyncs from fight 1's frame F
     // HLB_GIFCAPV=V,N: the same from vsync V (for the loading before a fight)
     uint32_t s_gifCapV = 0;
     // HLB_RAMV=V,V,...: the runtime's hl_ram dump (EE RAM, GS VRAM, VU1 data in hl_frames/) at these vsyncs
@@ -143,7 +158,15 @@ namespace
         }
         s_lastHook = s_vsync;
         if (f == s_first)
+        {
             ++s_frame;
+            for (const FStep &st : s_froute)
+                if (st.fight == s_fight && st.frame == s_frame)
+                {   // the runtime's hl_pad file (patch 0026): each button held 6 vsyncs and let go 6, from the next vsync
+                    std::ofstream("hl_pad", std::ios::app) << st.word << ' ';
+                    std::fprintf(s_txt, "v%u fight %u frame %u froute %s\n", s_vsync, s_fight, s_frame, st.word.c_str());
+                }
+        }
         if (s_mark && f == s_first)
             std::fprintf(stderr, "[hlb] v%u fight %u frame %u\n", s_vsync, s_fight, s_frame);
         if (f == s_first && std::find(s_ramAt.begin(), s_ramAt.end(), s_frame) != s_ramAt.end())
@@ -170,6 +193,14 @@ namespace
             std::fwrite(s_ram + (f & 0x1FFFFFFu), 1, kFighterBytes, s_bin);
             static uint8_t zero[kCameraBytes];
             std::fwrite(cam >= 0x100000u && cam < 0x2000000u ? s_ram + cam : zero, 1, kCameraBytes, s_bin);
+            if (s_vuCapAt != 0 && s_fight == 1 && f == s_first && s_frame == s_vuCapAt && s_vuCapLeft == 0)
+            {
+                std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
+                g_hlVuCap = std::fopen((s_prefix + "_vu1.cap").c_str(), "wb");
+                s_vuCapLeft = s_vuCapN;
+                s_vuCapAt = 0;
+                std::fprintf(s_txt, "v%u vu1cap fight %u frame %u\n", s_vsync, s_fight, s_frame);
+            }
             if (s_gifCapAt != 0 && s_fight == 1 && f == s_first && s_frame == s_gifCapAt && s_gifCapLeft == 0)
             {
                 std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
@@ -290,6 +321,18 @@ namespace
             s_gifCapLeft = s_gifCapN;
             std::fprintf(s_txt, "v%u gifcap\n", s_vsync);
         }
+        if (s_vuCapLeft != 0)
+        {
+            std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
+            const uint32_t h[2] = {0xFFu, s_vsync};
+            if (g_hlVuCap != nullptr)
+                std::fwrite(h, 4, 2, g_hlVuCap);
+            if (--s_vuCapLeft == 0 && g_hlVuCap != nullptr)
+            {
+                std::fclose(g_hlVuCap);
+                g_hlVuCap = nullptr;
+            }
+        }
         if (s_gifCapLeft != 0)
         {
             std::lock_guard<std::mutex> lock(g_hlGifCapMutex);
@@ -360,6 +403,24 @@ namespace
         {
             std::fprintf(s_txt, "v%u overlay %u\n", s_vsync, ovl);
             s_lastOverlay = ovl;
+            if (ovl < 64 && s_ovlSeen[ovl] == 0)
+                s_ovlSeen[ovl] = s_vsync;
+        }
+        for (const FStep &st : s_oroute)
+            if (st.fight < 64 && s_ovlSeen[st.fight] != 0 && s_vsync - s_ovlSeen[st.fight] == st.frame)
+            {
+                std::ofstream("hl_pad", std::ios::app) << st.word << ' ';
+                std::fprintf(s_txt, "v%u overlay %u +%u oroute %s\n", s_vsync, st.fight, st.frame, st.word.c_str());
+            }
+        if (s_oshotStep != 0 && s_oshotOvl < 64 && s_ovlSeen[s_oshotOvl] != 0)
+        {
+            const uint32_t d = s_vsync - s_ovlSeen[s_oshotOvl];
+            if (d % s_oshotStep == 0 && d / s_oshotStep < s_oshotCount)
+            {
+                if (FILE *t = std::fopen("hl_shot", "w"))
+                    std::fclose(t);
+                std::fprintf(s_txt, "v%u oshot %u\n", s_vsync, d / s_oshotStep);
+            }
         }
         if (s_quit != 0 && s_vsync >= s_quit)
         {
@@ -395,6 +456,37 @@ namespace
                 s_rngTo = *e ? static_cast<uint32_t>(std::strtoul(e + 1, nullptr, 0)) : s_rngFrom;
             }
             s_cdLog = std::getenv("HLB_CDLOG") != nullptr;
+            if (const char *r = std::getenv("HLB_OROUTE"))
+                for (const char *p = r; *p;)
+                {
+                    char *e;
+                    const uint32_t o = static_cast<uint32_t>(std::strtoul(p, &e, 10));
+                    if (*e != '.')
+                        break;
+                    const uint32_t off = static_cast<uint32_t>(std::strtoul(e + 1, &e, 10));
+                    if (*e != ':')
+                        break;
+                    const char *w = e + 1;
+                    const char *c = std::strchr(w, ',');
+                    s_oroute.push_back({o, off, std::string(w, c ? static_cast<size_t>(c - w) : std::strlen(w))});
+                    p = c ? c + 1 : w + std::strlen(w);
+                }
+            if (const char *v = std::getenv("HLB_OSHOT"))
+                std::sscanf(v, "%u,%u,%u", &s_oshotOvl, &s_oshotStep, &s_oshotCount);
+            if (const char *r = std::getenv("HLB_FROUTE"))
+                for (const char *p = r; *p;)
+                {
+                    char *e;
+                    uint32_t a = static_cast<uint32_t>(std::strtoul(p, &e, 10)), fight = 1;
+                    if (*e == '.')
+                        fight = a, a = static_cast<uint32_t>(std::strtoul(e + 1, &e, 10));
+                    if (*e != ':')
+                        break;
+                    const char *w = e + 1;
+                    const char *c = std::strchr(w, ',');
+                    s_froute.push_back({fight, a, std::string(w, c ? static_cast<size_t>(c - w) : std::strlen(w))});
+                    p = c ? c + 1 : w + std::strlen(w);
+                }
             if (const char *v = std::getenv("HLB_FNLOG"))
                 for (const char *p = v; *p && s_fnCount < 8;)
                 {
@@ -419,6 +511,8 @@ namespace
                     s_ramV.push_back(static_cast<uint32_t>(std::strtoul(p, &e, 0)));
                     p = *e ? e + 1 : e;
                 }
+            if (const char *v = std::getenv("HLB_VU1CAP"))
+                std::sscanf(v, "%u,%u", &s_vuCapAt, &s_vuCapN);
             if (const char *v = std::getenv("HLB_GIFCAPV"))
             {
                 char *e;

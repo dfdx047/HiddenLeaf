@@ -56,6 +56,49 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 02:45, madrugada: jutsu, campanha e partículas fora da tela contra o PCSX2 (PC; partículas em aberto)
+
+Todos os testes no PC, recomp contra PCSX2, `route_v3`, `HLB_RNG=1`.
+
+**Correção da entrada de 2026-11-08 08:24 (item 1):** a frase "o GS recebe os desenhos iguais" no quadro 199 estava
+errada. Na captura antiga (`rg1`) o recomp já mandava pacotes de partícula a mais pelo PATH1 (os mesmos de baixo).
+
+**Jutsu (igual):**
+- Entrada: △ △ ○ no quadro 88 da luta, com o Kakashi (1P) livre (`HLB_FROUTE="88:TRIANGLE TRIANGLE CIRCLE"`).
+- O que acontece nos dois lados, nos mesmos quadros: chakra 15→10, ação 8, o aviso "Unleash Ultimate Jutsu" e a aura.
+- Comparação: 35 pares de captura iguais e estado de jogo igual nas 411 chamadas.
+- No quadro 40 a mesma entrada não faz nada nos dois lados (o lutador ainda está na entrada), e daí vinha o "Ougi não
+  sai" de antes.
+- O golpe não acertou, então a cena do Ougi em si ainda não foi comparada.
+
+**Campanha (igual no conteúdo):** as mesmas telas e a mesma sequência de leituras do disco que o PCSX2
+(`HLB_OROUTE`/`HLB_OSHOT`). Cada carregamento chega de 44 a 80 vsyncs mais tarde.
+
+**Partículas fora da tela (aberto, só custo):**
+- O recomp manda 27 pacotes a mais pelo PATH1 no quadro 199 (16×48, 9×8 e 1×40 vértices). Todos estão inteiros fora
+  da tela, e a maioria dos vértices tem o bit ADC. Não se vê nada, mas custa VU1, o que importa no Android.
+- **Não é a VU1:** com `HL_VUFAST=0` sai o mesmo número.
+- **Não é o VCLIP:** o VCLIP em modo macro, com os bits ± trocados no `vu_translator.cpp`, não é usado pelo jogo. As
+  duas funções com `vu0_clip_flags` só fazem CFC2/CTC2.
+- **É o EE:** com `HLB_VU1CAP=199,4` (novo), o recomp faz 43 inícios de VU1 a mais no mesmo quadro (1983 contra 1940).
+  Por programa: `0x50` +50, `0x0` +11, `0x1820` +5, `0x28`/`0x30` +11, `0x250` −34. O EE monta mais lotes de partícula.
+- **Comparar a RAM ainda não ajuda:** com `HLB_RAMAT=198,199`, a heap acima de `0x900000` não se alinha com nenhum
+  deslocamento fixo. É o "desvio de 0x80 da heap" já anotado, só que maior e variável. Arrumar isso vem antes.
+
+**Palavras do lutador que diferem** (`+0x54`, `+0x000`, valores `0x80BBGGRR`): são sobras não inicializadas, que já
+estão na RAM no v4600, antes de o lutador existir em `0xd6a000`. Sem efeito.
+
+**Ferramentas:**
+- `hl_bench.cpp`:
+  - `HLB_FROUTE="[luta.]quadro:PALAVRAS,..."` (botões num quadro do lutador);
+  - `HLB_OROUTE="ovl.off:PALAVRAS"` e `HLB_OSHOT=ovl,passo,n` (rota e capturas contadas da carga de um overlay);
+  - `HLB_VU1CAP=F,N` (cada início de VU1: pc, os 16 KB de dados, VF e VI).
+- `0078-bench-vu1-capture.patch` (o escritor no `ps2_vu1_core.cpp`).
+- `tools/gsbench/vu1cmp.py`, e o modo `oshot` do `sheet.py`.
+- O mesmo em `HLBench.cpp`/`VU1micro.cpp` do PCSX2 da bancada.
+- **Aviso:** a captura de tela do recomp (`hl_shot`) pode cair alguns quadros depois da do PCSX2. Para comparar quadro a
+  quadro, usar `HLB_GSDUMP` contra `HLB_GIFCAP` e o `capcmp.py`.
+
 ### 2026-11-09 01:25, madrugada: fumaça, poeira e clarão de volta no PC (corrigido no PC, falta a rota nos aparelhos)
 
 Continuação da entrada de 2026-11-08 08:24. **Causa em duas partes, as duas medidas:**
