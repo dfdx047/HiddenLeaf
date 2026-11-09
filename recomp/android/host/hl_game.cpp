@@ -701,6 +701,13 @@ namespace
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
         noteFightStart();
+        {
+            // HL_SP_LOG: which fighter is the human one, its chakra and action, twice a second
+            static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;
+            if (s_spLog && humanFighter(f) && g_tick % 25u < 2u && g_tick != g_fighterTick)
+                std::fprintf(stderr, "[sp] v%llu human fighter 0x%x chakra %.1f action %u move 0x%x\n", static_cast<unsigned long long>(g_tick), f,
+                             static_cast<double>(readf(f + kFighterChakra)), read16(f + kFighterAction), read32(f + kFighterMove));
+        }
         g_fighterTick = g_tick;
         special(f);
         cpuHealthRoute(f);

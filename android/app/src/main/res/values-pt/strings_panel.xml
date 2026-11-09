@@ -19,7 +19,7 @@
     <string name="gp_tip_items">Trocam o item escolhido.</string>
     <string name="gp_tip_awaken">Despertar: com pouca vida, alguns personagens se transformam.</string>
     <string name="gp_tip_jutsu">Jutsu: △ e depois ○, num toque só (gasta chakra).</string>
-    <string name="gp_tip_ougi">Jutsu supremo (Ougi): △ △ ○ num toque só. No filme, toque o botão que o jogo pedir.</string>
+    <string name="gp_tip_ougi">Jutsu supremo (Ougi): △ △ ○ num toque só, de perto: o golpe do ○ precisa acertar para o filme começar. No filme, toque o botão que o jogo pedir.</string>
     <string name="gp_assists">Ajudas do toque</string>
     <string name="gp_special_one_hint">Um toque no botão especial faz o Jutsu ou o Ougi conforme o chakra, e responde aos botões que o jogo pede na tela.</string>
     <string name="gp_mash">Disputas e cenas de apertar repetido: cada toque vale</string>

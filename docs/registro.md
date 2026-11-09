@@ -56,6 +56,21 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 09:20, manhã: botão Ougi por toque real funciona (corrige a entrada "09:10")
+
+- **O lutador humano da luta 1 é `0xd69a00`**, achado com uma linha nova do `HL_SP_LOG`, a cada 0,5 s, em
+  `hl_game.cpp`: `[sp] human fighter <end> chakra <c> action <a> move <m>`. O POKE da entrada anterior foi para a CPU.
+- **O chakra do jogador já começa em 15,0.** A falta de chakra não explicava o filme que não saía.
+- **Teste novo** (`gest/ougi2.sh`, `gest/ougi2/`): seis toques no botão Ougi desde o começo da luta, sem POKE.
+  - O △△ do botão gasta chakra (15 → 10) e o jogo mostra o próprio aviso "Unleash Ultimate Jutsu" com o ícone ○: a
+    entrada chega certa.
+  - O ○ final lança o golpe de abertura. O filme do Ougi **só começa se esse golpe acertar**, que é regra do jogo; com
+    o adversário longe ou atacando (ação 5/6 do jogador), não acerta e o chakra volta.
+  - O especial de um toque não mexeu em nada (nenhuma linha `[sp] ... ougi`).
+- **Conclusão:** o botão está certo. Para o jogador, uma dica na aba Controles: "chegue perto antes do Ougi".
+- **Ferramenta:** `build/lab/withbase.sh CMD`: tira o A35 para um teste do jogo base e sempre o devolve (`trap EXIT`).
+  Antes, um `cd` falho no meio da cadeia de comandos deixou o aparelho sem o mod.
+
 ### 2026-11-09 09:10, manhã: botão Ougi por toque real ainda não abre o filme (aberto)
 
 - **Teste** (`build/lab/gest/ougi.sh`, saída em `gest/ougi/`):

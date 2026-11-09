@@ -19,7 +19,7 @@
     <string name="gp_tip_items">Change the chosen item.</string>
     <string name="gp_tip_awaken">Awakening: on low health, some characters transform.</string>
     <string name="gp_tip_jutsu">Jutsu: △ then ○, in one tap (uses chakra).</string>
-    <string name="gp_tip_ougi">Ultimate jutsu (Ougi): △ △ ○ in one tap. In its film, tap the button the game asks for.</string>
+    <string name="gp_tip_ougi">Ultimate jutsu (Ougi): △ △ ○ in one tap, up close: the ○ strike must land for the film to start. In its film, tap the button the game asks for.</string>
     <string name="gp_assists">Touch helpers</string>
     <string name="gp_special_one_hint">One tap of the special button does the Jutsu or the Ougi depending on the chakra, and answers the buttons the game asks for on screen.</string>
     <string name="gp_mash">Clashes and press-repeatedly scenes: each tap is worth</string>
