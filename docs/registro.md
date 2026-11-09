@@ -81,6 +81,9 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
     - a seleção (`matrix/o2menu_fix`) sai com os adereços inteiros e na proporção, ainda 50,0 fps;
     - a rota completa no Odin 2 Mini (`rec/o2_w4`, contact sheet `sheet.png`): título, seleção com Linked Mode, NOW
       LOADING, luta, WINNER, resultado, seleção de novo e Stage Select, tudo largo e certo.
+    - a campanha (`rec/o2_camp_w2`, `hl_env_camp_r.txt`, até v9883): abertura, NOW LOADING, cena do portão com
+      diálogos, "Skip?", "Act 1", tutorial do START, caminhada na vila com HUD e nomes de lugar, tudo largo e inteiro. As
+      barras recortadas de alguns quadros são a cortina de troca de área do jogo (entrada das 08:50).
 
 ### 2026-11-09 09:20, manhã: botão Ougi por toque real funciona (corrige a entrada "09:10")
 
