@@ -56,6 +56,22 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 15:50, tarde: depois da correção do título do A35
+
+- **Seleção do A35** (Odin 2 Mini, `HL_PADROUTE` até 4100:CROSS, `gest/env_a35sel.txt`): as duas grades de rostos terminam
+  com um rosto cortado na borda interna do painel. Parece a janela de rolagem do próprio jogo, mas falta a referência:
+  - o PCSX2 da bancada não acha o save copiado para o cartão de pasta ("Nenhum dado ... no slot 1"). O
+    `_pcsx2_superblock` do `Mcd001.ps2` tem 0 bytes; deve ser preciso formatar o cartão pela BIOS ou usar um cartão
+    em arquivo;
+  - tirei o save de novo; o cartão ficou como estava.
+- **Pool ~1 MB menor (fica assim por ora):** as pilhas de invocação do runtime (0x4000 cada, uma por thread e
+  profundidade, reaproveitadas) mais os blocos do MPEG e os pequenos do `calloc` saem de `0x1F00000` para cima. Já se
+  esgotaram uma vez num carregamento de luta. A RAM baixa (`0x80000–0x100000`, 512 KB) não comporta isso com folga.
+- **Alpha 1.1X:** o `stubfix --elf` não acha nenhum stub mudado (a única região alterada é `0x410d68`, fora deles).
+  Nada a refazer nela.
+- **Endereços fixos do heap no código host:** só em comentários (`0xd7b9a0`, rota antiga). As rotas de laboratório com
+  `POKE` em endereços do heap ficam 0x10 deslocadas.
+
 ### 2026-11-09 15:10, tarde: fundo do título do A35 igual ao PCSX2 (pool do jogo no endereço do PS2, tabela de códigos do A35, `4e6797e`)
 
 Corrige a entrada de 15:05: a causa estava em três pontos juntos.
