@@ -713,7 +713,9 @@ Três cenas, cada uma com o próprio layout (editável) e trocadas sozinhas pelo
   - **CPU:** a CPU também precisa de uma contagem (uma taxa de toques por dificuldade). Assim, contra a CPU, o
     resultado depende de quem toca mais rápido.
   - **Base que já existe** (`hl_game.cpp`):
-    - `special_one`: um toque faz o Jutsu ou o Ougi;
+    - `special_one`: um toque faz o Jutsu ou o Ougi. Na sequência do Ougi (`0x36E690`: `obj+0x112 + (jogador << 8)` os
+      botões, `obj+0x312 + jogador × 2` o passo, `obj+0x1A + jogador` diferente de 0 para a CPU), cada toque já vale o
+      botão do momento. Então a parte "um botão só" existe para o jogador humano; o que falta é a regra de quem ganha;
     - os passos de apertar repetido do Ougi e das disputas são lidos em `0x7AF440`, `0x819D10` e `0x820FD0`;
     - o `mash_percent` diz quanto vale cada toque.
   - **Falta achar no jogo:**
