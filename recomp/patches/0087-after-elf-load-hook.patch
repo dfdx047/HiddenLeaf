@@ -1,0 +1,32 @@
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -580,5 +580,7 @@
+ extern PS2OverlayResolver g_ps2OverlayResolver;
+ // Hidden Leaf: called at each vblank, on the EE's thread (the host's per-game code; may block to pause the game)
+ extern void (*g_hlVsyncHook)(PS2Runtime *runtime, uint64_t tick);
++// Hidden Leaf: called at the end of loadELF (the EE interpreter, recomp/runtime/hl_interp.cpp)
++extern void (*g_hlAfterElfLoad)(PS2Runtime *runtime, const std::string &elfPath);
+ 
+ #endif // PS2_RUNTIME_H
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1145,6 +1145,11 @@
+                                       elfCrc32Valid);
+ 
+     RUNTIME_LOG("ELF file loaded successfully. Entry point: 0x" << std::hex << m_cpuContext.pc << std::dec);
++    // Hidden Leaf: the EE interpreter (recomp/runtime/hl_interp.cpp) looks at the loaded program here
++    if (g_hlAfterElfLoad != nullptr)
++    {
++        g_hlAfterElfLoad(this, elfPath);
++    }
+     return true;
+ }
+ 
+@@ -1258,6 +1263,7 @@
+ // Code the game loads at run time (overlays): asked when the generated table has no function for a PC.
+ PS2OverlayResolver g_ps2OverlayResolver = nullptr;
+ void (*g_hlVsyncHook)(PS2Runtime *, uint64_t) = nullptr;
++void (*g_hlAfterElfLoad)(PS2Runtime *, const std::string &) = nullptr;
+ 
+ bool PS2Runtime::hasFunction(uint32_t address) const
+ {

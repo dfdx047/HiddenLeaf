@@ -56,6 +56,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 22:30, noite: interpretador do EE, primeira parte: a luta igual com 8330 funções interpretadas
+
+- `recomp/runtime/hl_interp.cpp` (copiado para o runtime pelo `recomp/build.sh`, como os outros) e o gancho
+  `g_hlAfterElfLoad` no fim do `loadELF` (`0087`). O interpretador é uma `RecompiledFunction` com o contrato do código
+  gerado (chamada pelo `dispatchGuestBranch`, salto e retorno saem com `ctx->pc`, desvio para trás chama o
+  `eeCheckpointDue`, delay slot e desvios "likely" como o `control_flow_emitter`, `bc0x` nunca desvia). Cada instrução usa
+  as macros do tradutor. Cobertura: inteiras, memória, SPECIAL, REGIMM, COP0, FPU, MMI escalares e `pcpyld paddub pand
+  pxor por pnor pcpyud`, `lqc2 sqc2`. **Falta:** as macros da VU0 (op `0x12`) e o resto das MMI.
+- Modo de teste: `HL_INTERP=all HL_INTERP_KEEP=build/gen/un5_config.toml HL_INTERP_MAP=build/gen/un5_map.csv` põe no
+  interpretador toda função do ELF (limites do mapa: a tabela gerada só tem a entrada e os pontos de retomada) que não é
+  stub e cuja instrução é toda coberta; a faixa inteira dela vai para o interpretador.
+- **Teste no PC (`route_v3`, até v8500, `HLB_RNG=1`):** 8330 funções (556 006 posições da tabela) no interpretador, 642
+  stubs nativos, 530 com instrução ainda não coberta (VU0: `vsub` em 311, `vadd` em 96, `vaddbc` em 76, `vmul` em 21).
+  Chega à luta (overlay `btl`), duas rodadas: **estado igual em todas as chamadas** contra o PCSX2 (`pv3`) e contra o nativo
+  do mesmo build (`nv3`). Sobram ponteiros de heap diferentes (64 palavras do lutador, 2 da câmera; o nativo tem 62).
+  O nativo `nv3` (com o `0086`) também dá estado igual ao PCSX2.
+- Os overlays (`PRG/`) ainda não passam pelo interpretador; o modo do mod (comparar com o ELF europeu) vem depois da VU0.
+
 ### 2026-11-09 21:40, noite: Odin 2 Mini sem conseguir desligar o mod; build normal para o desenvolvedor testar
 
 - **Causa:** `modlib/mods.txt`, `un5_mods.txt` e `un5_settings.txt` tinham sido gravados pelo adb (dono uid 2000, o
