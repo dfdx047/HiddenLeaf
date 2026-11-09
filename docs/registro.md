@@ -56,6 +56,32 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 17:00, tarde: o heap vai até a pilha principal, como no PS2 (`0085`); o pool do jogo do mesmo tamanho
+
+- **Causa do pool ~1 MB menor:**
+  - o `malloc` do jogo (`0x17A610`) é o do runtime (`ps2_stubs::malloc`, visto no gdb). O jogo pede um pool de
+    0x16cd7f0 e vai baixando de 0x100 até caber;
+  - o runtime cortava o heap em `0x1F00000`, porque guardava ali as pilhas de callback (0x4000 cada), os pools de
+    RPC, TLS e boot mode;
+  - no PS2 (PCSX2 com a BIOS, `HLB_FNLOG=0x168e18`), o `SetupThread(-1, 0x8000)` devolve `sp` = `0x1ffed60`
+    (0x12A0 abaixo do topo) e o `SetupHeap(0x928900, -1)` devolve `0x1ff7000` (4 KB abaixo da base da pilha,
+    `0x1ff8000`). O `sbrk` do jogo (`0x15f1a0`) usa o `EndOfHeap`.
+- **Correção** (`recomp/patches/0085-heap-to-the-main-stack.patch`):
+  - `SetupThread(-1, size)`: a pilha é o topo da RAM e o `sp` começa 0x12A0 abaixo dele;
+  - `SetupHeap(-1)`: o fim é a base da pilha menos 4 KB, que também é o valor de retorno. `EndOfHeap` devolve o
+    mesmo; o teto do alocador do runtime passou a `0x1FF7000`;
+  - as pilhas de callback ficam em `0x30000`–`0x70000`, e os pools de RPC, servidores, TLS e boot mode em
+    `0xA0000`–`0xD1000`. As duas faixas estão vazias no PCSX2 na luta (mapa por 16 KB das duas RAMs).
+- **Conferido no PC** (rota v3, `HLB_RAM` em v5430):
+  - topo do pool `a1` = `0x1ff5f40`, igual ao PCSX2 (antes `0x1effe40`);
+  - o fim da RAM (pilha principal) ocupado do mesmo jeito que no PCSX2;
+  - estado da luta igual ao PCSX2 em todas as chamadas (`hlbench.py diff`);
+  - o heap ainda se separa no bloco 3650: é a ordem das threads da entrada das 16:05, que este patch não toca.
+- **Conferido no Odin 2 Mini:**
+  - jogo base, luta por toques reais (`withbase.sh gest/fight.sh`): 50,0 fps, golpes, jutsu, Ougi, item, defesa e
+    pausa;
+  - A35 (`hl_env_a35r.txt`): carrega o save, `[codes]` aplica a tabela, câmera `x 0.750`, luta a 60 fps (NTSC).
+
 ### 2026-11-09 16:15, tarde: menus em 20:9 no Odin 2 Mini; campanha depois da mudança da câmera
 
 - **20:9** (`build/lab/gest/wide209.sh` pelo `withbase.sh`: `wm size 2400x1080` com `trap` que sempre devolve o

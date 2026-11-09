@@ -1,0 +1,138 @@
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -536,8 +536,8 @@
+     uint32_t m_guestHeapLimit = PS2_RAM_SIZE;
+     uint32_t m_guestHeapSuggestedBase = 0x00100000u;
+     bool m_guestHeapConfigured = false;
+-    uint32_t m_asyncCallbackStackFloor = 0x01F00000u;
+-    uint32_t m_asyncCallbackStackTop = PS2_RAM_SIZE;
++    uint32_t m_asyncCallbackStackFloor = 0x00030000u;
++    uint32_t m_asyncCallbackStackTop = 0x00070000u;
+ 
+     std::atomic<uint32_t> m_missingFunctionPolicy{static_cast<uint32_t>(MissingFunctionPolicy::ContinueToTarget)};
+     std::atomic<bool> m_missingFunctionReported{false};
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -99,7 +99,11 @@
+     constexpr uint32_t kGuestHeapDefaultBase = 0x00100000u;
+     constexpr uint32_t kGuestHeapDefaultAlignment = 16u;
+     constexpr uint32_t kGuestHeapSafetyPad = 0x1000u;
+-    constexpr uint32_t kGuestHeapHardLimit = 0x01F00000u;
++    // the heap reaches the main stack, as on the PS2 (SetupHeap(-1) ends 4 KB under it); the runtime's own stacks and
++    // pools live under the ELF, in RAM the PS2 leaves free once the game runs
++    constexpr uint32_t kGuestHeapHardLimit = 0x01FF7000u;
++    constexpr uint32_t kAsyncCallbackStackFloor = 0x00030000u;
++    constexpr uint32_t kAsyncCallbackStackTop = 0x00070000u;
+ 
+     constexpr uint32_t COP0_CAUSE_EXCCODE_MASK = 0x0000007Cu;
+     constexpr uint32_t COP0_CAUSE_BD = 0x80000000u;
+@@ -611,8 +615,8 @@
+     m_guestHeapLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+     m_guestHeapSuggestedBase = kGuestHeapDefaultBase;
+     m_guestHeapConfigured = false;
+-    m_asyncCallbackStackFloor = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-    m_asyncCallbackStackTop = PS2_RAM_SIZE;
++    m_asyncCallbackStackFloor = kAsyncCallbackStackFloor;
++    m_asyncCallbackStackTop = kAsyncCallbackStackTop;
+ }
+ 
+ void PS2Runtime::setDebugUiCallbacks(DebugUiCallback initCallback,
+@@ -1103,9 +1107,8 @@
+     }
+     {
+         std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
+-        const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
+-        m_asyncCallbackStackFloor = std::min(std::max(hardLimit, suggestedHeapBase), PS2_RAM_SIZE);
+-        m_asyncCallbackStackTop = PS2_RAM_SIZE;
++        m_asyncCallbackStackFloor = kAsyncCallbackStackFloor;
++        m_asyncCallbackStackTop = kAsyncCallbackStackTop;
+     }
+ 
+     LoadedModule module;
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+@@ -243,20 +243,20 @@
+ inline std::string g_ps2_cwd_device = "host0";
+ 
+ static constexpr uint32_t kRpcPacketSize = 64;
+-static constexpr uint32_t kRpcPacketPoolBase = 0x01F00000;
++static constexpr uint32_t kRpcPacketPoolBase = 0x000A0000; // under the ELF, free on the PS2 (kept out of the game's heap)
+ static constexpr uint32_t kRpcPacketPoolBytes = 0x00010000;
+ static constexpr uint32_t kRpcPacketPoolCount = kRpcPacketPoolBytes / kRpcPacketSize;
+-static constexpr uint32_t kRpcServerPoolBase = 0x01F10000;
++static constexpr uint32_t kRpcServerPoolBase = 0x000B0000;
+ static constexpr uint32_t kRpcServerPoolBytes = 0x00010000;
+ static constexpr uint32_t kRpcServerStride = 0x80;
+ static constexpr uint32_t kRpcServerPoolCount = kRpcServerPoolBytes / kRpcServerStride;
+ 
+-static constexpr uint32_t kTlsPoolBase = 0x01F20000;
++static constexpr uint32_t kTlsPoolBase = 0x000C0000;
+ static constexpr uint32_t kTlsPoolBytes = 0x00010000;
+ static constexpr uint32_t kTlsBlockSize = 0x100;
+ static constexpr uint32_t kTlsPoolCount = kTlsPoolBytes / kTlsBlockSize;
+ 
+-static constexpr uint32_t kBootModePoolBase = 0x01F30000;
++static constexpr uint32_t kBootModePoolBase = 0x000D0000;
+ static constexpr uint32_t kBootModePoolBytes = 0x00001000;
+ 
+ static constexpr uint32_t kSifRpcModeNowait = 0x01;
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -475,6 +475,9 @@
+         setReturnS32(ctx, 0);
+     }
+ 
++    // SetupThread(-1, size): the main stack's base; SetupHeap(-1) ends 4 KB under it, as on the PS2 (0x1ff7000)
++    static uint32_t g_mainStackBase = 0u;
++
+     // 0x3C SetupThread
+     // args: $a0 = gp, $a1 = stack, $a2 = stack_size, $a3 = args, $t0 = root_func
+     void SetupThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -501,7 +504,14 @@
+             if (stackSizeSigned > 0)
+             {
+                 const uint32_t requestedSize = static_cast<uint32_t>(stackSizeSigned);
+-                if (requestedSize < PS2_RAM_SIZE)
++                if (requestedSize > 0x12A0u && requestedSize < PS2_RAM_SIZE)
++                {
++                    // the PS2 kernel: the stack is the top `size` bytes of RAM and sp starts 0x12A0 under the top
++                    // (4 KB of arguments and the first frame; PCSX2 with its BIOS: 0x1ffed60 for 0x8000)
++                    g_mainStackBase = PS2_RAM_SIZE - requestedSize;
++                    sp = PS2_RAM_SIZE - 0x12A0u;
++                }
++                else if (requestedSize < PS2_RAM_SIZE)
+                 {
+                     sp = PS2_RAM_SIZE - requestedSize;
+                 }
+@@ -542,7 +552,10 @@
+         // (Ultimate Ninja 5: an interrupt handler's stack at 0x1ff7ff0 zeroed main's saved ra at 0x1ff7f90)
+         constexpr uint32_t kDefaultMainStackSize = 0x10000u;
+         const uint32_t reserved = stackSize != 0u ? stackSize : kDefaultMainStackSize;
+-        runtime->excludeAsyncCallbackStackRange(sp > reserved ? sp - reserved : 0u, sp);
++        if (stack == 0xFFFFFFFFu && g_mainStackBase != 0u)
++            runtime->excludeAsyncCallbackStackRange(g_mainStackBase, PS2_RAM_SIZE);
++        else
++            runtime->excludeAsyncCallbackStackRange(sp > reserved ? sp - reserved : 0u, sp);
+         setReturnU32(ctx, sp);
+     }
+ 
+@@ -555,7 +568,7 @@
+         const uint32_t heapBase = (heapBaseRaw + 0xFu) & ~0xFu;
+ 
+         // Silent Hill and other games often pass -1 (0xFFFFFFFF) to mean "rest of RAM".
+-        static constexpr uint32_t kDefaultGuestHeapEnd = 0x01F00000u;
++        const uint32_t kDefaultGuestHeapEnd = g_mainStackBase > 0x1000u ? g_mainStackBase - 0x1000u : 0x01F00000u;
+         uint32_t heapLimit = kDefaultGuestHeapEnd;
+ 
+         if (heapSize != 0u && heapSize != 0xFFFFFFFFu)
+@@ -583,7 +596,9 @@
+                           << std::dec << std::endl;
+             });
+ 
+-            setReturnU32(ctx, runtime->guestHeapBase());
++            // the PS2 kernel returns the heap's end (0x1ff7000 for UN5)
++            setReturnU32(ctx, (heapSize == 0xFFFFFFFFu && g_mainStackBase != 0u) ? runtime->guestHeapLimit()
++                                                                              : runtime->guestHeapBase());
+             return;
+         }
+ 
