@@ -797,3 +797,8 @@ com o build normal para o desenvolvedor jogar.
 
 Interpretador do EE: desligado por padrão (só com `HL_INTERP`); não muda o caminho normal nem o Android. Só entra no
 Android para mods que mudam código, e só depois de validado no PC; até lá a prioridade é a lista acima.
+
+**Achado do desenvolvedor (2026-11-09 ~23h):** boa parte dos bugs visuais vem do desenho em 16:9 e ultrawide; em 4:3 fica
+tudo normal (personagens esticados e sumindo na seleção, e outros do mesmo tipo). O caminho de widescreen inteiro (menus
+"Esticar" e "Desenhar em 16:9", widescreen da luta e o do aspecto do aparelho) vai ser analisado de novo do zero; todo
+bug visual é conferido primeiro em 4:3, 16:9 e 20:9 na mesma cena.
