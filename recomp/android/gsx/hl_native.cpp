@@ -2486,18 +2486,35 @@ namespace wide2d
 			--s_count;
 		}
 		s_verts[s_count++] = {field, wx, false};
-		if (!kick || s_count < need || !shown())
+		if (!shown())
 		{
-			if (!shown())
-				s_verts[s_count - 1].done = true;
+			s_verts[s_count - 1].done = true;
 			return;
 		}
-		if ((type == 2u || type == 4u || type == 5u) && s_runSqueeze >= 0)
+		const bool strip = type == 2u || type == 4u || type == 5u;
+		if (strip && s_runSqueeze >= 0)
 		{
-			if (s_runSqueeze)
-				squeeze(s_verts[s_count - 1]);
-			else
-				s_verts[s_count - 1].done = true;
+			// the run's decision for every vertex, kicked or not: a vertex without a kick (ADC, XYZ3: the 3D models
+			// the VU1 clips) is still a corner of the next triangles, and left alone it stretched them (the props of the
+			// character selection, docs/registro.md 2026-11-09)
+			for (int i = 0; i < s_count; ++i)
+			{
+				if (s_runSqueeze)
+					squeeze(s_verts[i]);
+				else
+					s_verts[i].done = true;
+			}
+			return;
+		}
+		if (!kick || s_count < need)
+		{
+			if (!strip && s_count == need)
+			{
+				// a list's primitive without a kick is not drawn: its vertices are not the next one's
+				for (int i = 0; i < s_count; ++i)
+					s_verts[i].done = true;
+				s_count = 0;
+			}
 			return;
 		}
 		float lo = s_verts[0].wx, hi = lo;
@@ -2595,6 +2612,9 @@ void widen2d(uint8_t* data, uint32_t size)
 	static const bool s_off = std::getenv("HL_WIDE2D_OFF") != nullptr;
 	if (s_off || s_hudScale >= 0.999f)
 		return;
+	// (vertices queued by the last packet point into its buffer: they keep their place in the decision, never written)
+	for (int i = 0; i < s_count; ++i)
+		s_verts[i].done = true;
 	uint32_t at = 0u;
 	while (at + 16u <= size)
 	{

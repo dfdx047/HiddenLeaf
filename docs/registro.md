@@ -56,6 +56,32 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 09:21, manhã: desempenho dos menus e adereços 3D da seleção corrigidos no widescreen
+
+- **Medida da seleção de personagem** (`build/lab/menuperf.sh`, `matrix/o2menu.tsv`): rota só até v4373, sem modo
+  rápido, 30 s parado na seleção a partir de v4700.
+  | escala / fps | fps do jogo | 1% low | pares > 44 ms | EE / VU1 / GS (ms) |
+  |---|---|---|---|---|
+  | 2x / 60 | 50,0 | 46,6 | 0,0% | 2,4 / 1,3 / 2,9 |
+  | 4x / 120 | 50,0 | 46,7 | 0,0% | 2,2 / 1,2 / 2,7 |
+  | 8x / 60 | 50,0 | 46,6 | 0,0% | 2,2 / 1,2 / 2,6 |
+  - Os menus sobram em qualquer resolução. O contador do canto (~25) é o próprio menu, que redesenha um quadro sim, um
+    não.
+- **Defeito achado na medida:** com o 2D apertado, os adereços 3D da seleção viravam manchas esticadas: as engrenagens,
+  os pergaminhos com kanji e o selo "Linked Character". Com `HL_WIDE2D_OFF=1` saíam inteiros (`matrix/o2menu_off`).
+  - Não é buffer à parte: no dump do GS (`gsdumps/sel`, `HL_GS_DUMP=selecao`) tudo vai para o FBP 0, fbw 8.
+  - **Causa:** em `wide2d::vertex` (`hl_native.cpp`), depois da decisão do primeiro triângulo de uma tira, só o
+    vértice com disparo era apertado. Um vértice sem disparo (ADC ou XYZ3, comum nos modelos 3D vindos da VU1) ficava
+    na largura antiga e esticava os triângulos seguintes.
+  - **Correção:**
+    - a decisão da tira vale para todo vértice, com ou sem disparo;
+    - uma primitiva de lista sem disparo zera a fila;
+    - os vértices pendentes do pacote anterior nunca são escritos, porque apontam para o buffer dele.
+  - **Conferido:**
+    - a seleção (`matrix/o2menu_fix`) sai com os adereços inteiros e na proporção, ainda 50,0 fps;
+    - a rota completa no Odin 2 Mini (`rec/o2_w4`, contact sheet `sheet.png`): título, seleção com Linked Mode, NOW
+      LOADING, luta, WINNER, resultado, seleção de novo e Stage Select, tudo largo e certo.
+
 ### 2026-11-09 09:20, manhã: botão Ougi por toque real funciona (corrige a entrada "09:10")
 
 - **O lutador humano da luta 1 é `0xd69a00`**, achado com uma linha nova do `HL_SP_LOG`, a cada 0,5 s, em
