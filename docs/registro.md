@@ -56,6 +56,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 06:40, manhã: rota v3 deslocada no Odin 2 Mini (`hl_env_v3o2.txt`): a luta 2 começa ainda mais tarde
+
+- Deslocar +2100 vsyncs tudo o que vinha de v11150 em diante (`POKE`, ○ e os ✕ dos menus entre as lutas) atrasou
+  também os menus. A luta 2 começou em v14831 (`rec/o2_v3c`) e o KO não coube até v16800.
+- **Conclusão:** depois das cargas com o tempo do drive (`e0beedf`), uma rota por vsync absoluto não serve para a luta 2.
+  **Fazer:** botões e `POKE` relativos ao começo de cada luta (o nativo já sabe: "scene on at vsync"). Até lá, a
+  vitória da luta 2 fica sem conferir no Odin 2 Mini. A da luta 1 está conferida (`rec/o2_v3`).
+- O mod foi posto de volta (`1|un6-a35`).
+
 ### 2026-11-09 06:36 (hora real), manhã: rota v3 até v16200 no Odin 2 Mini
 
 - **Hora (correção):** as duas entradas de baixo, marcadas 06:36 e 06:45, foram escritas às ~06:20 e às 06:30
