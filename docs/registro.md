@@ -56,6 +56,26 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 09:50, manhã: botões escondidos nos diálogos da campanha (tentativa, revertida; aberto)
+
+- **Objetivo:** nos diálogos da campanha, esconder os botões de luta, que tapam o texto, e um toque avançar a fala
+  (✕), com os gestos dos menus.
+- **Ferramentas novas** (só depuração, em `hl_game.cpp`; `build/lab/ramrun.sh`, `build/lab/ramflag.py`):
+  - `HL_RAM_DUMP=V,...`: os 32 MB da RAM do EE em `files/ramdumps/ram_<V>.bin`;
+  - `HL_WATCH=ADDR,...`: uma linha `[watch]` quando a palavra muda;
+  - `ramflag.py`: palavras estáveis em cada grupo de dumps e diferentes entre os grupos.
+- **Candidato `0x6316B4` (bit 31), achado com 3 dumps de diálogo × 4 andando:**
+  - liga em v6533, no começo do diálogo, e desliga em v8134 na rota automática;
+  - com a cena "menu" ligada por ele (`gest/talk.sh`, toques reais no meio da tela), os botões sumiram na fala e os
+    toques avançaram a conversa e o tutorial "How to move";
+  - **mas ele só desliga quando o analógico se mexe:** com o jogador já livre ("Talk" na tela), continuava ligado, e o
+    jogador ficaria sem analógico. **Revertido.**
+- **Diálogo × parado × andando** (`ramd/camp`, `ramd/stand`, rota até v8100 sem caminhar):
+  - nada na área estática separa os três;
+  - no heap há milhares de diferenças (a janela de fala é alocada), sem endereço fixo confiável.
+- **Próximo passo:** achar no código do ADV onde o personagem lê o analógico e o que o bloqueia durante uma fala, e
+  usar essa condição.
+
 ### 2026-11-09 09:21, manhã: desempenho dos menus e adereços 3D da seleção corrigidos no widescreen
 
 - **Medida da seleção de personagem** (`build/lab/menuperf.sh`, `matrix/o2menu.tsv`): rota só até v4373, sem modo

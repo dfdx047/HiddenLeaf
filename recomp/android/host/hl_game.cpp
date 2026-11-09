@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sys/stat.h>
 #include <iostream>
 #include <string>
 #include <sys/system_properties.h>
@@ -1002,6 +1003,54 @@ namespace
         }
         if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
             unlockEverything();
+        {
+            // HL_RAM_DUMP=V,V,... (debugging): the 32 MB of EE RAM at these vsyncs, into HL_RAM_DUMP_DIR (the app's files
+            // folder by default)/ramdumps/ram_<V>.bin, for comparing the game's state between scenes (build/lab/ramflag.py)
+            static std::vector<uint64_t> s_ramAt = [] {
+                std::vector<uint64_t> at;
+                if (const char *v = std::getenv("HL_RAM_DUMP"))
+                    for (const char *p = v; *p;)
+                    {
+                        char *e;
+                        at.push_back(std::strtoull(p, &e, 10));
+                        p = *e ? e + 1 : e;
+                    }
+                return at;
+            }();
+            // HL_WATCH=ADDR,ADDR,... (hex, debugging): a line whenever one of these 32-bit words changes
+            static std::vector<std::pair<uint32_t, uint32_t>> s_watch = [] {
+                std::vector<std::pair<uint32_t, uint32_t>> w;
+                if (const char *v = std::getenv("HL_WATCH"))
+                    for (const char *p = v; *p;)
+                    {
+                        char *e;
+                        w.emplace_back(static_cast<uint32_t>(std::strtoul(p, &e, 16)), 0xDEADBEEFu);
+                        p = *e ? e + 1 : e;
+                    }
+                return w;
+            }();
+            for (auto &[addr, last] : s_watch)
+                if (const uint32_t now = read32(addr); now != last)
+                {
+                    std::fprintf(stderr, "[watch] v%llu %07x %08x -> %08x (overlay %d)\n", static_cast<unsigned long long>(tick), addr, last, now, hl_game::overlay());
+                    last = now;
+                }
+            for (uint64_t &at : s_ramAt)
+                if (at != 0u && tick >= at)
+                {
+                    const char *dir = std::getenv("HL_RAM_DUMP_DIR");
+                    const std::string base = std::string(dir ? dir : "/sdcard/Android/data/com.dfdx047.hiddenleaf/files") + "/ramdumps";
+                    ::mkdir(base.c_str(), 0775);
+                    const std::string name = base + "/ram_" + std::to_string(tick) + ".bin";
+                    if (FILE *f = std::fopen(name.c_str(), "wb"))
+                    {
+                        std::fwrite(g_rdram, 1, 32u << 20, f);
+                        std::fclose(f);
+                    }
+                    std::fprintf(stderr, "[ram] v%llu %s\n", static_cast<unsigned long long>(tick), name.c_str());
+                    at = 0u;
+                }
+        }
         // (for the native renderer's fight held without its detector: hl_native.cpp, s_held)
         if (hl_game::g_wideCameraOut != nullptr)
             hl_game::g_wideCameraOut(wideCamera());
