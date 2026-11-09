@@ -1,0 +1,76 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index 850a7c3..5faa6a7 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -9,6 +9,10 @@
+ #include <fstream>
+ #include <string>
+ 
++// Hidden Leaf: the vsync fight N (from 1) began, or 0 while it has not; set by the game's host code (hl_game.cpp on
++// Android), for the "@N+vsyncs" steps of HL_PADROUTE.
++uint64_t (*g_hlFightStart)(uint32_t) = nullptr;
++
+ namespace ps2_stubs
+ {
+     namespace
+@@ -281,25 +285,53 @@ namespace ps2_stubs
+             {
+                 lastCheck = tick;
+                 // HL_PADROUTE="750:CROSS,1750:START": the same buttons by vsync, so a route does not depend on how
+-                // fast the host runs
+-                static const std::vector<std::pair<uint64_t, std::string>> route = []
++                // fast the host runs. "@2+450:CIRCLE": 450 vsyncs after fight 2 began (g_hlFightStart, given by the
++                // game's host code), so a route survives loads that take another time.
++                struct RouteStep
++                {
++                    uint64_t at;
++                    uint32_t fight;
++                    std::string words;
++                };
++                static const std::vector<RouteStep> route = []
+                 {
+-                    std::vector<std::pair<uint64_t, std::string>> out;
++                    std::vector<RouteStep> out;
+                     const char *env = std::getenv("HL_PADROUTE");
+                     std::stringstream list(env ? env : "");
+                     std::string item;
+                     while (std::getline(list, item, ','))
+                     {
+                         const size_t colon = item.find(':');
+-                        if (colon != std::string::npos)
+-                            out.emplace_back(std::strtoull(item.c_str(), nullptr, 10), item.substr(colon + 1));
++                        if (colon == std::string::npos)
++                            continue;
++                        RouteStep step{0u, 0u, item.substr(colon + 1)};
++                        if (item[0] == '@')
++                        {
++                            char *end = nullptr;
++                            step.fight = static_cast<uint32_t>(std::strtoul(item.c_str() + 1, &end, 10));
++                            step.at = (end && *end == '+') ? std::strtoull(end + 1, nullptr, 10) : 0u;
++                        }
++                        else
++                            step.at = std::strtoull(item.c_str(), nullptr, 10);
++                        out.push_back(std::move(step));
+                     }
+                     return out;
+                 }();
+                 static size_t routeNext = 0u;
+-                while (routeNext < route.size() && route[routeNext].first <= tick)
++                while (routeNext < route.size())
+                 {
+-                    std::ofstream("hl_pad", std::ios::app) << route[routeNext].second << ' ';
++                    const RouteStep &step = route[routeNext];
++                    uint64_t due = step.at;
++                    if (step.fight != 0u)
++                    {
++                        const uint64_t start = g_hlFightStart ? g_hlFightStart(step.fight) : 0u;
++                        if (start == 0u)
++                            break;
++                        due += start;
++                    }
++                    if (due > tick)
++                        break;
++                    std::ofstream("hl_pad", std::ios::app) << step.words << ' ';
+                     ++routeNext;
+                 }
+                 std::ifstream file("hl_pad");

@@ -56,6 +56,29 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 07:09, manhã: rota relativa ao começo de cada luta (`@N+vsyncs`), Odin 2 Mini
+
+- **`0083-padroute-fight-relative.patch`** (`Pad.cpp` do runtime):
+  - `HL_PADROUTE` aceita `@N+vsyncs:BOTÕES`, contados do começo da luta N;
+  - o runtime pergunta por `g_hlFightStart(N)`, que o código do jogo preenche;
+  - os passos seguem em ordem, e um passo relativo espera a luta dele começar.
+- **`hl_game.cpp`:**
+  - a luta começa quando um lutador lê a entrada depois de mais de `HL_FIGHT_GAP` vsyncs (1500) sem lutador nem Ougi
+    lendo o controle. O filme do Ougi para os lutadores por ~1000 vsyncs; os menus entre lutas, ~3800;
+  - o log diz `[route] vN fight K begins`;
+  - `HL_CPU_HP` também aceita `@N+vsyncs`. Ele baixa a vida do lutador da CPU, achado pelos bits de controle, sem
+    endereço fixo.
+- **Rota `build/lab/hl_env_v3r.txt`:**
+  - os menus da v3 até a luta 1, por vsync;
+  - `HL_CPU_HP=@1+450,@2+450`;
+  - ○ de +500 a +1600 a cada 12 e ✕ de +1700 a cada 150, em cada luta.
+- **Teste (`rec/o2_v3r`):**
+  - log: `fight 1 begins` v6098, `health 0.0115` v6646, `fight 2 begins` v9873, `health` v10323, `fight 3 begins` v14500;
+  - luta 1: WINNER "Naruto Uzumaki" e resultado (63 / 96 / 562 / 721), seleção, VS;
+  - luta 2 (Naruto x Naruto): KO no tempo 82, depois tela branca, carga e seleção, sem WINNER. É o caminho da vitória da
+    CPU (igual ao PCSX2, 06:09), mas pelos quadros não dá para ver quem caiu. **Conferir:** pôr a vida dos dois no log;
+  - a terceira luta também começa e termina.
+
 ### 2026-11-09 06:40, manhã: rota v3 deslocada no Odin 2 Mini (`hl_env_v3o2.txt`): a luta 2 começa ainda mais tarde
 
 - Deslocar +2100 vsyncs tudo o que vinha de v11150 em diante (`POKE`, ○ e os ✕ dos menus entre as lutas) atrasou

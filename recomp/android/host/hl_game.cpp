@@ -20,6 +20,9 @@
 #include <thread>
 #include <vector>
 
+// the runtime's Pad.cpp: when fight N began, for the "@N+vsyncs" steps of HL_PADROUTE
+extern uint64_t (*g_hlFightStart)(uint32_t);
+
 #if defined(HL_WATCH_BUILD)
 namespace hl_watch
 {
@@ -85,6 +88,24 @@ namespace
     uint64_t g_tick = 0u;          // vsyncs
     uint64_t g_fighterTick = 0u;   // the last vsync a fighter read its input (0x21E660): a fight is going on
     uint64_t g_ougiTick = 0u;      // the last vsync an Ougi's sequence or prompt read the pad (0x36E690, 0x6C99B0)
+
+    // The vsync each fight began: a fighter reads its input after more than HL_FIGHT_GAP vsyncs (1500) with no fighter and
+    // no Ougi reading the pad. An Ougi's film stops the fighters for ~1000 vsyncs; the result, the menus and the load
+    // between two fights take ~3800 (Odin 2 Mini, 2026-11-09). For the "@N+vsyncs" routes (HL_PADROUTE, HL_CPU_HP).
+    std::vector<uint64_t> g_fightStarts;
+    uint64_t fightStart(uint32_t n)
+    {
+        return n >= 1u && n <= g_fightStarts.size() ? g_fightStarts[n - 1u] : 0u;
+    }
+    void noteFightStart()
+    {
+        static const uint64_t s_gap = std::getenv("HL_FIGHT_GAP") ? std::strtoull(std::getenv("HL_FIGHT_GAP"), nullptr, 10) : 1500u;
+        const uint64_t live = g_fighterTick > g_ougiTick ? g_fighterTick : g_ougiTick;
+        if (live != 0u && g_tick - live <= s_gap)
+            return;
+        g_fightStarts.push_back(g_tick);
+        std::fprintf(stderr, "[route] v%llu fight %zu begins\n", static_cast<unsigned long long>(g_tick), g_fightStarts.size());
+    }
 
     // The wide projection is for the 3D of a fight (while the fighters read their input, and an Ougi's film) and of the
     // campaign. Everything else drawn through a camera (the result screen's picture, menus) is 2D made for 4:3: squeezed, it
@@ -620,7 +641,13 @@ namespace
     // that poke landed in the game's node list (docs/registro.md, 2026-11-04 18:40).
     void cpuHealthRoute(uint32_t f)
     {
-        static std::vector<uint64_t> s_at;
+        // entries: a vsync, or "@N+vsyncs" counted from the start of fight N (as in HL_PADROUTE)
+        struct At
+        {
+            uint64_t at;
+            uint32_t fight;
+        };
+        static std::vector<At> s_at;
         static size_t s_next = 0;
         static bool s_read = false;
         if (!s_read)
@@ -629,15 +656,35 @@ namespace
             if (const char *v = std::getenv("HL_CPU_HP"))
                 for (const char *c = v; *c != 0;)
                 {
+                    At a{0u, 0u};
                     char *end = nullptr;
-                    const unsigned long long t = std::strtoull(c, &end, 10);
-                    if (end == c)
-                        break;
-                    s_at.push_back(t);
+                    if (*c == '@')
+                    {
+                        a.fight = static_cast<uint32_t>(std::strtoul(c + 1, &end, 10));
+                        if (*end == '+')
+                            a.at = std::strtoull(end + 1, &end, 10);
+                    }
+                    else
+                    {
+                        a.at = std::strtoull(c, &end, 10);
+                        if (end == c)
+                            break;
+                    }
+                    s_at.push_back(a);
                     c = *end == ',' ? end + 1 : end;
                 }
         }
-        if (s_next >= s_at.size() || g_tick < s_at[s_next] || (read32(f + kFighterKind) & 0x1E0u) == 0u)
+        if (s_next >= s_at.size() || (read32(f + kFighterKind) & 0x1E0u) == 0u)
+            return;
+        uint64_t due = s_at[s_next].at;
+        if (s_at[s_next].fight != 0u)
+        {
+            const uint64_t start = fightStart(s_at[s_next].fight);
+            if (start == 0u)
+                return;
+            due += start;
+        }
+        if (g_tick < due)
             return;
         const float hp = 0.0115f;
         std::memcpy(g_rdram + f + 0x6Cu, &hp, 4);
@@ -649,6 +696,7 @@ namespace
     {
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
+        noteFightStart();
         g_fighterTick = g_tick;
         special(f);
         cpuHealthRoute(f);
@@ -883,6 +931,7 @@ namespace
             if (g_cameraOriginal != nullptr)
                 runtime->registerFunction(kCameraMatrices, cameraMatrices);
             g_inputOriginal = runtime->lookupFunction(kFighterInput);
+            ::g_hlFightStart = &fightStart;
             if (g_inputOriginal != nullptr)
                 runtime->registerFunction(kFighterInput, fighterInput);
             g_sequenceOriginal = runtime->lookupFunction(kSequenceStep);
