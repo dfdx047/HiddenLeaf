@@ -702,6 +702,25 @@ Três cenas, cada uma com o próprio layout (editável) e trocadas sozinhas pelo
   L1/R1 trocam o item, L2/R2 defesa) e das entradas da série (△ ○ jutsu, △ △ ○ jutsu supremo). **Conferir no UN5
   quando o jogo rodar**, inclusive o tempo entre os toques do Jutsu e do Ougi (hoje 70/50/90 ms).
 - Depois: variantes de direção dos jutsus e os minijogos do Ougi num toque.
+- [ ] **Modo "Ougi de um botão" (pedido do desenvolvedor, 2026-11-09):**
+  - **Onde se escolhe:** no menu de configuração da luta (Battle Settings, antes da luta) entra uma opção a mais para
+    o Ougi. Ela vale para as lutas seguintes.
+  - **O que muda:** o especial (△ ○, e o △ △ ○) começa como hoje. Os minijogos do Ougi, de quem faz e de quem leva,
+    trocam as sequências de botões por **um único botão, o ○** (o de bater), apertado várias vezes.
+  - **Quem ganha:** conta-se quantas vezes cada lado apertou na janela do minijogo:
+    - se quem fez apertou mais, o especial segue;
+    - se quem leva apertou mais, o especial é cancelado.
+  - **CPU:** a CPU também precisa de uma contagem (uma taxa de toques por dificuldade). Assim, contra a CPU, o
+    resultado depende de quem toca mais rápido.
+  - **Base que já existe** (`hl_game.cpp`):
+    - `special_one`: um toque faz o Jutsu ou o Ougi;
+    - os passos de apertar repetido do Ougi e das disputas são lidos em `0x7AF440`, `0x819D10` e `0x820FD0`;
+    - o `mash_percent` diz quanto vale cada toque.
+  - **Falta achar no jogo:**
+    - onde cada minijogo decide sucesso ou falha (resultado por lado), para trocar pela comparação das contagens;
+    - a opção do Battle Settings (o texto e o valor gravado), para acrescentar o modo novo;
+    - se acrescentar uma linha ao menu do jogo custar demais, a opção vai para a aba Controles do menu do Hidden
+      Leaf, e o desenvolvedor decide.
 - **Contrato do motor:** `TouchBridge.nativeScene()` → 0 desconhecido, 1 menu, 2 luta, 3 campanha. O motor sabe
   pelo overlay carregado (`BTL.BIN` luta, `ADV.BIN` aventura/campanha) e pelo estado do jogo.
 
