@@ -33,7 +33,7 @@ sealed interface InstallState {
  *  2. the boot program and the overlays are checked by SHA-256 against the release the engine was recompiled from:
  *     the engine's code is that program, so another one cannot run. An image of a mod (Ultimate Ninja 6, the
  *     Brazilian version) is recognised and the player is told to import it on the Mods page instead. Then the
- *     whole image is checked by SHA-1 against Redump's dump, so a damaged or patched file elsewhere is caught too;
+ *     whole image is checked by SHA-256 against Redump's dump, so a damaged or patched file elsewhere is caught too;
  *  3. only the small files are copied (SYSTEM.CNF, the ELF, PRG/, MODULES/, the small DATA/ .BIN files) to runtime/data/.
  */
 class GameDataInstaller(
@@ -114,10 +114,10 @@ class GameDataInstaller(
             report(InstallState.Working(context.getString(R.string.step_checking), 0.05f + 0.1f * i / KnownVersions.BASE_OVERLAYS.size, path))
         }
         // the program is the right one; the rest of the disc (the data, the IOP modules) has to be Redump's dump
-        val sha1 = imageSha1(iso) { percent ->
+        val sha = imageSha256(iso) { percent ->
             report(InstallState.Working(context.getString(R.string.step_checking), 0.15f + 0.85f * percent / 100, context.getString(R.string.detail_image_checksum, percent)))
         }
-        if (sha1 != KnownVersions.BASE_ISO_SHA1) throw Stop(context.getString(R.string.err_base_not_redump, sha1, KnownVersions.BASE_ISO_SHA1))
+        if (sha != KnownVersions.BASE_ISO_SHA256) throw Stop(context.getString(R.string.err_base_not_redump, sha, KnownVersions.BASE_ISO_SHA256))
     }
 
     private suspend fun copyBoot(iso: IsoImage, report: (InstallState.Working) -> Unit): InstallState.Installed {
@@ -179,9 +179,9 @@ class GameDataInstaller(
             return md.digest().joinToString("") { "%02x".format(it) }
         }
 
-        /** SHA-1 of the whole image file, with [progress] in percent. */
-        suspend fun imageSha1(iso: IsoImage, progress: (Int) -> Unit): String {
-            val md = MessageDigest.getInstance("SHA-1")
+        /** SHA-256 of the whole image file, with [progress] in percent. */
+        suspend fun imageSha256(iso: IsoImage, progress: (Int) -> Unit): String {
+            val md = MessageDigest.getInstance("SHA-256")
             val buf = ByteBuffer.allocate(4 shl 20)
             val total = iso.length
             var pos = 0L

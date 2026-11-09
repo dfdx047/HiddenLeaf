@@ -14,8 +14,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(RT "${PS2R}/ps2xRuntime")
 set(HOST "${CMAKE_CURRENT_SOURCE_DIR}/host")
 
-# Both SoCs are at least ARMv8.2-A (Cortex-A55/A76/A77). No FMA contraction: ARM fuses by default, and the PS2 does not.
-set(UN5_ARCH -march=armv8.2-a)
+# The test devices are at least ARMv8.2-A (Cortex-A55/A76/A77). UN5_MARCH=armv8-a (build.sh with HL_V80=1) makes the
+# libun5_v80.so the launcher picks on ARMv8.0 CPUs (the Mi A3's Snapdragon 665). No FMA contraction: ARM fuses by
+# default, and the PS2 does not.
+set(UN5_MARCH "armv8.2-a" CACHE STRING "the -march of the engine")
+set(UN5_ARCH -march=${UN5_MARCH})
 set(UN5_NUMERIC -fno-strict-aliasing -fwrapv -ffp-contract=off)
 add_compile_options(${UN5_ARCH} ${UN5_NUMERIC})
 add_compile_definitions(PS2X_HEADLESS_HOST=1 USE_SSE2NEON)

@@ -64,7 +64,7 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
                 dir = d,
                 changesCode = p.getProperty("code") == "1",
                 known = p.getProperty("known") == "1",
-                pack = com.dfdx047.hiddenleaf.engine.EngineBridge.has(context, com.dfdx047.hiddenleaf.engine.EngineBridge.packOf(id)) ||
+                pack = com.dfdx047.hiddenleaf.engine.EngineBridge.run { has(context, forCpu(packOf(id))) } ||
                     (KnownVersions.MODS.firstOrNull { it.id == id }?.pack ?: (p.getProperty("code") != "1")),
                 boot = p.getProperty("boot", ""),
             )
@@ -136,6 +136,14 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
         onProgress(context.getString(R.string.detail_checksums))
         val elfSha = GameDataInstaller.sha256(iso, elf)
         val known = KnownVersions.modByElf(elfSha)
+        // a known mod only from an image of it the launcher knows (the whole image, by SHA-256): each player brings
+        // their own, and a damaged or different build would run code the engine was not made for
+        val isoSha = GameDataInstaller.imageSha256(iso) { percent ->
+            onProgress(context.getString(R.string.detail_image_checksum, percent))
+        }
+        if (known != null && known.isoSha256.isNotEmpty() && isoSha !in known.isoSha256) {
+            throw Stop(context.getString(R.string.err_mod_image, known.name, isoSha, known.isoSha256.first()))
+        }
         val id = known?.id ?: "mod-${elfSha.take(8)}"
         val dir = File(paths.modLibrary, id)
         val disc = File(dir, "disc")
@@ -179,6 +187,7 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
         p["name"] = known?.name ?: context.getString(R.string.mod_unknown_name, boot)
         p["boot"] = boot
         p["elf_sha256"] = elfSha
+        p["iso_sha256"] = isoSha
         p["files"] = files.toString()
         p["bytes"] = bytes.toString()
         p["code"] = if (code) "1" else "0"

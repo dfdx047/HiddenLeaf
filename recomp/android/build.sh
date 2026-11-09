@@ -18,11 +18,14 @@ NDK=${NDK:-$HOME/Android/Sdk/ndk/29.0.14206865}
 out="$B/android"
 # HL_WATCH_BUILD=1: the lab build with the write watch (host/hl_watch.cpp), in its own folder
 watch=OFF; [ "${HL_WATCH_BUILD:-0}" = 1 ] && { watch=ON; out="$B/android_watch"; }
+# HL_V80=1: the ARMv8.0 build (-march=armv8-a) next to the ARMv8.2 one, as libun5_v80.so (libun5_<id>_v80.so for a mod);
+# the launcher picks it on CPUs without the ARMv8.1 atomics (EngineBridge)
+v80=""; march=armv8.2-a; [ "${HL_V80:-0}" = 1 ] && { v80=_v80; march=armv8-a; }
 ps2r="$B/PS2Recomp"
-lib=libun5.so
+lib=libun5$v80.so
 pack=()
 if [ -n "$mod" ]; then
-    out="$B/android_$mod"; ps2r="$B/mods/$mod/PS2Recomp"; lib="libun5_${mod//-/_}.so"; pack=(-DHL_PACK_ID="$mod")
+    out="$B/android_$mod"; ps2r="$B/mods/$mod/PS2Recomp"; lib="libun5_${mod//-/_}$v80.so"; pack=(-DHL_PACK_ID="$mod")
     [ -d "$ps2r/ps2xRuntime/src/runner" ] || { echo "no $ps2r: recomp/build.sh --mod <the mod's ISO> first" >&2; exit 1; }
     # the stubs and unstubs (tools/un5.py) go in when the code is generated: a mod generated before a change to them runs the
     # old ones (2026-11-09: the A35 with the runtime's sceGsExecLoadImage, black 3D in the fight)
@@ -34,6 +37,7 @@ if [ -n "$mod" ]; then
     rsync -a --exclude /ps2xRuntime/src/runner/ --exclude /ps2xRuntime/include/ps2_recompiled_functions.h --exclude /ps2xRuntime/include/ps2_recompiled_stubs.h \
         --exclude /build-tools/ --exclude /build-rt/ --exclude /.git/ "$B/PS2Recomp/" "$ps2r/"
 fi
+out="$out$v80"
 jni="$here/android/app/src/main/jniLibs/arm64-v8a"
 assets="$here/android/app/src/main/assets/gsx"
 SDL3="$DR/port/build/android-toolchain/sdl3"
@@ -54,7 +58,7 @@ if [ ! -e "$nominum/core/vif1.cpp" ]; then
 fi
 [ -d "$nominum/build/vu1rec" ] || echo "note: no $nominum/build/vu1rec: Nominum's VU1 without recompiled blocks (docs/registro.md, 2026-11-04 14:20)" >&2
 
-cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHL_NOMINUM_DIR="$nominum" -DHL_WATCH_BUILD=$watch \
+cmake -S "$here/recomp/android" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHL_NOMINUM_DIR="$nominum" -DHL_WATCH_BUILD=$watch -DUN5_MARCH=$march \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
     -DANDROID_STL=c++_static -DPS2R="$ps2r" "${pack[@]}" -DSDL3="$SDL3" -DFFMPEG="$FFMPEG" -DARMSX2="$DR/port/build/bt4/ARMSX2"
 cmake --build "$out" --target un5 -j"${JOBS:-$(nproc)}"

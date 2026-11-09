@@ -56,6 +56,29 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 21:00, noite: Mi A3 (ARMv8.0) e ISO conferida por SHA-256
+
+- **Mi A3 (Snapdragon 665, Adreno 610, ARMv8.0):** a `libun5.so` (`-march=armv8.2-a`) caía na abertura com SIGILL em
+  `PS2Memory::initialize`: o 665 não tem os atomics do ARMv8.1 (`/proc/cpuinfo`: `fp asimd evtstrm aes pmull sha1
+  sha2 crc32 cpuid`). Agora o APK leva as duas: `HL_V80=1 recomp/android/build.sh` faz a `libun5_v80.so`
+  (`-march=armv8-a`, pasta `build/android_v80`), e o `EngineBridge` escolhe pela CPU (sem `atomics` e `asimdrdm`, a
+  `_v80`). Uma lib de mod sem `_v80` não é carregada num ARMv8.0. As outras libs do APK (GS do ARMSX2, SDL3, hooks)
+  só têm os `__aarch64_*` do compilador, que testam a CPU na hora: rodam no 665 como estão.
+  **Teste:** no Mi A3, boot até a escolha de idioma, sem crash; menus pelo GS do ARMSX2 (Vulkan, 1x). Luta e nativo
+  na Adreno 610 ainda não testados. Odin 2 Mini com a lib v8.2: não conferido depois da mudança.
+- **ISO por SHA-256:** a imagem inteira do base passa a ser conferida por SHA-256 (era SHA-1), e um mod conhecido só
+  entra de uma imagem dele com o SHA-256 conhecido (`KnownMod.isoSha256`; o de cada mod fica no `mod.properties`).
+  Hashes: europeia `2e1b9a88…07bff`, A35 `37e01173…5007d`, Alpha 1.1X `bd95521e…6d9`, Versão Brasileira
+  `2c60b591…ed5e`. **Teste:** no Mi A3, remover os dados e importar a europeia de novo: "Versão europeia verificada".
+  Importação de mod com a conferência nova: não testada.
+- **Plano (decidido com o desenvolvedor):** os pacotes de código dos mods (`libun5_<id>.so`) saem do APK; cada um importa
+  a própria ISO e o código que o mod muda passa a rodar por um interpretador do EE dentro da `libun5.so` (a função
+  cujos bytes na RAM diferem dos recompilados vai para o interpretador). Nada de motor por fora. O pacote do A35 só sai
+  depois do interpretador rodar o A35.
+- **Correção da entrada das 18:35:** o filme não travava pela thread de prioridade 0; era o `ChangeThreadPriority`
+  devolvendo 0 em vez da prioridade antiga (o UN5 guarda em `0x3F6180` e restaura). `0086` + `InitThread` de verdade
+  (`tools/un5.py`): no PC boot e luta OK, estado igual. Ainda sem commit: falta o teste no Odin 2 Mini.
+
 ### 2026-11-09 18:35, tarde: o que trava o filme é a thread auxiliar de prioridade 0
 
 - Só o `InitThread` real com a prioridade 0 aceita (sem o `StartThread`): o boot também não passa dos filmes (nenhum

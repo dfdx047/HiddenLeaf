@@ -402,9 +402,10 @@
     <string name="err_is_mod">Esta é a %1$s, um mod. Importe aqui a ISO europeia original como base e depois adicione esta imagem na página Mods.</string>
     <string name="err_not_un5">Este é outro jogo ou outra versão (%1$s). O Hidden Leaf precisa de Naruto Shippuden: Ultimate Ninja 5, versão europeia (SLES-55605).</string>
     <string name="err_base_modified">Esta ISO europeia foi modificada (o programa ou os overlays diferem do original). Use um dump limpo como base; um mod entra depois, na página Mods.</string>
-    <string name="err_base_not_redump">O programa desta ISO europeia é o certo, mas a imagem como um todo não é o dump original: algum outro arquivo dela está danificado ou com patch (patch de DVD para CD, download corrompido).\nSHA-1 desta imagem: %1$s\nEsperado (Redump): %2$s\nFaça o dump do disco de novo, ou use uma imagem que bata com o Redump.</string>
+    <string name="err_base_not_redump">O programa desta ISO europeia é o certo, mas a imagem como um todo não é o dump original: algum outro arquivo dela está danificado ou com patch (patch de DVD para CD, download corrompido).\nSHA-256 desta imagem: %1$s\nEsperado (Redump): %2$s\nFaça o dump do disco de novo, ou use uma imagem que bata com o Redump.</string>
     <string name="err_missing_file">Falta um arquivo do jogo na imagem: %1$s</string>
     <string name="err_base_gone">Não dá mais para abrir a ISO base (foi movida ou apagada?). Importe de novo no Início.</string>
+    <string name="err_mod_image">Este é o %1$s, mas não uma imagem dele que o launcher conhece: o disco como um todo é diferente (download corrompido, outra versão, um patch por cima).\nSHA-256 desta imagem: %2$s\nEsperado: %3$s</string>
     <string name="err_mod_is_base">Esta imagem é igual ao jogo base: não tem mod nela.</string>
     <string name="detail_compare">Comparando com a base · %1$d%% · %2$s</string>
     <string name="mod_unknown_name">Mod (%1$s)</string>
