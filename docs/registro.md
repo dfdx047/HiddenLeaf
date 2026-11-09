@@ -56,6 +56,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 18:35, tarde: o que trava o filme é a thread auxiliar de prioridade 0
+
+- Só o `InitThread` real com a prioridade 0 aceita (sem o `StartThread`): o boot também não passa dos filmes (nenhum
+  overlay até v4000; o normal é o overlay 1 em v2734). Logo, o travamento da entrada das 18:00 vem da thread auxiliar
+  da libkernel (prioridade 0, à espera do semáforo dela) no escalonador do runtime, não do `StartThread`.
+- Pista: no runtime, `RotateThreadReadyQueue(0)` quer dizer "a prioridade de quem chama"; a libkernel usa a prioridade
+  0 de verdade para a thread auxiliar. Ver isso e como o runtime trata uma thread de prioridade 0 em espera.
+- Revertido de novo; o código gerado volta ao estado do `9f1f61e`.
+
 ### 2026-11-09 18:00, tarde: ordem das threads no boot (tentativa, revertida; aberto)
 
 - **Medida** (`HLB_FNLOG` com alocar, liberar e os stubs de syscall `CreateThread 0x15e8a0`, `StartThread 0x15e8c0`,
