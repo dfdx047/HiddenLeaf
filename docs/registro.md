@@ -56,6 +56,21 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 09:10, manhã: botão Ougi por toque real ainda não abre o filme (aberto)
+
+- **Teste** (`build/lab/gest/ougi.sh`, saída em `gest/ougi/`):
+  - toque real no botão Ougi (0,80; 0,29) e depois toques no Ataque durante 7 s;
+  - **sem nada no chakra:** o jogador apanha enquanto segura Chakra, e o Ougi não sai (falta chakra);
+  - **com o chakra do lutador `0xd7ba20` posto em 15,0 por POKE** (só depuração: `+0x70`, float `0x41700000`, a cada
+    60 vsyncs, `gest/env_ougi.txt`): o toque dispara uma sequência de jutsu (o salto ao céu, 5 hits), não o filme do
+    Ougi.
+- **Hipóteses a separar:**
+  1. `0xd7ba20` não é o jogador na luta 1. A CPU foi `0xd7b9a0` nas rotas, mas isso não prova qual é o jogador;
+     falta logar o lutador humano;
+  2. o especial de um toque (`special_one`, ligado) reescreve o ○ final do △△○ do botão Ougi. O registro de 11-05
+     viu △△○ funcionar com o especial **desligado**.
+- **Próximo passo:** logar com `HL_SP_LOG` o lutador humano e o chakra no toque, e repetir com o especial desligado.
+
 ### 2026-11-09 08:49, manhã: térmica de 4x/120 no Odin 2 Mini e correção de horários
 
 - **Correção de horários:** as entradas "08:50" (campanha) e "08:58" (botões na tela) foram escritas antes das 08:49 reais.
