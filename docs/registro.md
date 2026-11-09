@@ -56,6 +56,31 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 06:36, manhã: Odin 2 Mini (aparelho de teste a partir de agora): luta, Ougi, vitória, campanha
+
+- **Aparelhos:** pedido do desenvolvedor às 06:12: não usar mais o RP5, testar só no Odin 2 Mini
+  (`192.168.1.206:5555`, já no Wi-Fi e desbloqueado).
+- **Mod:** o aparelho estava com o A35 ligado pelo launcher (`modlib/mods.txt` = `1|un6-a35` e `un5_mods.txt`). Os
+  dois foram copiados para o scratchpad e apagados para as rotas da base; voltam no fim.
+- **Ajustes do aparelho, mantidos:** resolução 2x (alvo 1026x900), 60 interpolado.
+- **Rotas, APK de `63298ae`:**
+  - **Luta da `route_v3` do PC (`rec/o2_pc3`):**
+    - menus, START BATTLE, luta até o KO e seleção;
+    - Ougi da CPU com a cena no céu;
+    - nativo a 2x, mínimo de 49,9 fps.
+  - **Campanha (`rec/o2_camp`):**
+    - diálogos, "Act 1", vila, troca de área para o Hidden Leaf Gate, menu START e painel de pausa;
+    - de 49,7 a 49,9 fps, uma amostra de 46,7;
+    - o "Sair do jogo" não rodou, pelo mesmo motivo de antes (o fim da rota vem antes do `QUIT_AT`).
+  - **Rota v3 (`rec/o2_v3`):**
+    - luta 1 com o Ougi do jogador: faixa "Reversal", sequência de botões com OK/ERROR, manto da Kyubi no
+      cânion, close nos olhos, escurecimento e volta;
+    - KO, WINNER "Naruto Uzumaki", resultado "Ninja Song" (34 / 92 / 661 / 787, Outstanding), seleção, VS da "Round 2",
+      carga e começo da luta 2;
+    - de 44,3 a 49,9 fps; a gravação parou no vsync de fim, antes do KO da luta 2.
+- **Save do A35:** copiado do RP5, só o arquivo. Pelo adb não dá para criar pasta em `Android/data` neste Android;
+  foi via `/data/local/tmp` e `run-as com.dfdx047.hiddenleaf cp`.
+
 ### 2026-11-09 06:09, manhã: vitória da CPU vai à seleção também no PCSX2; luta 1 igual ao PCSX2 até v9400 (PC)
 
 - **Vitória da CPU:** a rota `route_v3` seguida de ✕ a cada 150 vsyncs leva a luta 1 até a vitória da CPU, e
