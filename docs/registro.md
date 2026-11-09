@@ -56,6 +56,41 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 15:10, tarde: fundo do título do A35 igual ao PCSX2 (pool do jogo no endereço do PS2, tabela de códigos do A35, `4e6797e`)
+
+Corrige a entrada de 15:05: a causa estava em três pontos juntos.
+
+- **A tabela de códigos do A35.** O A35 troca `jal _sceSifSendCmd` em `0x161E10` por `jal 0x17B1E4`. Ali fica um
+  pequeno motor (escrito por cima do `memcpy` da base) que, a cada comando SIF, grava uma tabela de pares
+  (endereço << 7 | tipo, valor). A única entrada põe 0,75 em `0xC3EF14`, o `+0x274` da câmera principal, logo depois
+  que `0x1843D0` a reinicia com 1,0. Achei com um ponto de observação de escrita na bancada (`HLB_WATCHW=0xc3ef14`):
+  `pc 0x17b224`, `ra 0x161e18`. Aqui, `sceSifSendCmd` era stub do runtime e as RPCs (`sceSifCallRpc`,
+  `sceSifBindRpc`) são HLE, então o motor nunca rodava.
+  - `tools/un5.py stubfix --elf --base --base-config` (o `build.sh --mod` passa os três): todo stub cujo código no ELF do
+    mod difere do da base passa a ser recompilado. No A35, só o `sceSifSendCmd`. Os limites de cada função vêm dos dois
+    configs, senão o `memcmp`, intacto, parecia mudado.
+  - `hl_game.cpp` (`modCodeTable`): acha o motor pelo `jal` em `0x161E10` e o `lui`/`ori $t4` do cabeçalho, e aplica a
+    tabela antes de cada `sceSifCallRpc` e `sceSifBindRpc`, como no PS2. Tipos: `sb`, `sh`, `sw`, inclusive no delay
+    slot de um `b`. Log: `[codes] the mod's code table at 0x17b244`.
+- **O pool do jogo 0x10 abaixo do PS2.** No boot (`0x118CA0`), o jogo pede ao `malloc` toda a RAM do fim do ELF até a
+  pilha e mantém o próprio heap ali, de baixo para cima. O newlib devolve `end + 0x10` (PCSX2: `0x928910` na base,
+  `0xA28910` no A35); o heap do runtime devolvia `end`. Por isso todo objeto do jogo ficava 0x10 abaixo (câmera
+  principal em `0xc3ec90`, contra `0xc3eca0` no PCSX2), e a tabela do A35 cairia no `+0x284` da câmera. `gameMalloc`
+  (`0x17A610`, só para as chamadas de `0x118D3C`/`0x118D58`) pede 0x10 a mais e devolve +0x10. Agora as câmeras
+  nascem nos mesmos endereços do PCSX2 (`0xc3eca0`, `0xc3ef60`, `0xc3f750`, `0xc3fa60`).
+  - **Ainda diferente:** o pool é ~1 MB menor (`0x14d76f0`, contra `0x15cd6f0`): o runtime reserva `0x1F00000` para
+    cima para as pilhas de callback. O jogo tenta de 0x100 em 0x100 até caber.
+- **O nosso gancho de câmera.** Fora das cenas largas, ele gravava 1,0 em toda câmera e apagava o 0,75 do A35. Agora
+  só mexe nas câmeras que ele mesmo alargou, e devolve a cada uma o valor que o jogo tinha (1,0 na base). O
+  `HL_CAM_NOWRITE` saiu.
+- **Resultado no Odin 2 Mini** (`HL_WATCH=0xc3ef14`: 0 → 0,75 no v3, sem mais mudanças):
+  - **A35:** o fundo do título mostra o mesmo enquadramento do PCSX2 (Sasuke à esquerda, Kakashi e Sakura à direita),
+    sem a ampliação de 1,34. O 2D fica nas proporções da tela (widescreen dos menus); antes saía esticado 1,33.
+  - **Base:** luta por toques reais (`withbase.sh gest/fight.sh`): larga a 0,75 no v6100, de volta à escala do jogo no
+    v6600 ("3 of 4 cameras back"), e larga de novo na seguinte. Imagem normal.
+- **Bancada (fora do repositório):** `HLB_WATCHW=addr` (cada escrita do EE na palavra, sem pausar, via memcheck do
+  recompilador) e `v0`/`sp` no `HLB_FNLOG`.
+
 ### 2026-11-09 15:05, tarde: o fundo 3D do título do A35 sai 4/3 mais largo que no PCSX2 (causa parcial, aberto)
 
 - **Visto:** no título do A35, a arte de fundo (projetada por câmera) sai ampliada 1,34 na horizontal em relação ao
