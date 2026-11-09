@@ -56,6 +56,16 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 14:08, tarde: a primeira conversa da campanha também com os controles dos menus
+
+- `hl_game.cpp` (`scene()`): a regra das conversas não espera mais o jogador andar uma vez (`g_advFreeTick != 0`).
+  Basta o gancho do `0x723970` estar posto. Ele só entra quando a tabela do ADV da biblioteca tem essa função, e a
+  tabela só responde quando o ADV na memória é o dela. Corrige o limite anotado em "10:10".
+- **Teste (toque real, base):** `build/lab/gest/talk3.sh`: a rota para no começo da campanha (v6160), e depois são só
+  toques no meio da tela a cada 1,3 s. A primeira conversa (Naruto, Sakura, Jiraiya) e a caixa "How to move" ficam só
+  com MENU e START, e os toques passam as falas. Com o jogador livre, os controles da campanha voltam. Os toques no
+  meio, já livre, não fazem nada.
+
 ### 2026-11-09 13:47, tarde: o A35 (NTSC) 21 linhas acima do PCSX2, corrigido (`0084`, `3d5bdb2`); conversas na Alpha 1.1X
 
 - **Imagem do A35:** o A35 é a versão americana (`SLUS_556.06`, NTSC). No Odin, o título e os menus saíam 21 linhas

@@ -1254,11 +1254,12 @@ int hl_game::scene()
     else if (s_scene != 1 && (now - s_lastOn > (s_scene == 2 ? 2000u : 8000u) || (s_scene == 2 ? mode != 1 : mode != 2)))
         s_scene = 1;
     // In the campaign, while the player cannot move (a conversation, a tutorial's box, a cut scene) the touch controls are the
-    // menu's: the fight's buttons leave the text alone and a tap is ✕, which moves the conversation on. Only once the game
-    // has shown it is the ADV this knows (the player moved at least once): a mod whose ADV is another keeps the campaign's
-    // controls. HL_TALK_OFF=1 keeps them too.
+    // menu's: the fight's buttons leave the text alone and a tap is ✕, which moves the conversation on. From the first
+    // conversation: the hook is only in when this library's ADV (the one the overlay resolver found in memory) has that
+    // function at 0x723970 (the base's, the Alpha 1.1X's, the A35's); a library without it keeps the campaign's controls.
+    // HL_TALK_OFF=1 keeps them too.
     static const bool s_talkOff = std::getenv("HL_TALK_OFF") != nullptr;
-    if (s_scene == 3 && mode == 2 && !s_talkOff && g_advFreeTick != 0u && tick - g_advFreeTick > 15u)
+    if (s_scene == 3 && mode == 2 && !s_talkOff && g_advFreeOriginal != nullptr && tick - g_advFreeTick > 15u)
         return 4; // (the launcher takes it as the menu's controls, at once: no wait for a loading screen's flicker)
     return s_scene;
 }
