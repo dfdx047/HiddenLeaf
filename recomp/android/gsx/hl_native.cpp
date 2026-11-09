@@ -2415,6 +2415,204 @@ static void applyAspect()
 	MTGS::RunOnGSThread([type]() { EmuConfig.CurrentAspectRatio = type; });
 }
 
+// ---- the 2D of the menus in the screen's shape (the GS draws them; this module is off then)
+// The picture is stretched from 4:3 to the screen (applyAspect). Each primitive drawn into the shown frame is squeezed
+// toward the middle by hudScale ((4/3) / shape), so stretched it has its own proportions again, and what covers the whole
+// width (a background, a clear, a fade) is left as it is and fills the screen. The scissor of a panel is squeezed with
+// what it clips. Offscreen drawing (another frame width than the display's) is not touched.
+namespace wide2d
+{
+	uint32_t s_prim = 0u, s_prmodecont = 1u, s_prmode = 0u;
+	uint32_t s_ofx[2] = {}, s_fbw[2] = {};
+	uint32_t s_dispW = 512u, s_dispFbw = 8u;
+	struct Vert
+	{
+		uint8_t* x; // the low 16 bits of an XYZ register (12.4 fixed point, before XYOFFSET)
+		float wx;   // its window x
+		bool done;
+	};
+	Vert s_verts[3] = {};
+	int s_count = 0;   // vertices queued for the primitive
+	int s_runSqueeze = -1; // strips and fans: the decision of the run's first triangle (-1 none yet)
+
+	inline uint32_t ctxt() { return (((s_prmodecont & 1u) ? s_prim : s_prmode) >> 9) & 1u; }
+	inline bool shown() { return s_fbw[ctxt()] == s_dispFbw; }
+
+	void squeeze(Vert& v)
+	{
+		if (v.done)
+			return;
+		v.done = true;
+		const float cx = s_dispW * 0.5f;
+		const float nx = cx + (v.wx - cx) * s_hudScale;
+		const int32_t fixed = static_cast<int32_t>(s_ofx[ctxt()]) + static_cast<int32_t>(nx * 16.0f + 0.5f);
+		const uint16_t x = static_cast<uint16_t>(std::clamp(fixed, 0, 0xFFFF));
+		std::memcpy(v.x, &x, 2);
+	}
+
+	void prim(uint32_t value)
+	{
+		s_prim = value & 0x7FFu;
+		s_count = 0;
+		s_runSqueeze = -1;
+	}
+
+	void vertex(uint8_t* field, bool kick)
+	{
+		uint16_t x;
+		std::memcpy(&x, field, 2);
+		const float wx = (static_cast<float>(x) - static_cast<float>(s_ofx[ctxt()])) / 16.0f;
+		const uint32_t type = s_prim & 7u;
+		const int need = type == 0u ? 1 : (type <= 2u || type == 6u) ? 2 : type <= 5u ? 3 : 0;
+		if (need == 0)
+			return;
+		if (s_count == need)
+		{
+			// the queue moves on: a strip keeps its last two, a fan its first and last
+			if (type == 5u)
+				s_verts[1] = s_verts[2];
+			else
+				for (int i = 0; i + 1 < need; ++i)
+					s_verts[i] = s_verts[i + 1];
+			--s_count;
+		}
+		s_verts[s_count++] = {field, wx, false};
+		if (!kick || s_count < need || !shown())
+		{
+			if (!shown())
+				s_verts[s_count - 1].done = true;
+			return;
+		}
+		if ((type == 2u || type == 4u || type == 5u) && s_runSqueeze >= 0)
+		{
+			if (s_runSqueeze)
+				squeeze(s_verts[s_count - 1]);
+			else
+				s_verts[s_count - 1].done = true;
+			return;
+		}
+		float lo = s_verts[0].wx, hi = lo;
+		for (int i = 1; i < s_count; ++i)
+		{
+			lo = std::min(lo, s_verts[i].wx);
+			hi = std::max(hi, s_verts[i].wx);
+		}
+		const bool full = hi - lo >= s_dispW * 0.9f;
+		if (type == 2u || type == 4u || type == 5u)
+			s_runSqueeze = full ? 0 : 1;
+		for (int i = 0; i < s_count; ++i)
+		{
+			if (full)
+				s_verts[i].done = true;
+			else
+				squeeze(s_verts[i]);
+		}
+		if (type == 6u || type == 3u || type == 1u || type == 0u)
+			s_count = 0;
+	}
+
+	void scissor(uint8_t* value, uint32_t c)
+	{
+		if (s_fbw[c] != s_dispFbw)
+			return;
+		uint64_t v;
+		std::memcpy(&v, value, 8);
+		const uint32_t x0 = v & 0x7FFu, x1 = (v >> 16) & 0x7FFu;
+		if (x0 == 0u && x1 + 1u >= s_dispW)
+			return; // the whole width
+		const float cx = s_dispW * 0.5f;
+		const uint32_t n0 = static_cast<uint32_t>(std::clamp(cx + (static_cast<float>(x0) - cx) * s_hudScale, 0.0f, 2047.0f));
+		const uint32_t n1 = static_cast<uint32_t>(std::clamp(cx + (static_cast<float>(x1) - cx) * s_hudScale + 0.5f, 0.0f, 2047.0f));
+		v = (v & ~0x7FF07FFull) | n0 | (static_cast<uint64_t>(n1) << 16);
+		std::memcpy(value, &v, 8);
+	}
+
+	void reg(uint32_t address, uint8_t* value)
+	{
+		uint64_t v;
+		std::memcpy(&v, value, 8);
+		switch (address)
+		{
+			case 0x00: prim(static_cast<uint32_t>(v)); break;
+			case 0x04: case 0x05: vertex(value, true); break;
+			case 0x0C: case 0x0D: vertex(value, false); break;
+			case 0x18: case 0x19: s_ofx[address - 0x18] = v & 0xFFFFu; break;
+			case 0x1A: s_prmodecont = v & 1u; break;
+			case 0x1B: s_prmode = v & 0x7FFu; break;
+			case 0x40: case 0x41: scissor(value, address - 0x40); break;
+			case 0x4C: case 0x4D: s_fbw[address - 0x4C] = (v >> 16) & 0x3Fu; break;
+			default: break;
+		}
+	}
+} // namespace wide2d
+
+void privRegs(const uint8_t* regs, uint32_t size)
+{
+	// DISPFB2 (0x90): FBW at bits 9..14; DISPLAY2 (0xA0): DW bits 32..43, MAGH bits 23..26
+	if (size < 0xA8u)
+		return;
+	uint64_t fb, disp;
+	std::memcpy(&fb, regs + 0x90, 8);
+	std::memcpy(&disp, regs + 0xA0, 8);
+	const uint32_t w = static_cast<uint32_t>(((disp >> 32) & 0xFFFu) + 1u) / static_cast<uint32_t>(((disp >> 23) & 15u) + 1u);
+	if (w >= 256u && w <= 1024u)
+	{
+		wide2d::s_dispW = w;
+		wide2d::s_dispFbw = (fb >> 9) & 0x3Fu;
+	}
+}
+
+void widen2d(uint8_t* data, uint32_t size)
+{
+	using namespace wide2d;
+	static const bool s_off = std::getenv("HL_WIDE2D_OFF") != nullptr;
+	if (s_off || s_hudScale >= 0.999f)
+		return;
+	uint32_t at = 0u;
+	while (at + 16u <= size)
+	{
+		uint64_t lo, hi;
+		std::memcpy(&lo, data + at, 8);
+		std::memcpy(&hi, data + at + 8, 8);
+		const uint32_t qwords = tagQwords(lo), flg = (lo >> 58) & 3u;
+		const uint32_t nreg = ((lo >> 60) & 15u) ? ((lo >> 60) & 15u) : 16u;
+		const uint32_t nloop = lo & 0x7FFFu;
+		uint8_t* body = data + at + 16u;
+		if (at + 16u + qwords * 16u > size)
+			return; // (a tag cut by the packet's end: left alone)
+		at += 16u + qwords * 16u;
+		if (flg >= 2u)
+			continue;
+		if ((lo >> 46) & 1u)
+			prim(static_cast<uint32_t>((lo >> 47) & 0x7FFu));
+		if (flg == 0u)
+		{
+			uint8_t* q = body;
+			for (uint32_t l = 0; l < nloop; ++l)
+				for (uint32_t r = 0; r < nreg; ++r, q += 16)
+				{
+					const uint32_t d = (hi >> (4u * r)) & 15u;
+					uint64_t b;
+					std::memcpy(&b, q + 8, 8);
+					switch (d)
+					{
+						case 0x0: prim(static_cast<uint32_t>(q[0] | (q[1] << 8))); break;
+						case 0x4: case 0x5: vertex(q, ((b >> 47) & 1u) == 0u); break;
+						case 0xC: case 0xD: vertex(q, false); break;
+						case 0xE: reg(static_cast<uint32_t>(b & 0xFFu), q); break;
+						default: break;
+					}
+				}
+		}
+		else
+		{
+			uint8_t* q = body;
+			for (uint32_t k = 0; k < nloop * nreg; ++k, q += 8)
+				reg((hi >> (4u * (k % nreg))) & 15u, q);
+		}
+	}
+}
+
 void setShape(float aspect, float hudScale)
 {
 	s_shape = aspect;

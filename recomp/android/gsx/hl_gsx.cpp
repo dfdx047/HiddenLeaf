@@ -40,6 +40,7 @@
 #include "hl_native.h"
 #include "ps2_live_ring.h"
 
+static std::atomic<bool> g_bt4WideCamera{false}; // (Bt4Gsx_WideCamera, below)
 int bt4gsx_runner_main(int argc, char* argv[]); // pcsx2-gsrunner's main() (Main.cpp, renamed by the build)
 
 namespace
@@ -406,6 +407,8 @@ namespace
 						dumpTransfer(path, s_packet.data(), length);
 					if (hl_native::transfer(path, s_packet.data(), length))
 						continue;
+					if (!hl_native::sceneOn() && !g_bt4WideCamera.load(std::memory_order_relaxed))
+						hl_native::widen2d(s_packet.data(), length);
 					*out = {type, path, s_packet.data(), length};
 					return true;
 				}
@@ -449,6 +452,7 @@ namespace
 					peek(1, s_packet.data(), kPrivRegsSize);
 					consume(1 + kPrivRegsSize);
 					s_dumpRegs.assign(s_packet.begin(), s_packet.begin() + kPrivRegsSize);
+					hl_native::privRegs(s_packet.data(), static_cast<uint32_t>(kPrivRegsSize));
 					*out = {type, 0, s_packet.data(), static_cast<uint32_t>(kPrivRegsSize)};
 					return true;
 				}
@@ -524,6 +528,9 @@ struct Bt4GsxArgs
 };
 
 __attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
+// The host: the game's camera is the wide one this vsync (a fight, an Ougi's film, the campaign): its 3D is already in the
+// screen's shape, so the menus' 2D squeeze (hl_native::widen2d) stays off
+__attribute__((visibility("default"))) void Bt4Gsx_WideCamera(bool wide) { g_bt4WideCamera.store(wide, std::memory_order_relaxed); }
 __attribute__((visibility("default"))) void Bt4Gsx_LiveFight(bool live) { hl_native::liveFight(live); }
 __attribute__((visibility("default"))) int Bt4Gsx_PresentRate() { return hl_native::presentRate(); }
 

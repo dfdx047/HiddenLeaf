@@ -11,6 +11,7 @@ namespace hl_game
     extern std::atomic<uint32_t> g_vsync;      // the vsync now (for other threads' logs: the SPU2's HL_SND_ONSET)
 
     extern bool (*g_nativeOn)();
+    extern void (*g_wideCameraOut)(bool wide);   // libbt4gsx: the camera is the wide one (its menus' 2D squeeze stays off)
     extern void (*g_liveFight)(bool live);       // libbt4gsx: the fighters read their input and no Ougi is on the screen               // libbt4gsx: its native renderer is drawing (a fight or the campaign)
     int divider();                             // vsyncs a game frame takes (the game's own: 2)
 

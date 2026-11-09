@@ -40,6 +40,7 @@ namespace hl_game
     std::atomic<int> g_mashPercent{100};
     bool (*g_nativeOn)() = nullptr;
     void (*g_liveFight)(bool) = nullptr;
+    void (*g_wideCameraOut)(bool) = nullptr;
     void (*g_gsDump)(const char *, int) = nullptr;
     std::string g_gsDumpDir;
     std::string g_vifDumpDir;
@@ -992,6 +993,8 @@ namespace
         if (hl_game::g_unlockAll.load(std::memory_order_relaxed) && tick % 50u == 0u)
             unlockEverything();
         // (for the native renderer's fight held without its detector: hl_native.cpp, s_held)
+        if (hl_game::g_wideCameraOut != nullptr)
+            hl_game::g_wideCameraOut(wideCamera());
         if (hl_game::g_liveFight != nullptr)
             hl_game::g_liveFight(hl_game::overlay() == 1 && g_fighterTick != 0u && tick - g_fighterTick <= 30u && !ougiOnScreen()); // (30: in a live fight the age reaches 11 to 21 now and then)
         static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;
