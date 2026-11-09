@@ -56,6 +56,26 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 04:45, madrugada: Alpha 1.1X no RP5 com a `libun5.so` nova; ritmo das cargas (PC)
+
+- **Hora (correção):** a entrada de baixo, marcada 04:50, foi escrita às 04:39 (`85627b0`).
+- **Alpha 1.1X no RP5 (`rec/pc3_rp5_a11x`, `hl_env_n3_v3_c.txt`, `un5_mods.txt` = `modlib/un6-a11x/disc`, apagado no
+  fim):** o log diz `mod program …/un6-a11x/disc/SLES_556.05 (the base's code, its own data)`. Na rota:
+  - menus do mod, Hidden Leaf Village e luta (nativo de v6113 a v7264);
+  - Ougi da CPU com o "Press the appropriate button" e "You win!!";
+  - volta à luta, até o v9255;
+  - de 49,4 a 50 fps, som presente.
+- **A35:** `libun5_un6_a35.so` sendo refeita com os patches novos (`recomp/android/build.sh --mod un6-a35`).
+- **Ritmo das cargas, PC (`HLB_CDLOG=1`, corridas `pcd`/`rcd`, as leituras do EE casadas pelo LBN):**
+  - O tamanho de cada leitura é igual (0x20 setores); muda só o ritmo.
+  - Na abertura, o recomp chega a ler ~500 vsyncs antes: o CD dele é instantâneo.
+  - Nos menus, o recomp lê ~48 vsyncs antes, porque a rota usa vsyncs fixos. A leitura periódica `0x75xxx` (a cada
+    ~50 vsyncs) também vem 48 vsyncs antes.
+  - Na carga da luta (de v5031 em diante), cada leitura sai um pouco depois: o atraso cresce de +5 a +54 vsyncs em
+    ~250 vsyncs. Daí os 28 vsyncs a mais no começo da luta.
+  - **Conclusão:** igualar isso exige um modelo de tempo do drive (busca e leitura) e de ciclos do EE como no PCSX2.
+    Ganho: ~1 s na carga da luta no PC. Não faço agora.
+
 ### 2026-11-09 04:50, madrugada: RP5 com a `libun5.so` nova: campanha completa e Ougi
 
 Mesmo APK da entrada das 04:30 (`af8ed28`), com o `hl_lbn.txt` no aparelho.
