@@ -56,6 +56,16 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 06:36 (hora real), manhã: rota v3 até v16200 no Odin 2 Mini
+
+- **Hora (correção):** as duas entradas de baixo, marcadas 06:36 e 06:45, foram escritas às ~06:20 e às 06:30
+  (`612d3ca`, `01b4dd4`).
+- **`rec/o2_v3b`** (mod tirado e posto de volta como antes): a luta 1 e a vitória como em `o2_v3`, e a luta 2 até o
+  tempo 70, sem trava e de 49,8 a 49,9 fps.
+- **O KO da luta 2 não saiu até v16200.** O `POKE` da vida da CPU (`d7ba8c` em v11150) não derrubou a CPU a tempo.
+  O endereço é o do registro de 11-03, e o lutador da luta 2 pode ter mudado de lugar. Fica para a próxima rota: tirar
+  o endereço do log do jogo, ou terminar a luta 2 por tempo.
+
 ### 2026-11-09 06:45, manhã: A35 no Odin 2 Mini; o mod do desenvolvedor de volta
 
 - **A35 (`rec/o2_a35`, `hl_env_a35f.txt`, `libun5_un6_a35.so` regenerada às 05:10):**
