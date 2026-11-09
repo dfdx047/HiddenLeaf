@@ -56,6 +56,41 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 15:05, tarde: o fundo 3D do título do A35 sai 4/3 mais largo que no PCSX2 (causa parcial, aberto)
+
+- **Visto:** no título do A35, a arte de fundo (projetada por câmera) sai ampliada 1,34 na horizontal em relação ao
+  PCSX2, em 16:9 e em 4:3. O 2D (botões e textos) está no lugar certo. Medida: ajuste de escala por mínimo erro entre a
+  captura do Odin e a do PCSX2 (`a35t_v03200`). Na VRAM do quadro mostrado (dumps do GS dos dois lados, desembaralhados
+  do PSMCT32), o 2D é igual e só o fundo difere. O jogo base em 4:3 bate com o PCSX2.
+- **Descartado:**
+  - registros de exibição: `DISPFB`/`DISPLAY` iguais aos do PCSX2 (dump `a35d_v03200_gs`). O `SMODE1` só difere no bit
+    SINT;
+  - código que se modifica: o código principal na RAM do PCSX2 é igual ao arquivo;
+  - patches do PCSX2: nenhum para `SLUS-55606`;
+  - o nosso gancho de câmera: sem a escrita (`HL_CAM_NOWRITE=1`), a imagem é a mesma.
+- **Mecanismo:**
+  - o A35 muda a câmera do jogo: `0x10DD00` usa 688 no lugar de 512 e 2,3125 no lugar de 2; `0x10E670` e `0x10F4F0`
+    passam 0,75 no lugar de 1,0;
+  - as câmeras nascem com `+0x274` (escala horizontal) = 0,75 (v181 no PCSX2, v2 no nosso);
+  - em seguida, `0x1843D0` reinicia a câmera principal com 1,0 (`lui 0x3F80` fixo; `HLB_FNLOG` com `f12`/`f18`, novo na
+    bancada). Isso acontece **nos dois**;
+  - **no PCSX2**, a câmera principal já está de novo em 0,75 no v199 e fica assim (v200 a v3200; a cópia `0x1C01B0`
+    para `0xcb6550` também leva 0,75). **No nosso** fica 1,0 (`HL_WATCH=0xc3ef04`: 0 → 1,0 no v3, e mais nada). 1/0,75
+    = 1,333, a ampliação medida;
+  - nenhuma das funções que escrevem `+0x274` por instrução roda no PCSX2 depois do v198: o setter `0x10EED0`, as do
+    programa (`0x23F240`, `0x23F3F0`, `0x23F4C0`, `0x21B7C0`, `0x21BC70`, `0x240D70`, `0x254C70`), as do ETC
+    (`0x6E4000`, `0x6E7330`) e a do MOD (`0xA022E0`). A volta a 0,75 deve vir de uma cópia do bloco inteiro da câmera
+    (`sq`/memcpy) que só acontece no PCSX2. É a próxima coisa a achar: um ponto de parada de escrita no PCSX2 em
+    `0xc3ef14`, ou a cópia da RAM em vários pontos do v198.
+- **Ferramentas novas:**
+  - `HL_CAM_LOG=1`: cada chamada do setter, com o chamador da inicialização; e cada mudança do `+0x274` vista pelo
+    gancho;
+  - `HL_CAM_NOWRITE=1`: o gancho não escreve 1,0 fora das cenas largas;
+  - `HL_DISP_LOG=1` (`hl_native.cpp`): os registros de exibição, a cada mudança;
+  - na bancada (fora do repositório): `f12` e `f18` no `HLB_FNLOG`.
+- **Atenção:** a troca para 4:3 pelo menu do jogo fica salva no `un5_settings.txt`. Voltei o Odin para "Tela cheia".
+  Na rota de 4:3, o menu do jogo funcionou por toque (Gráficos → 4:3 → Continuar).
+
 ### 2026-11-09 14:08, tarde: a primeira conversa da campanha também com os controles dos menus
 
 - `hl_game.cpp` (`scene()`): a regra das conversas não espera mais o jogador andar uma vez (`g_advFreeTick != 0`).

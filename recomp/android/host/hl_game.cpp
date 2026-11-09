@@ -134,6 +134,21 @@ namespace
             s_last = scale;
             std::fprintf(stderr, "[cam] v%llu x %.3f\n", static_cast<unsigned long long>(g_tick), scale);
         }
+        static const bool s_camLog = std::getenv("HL_CAM_LOG") != nullptr;
+        if (s_camLog)
+        {
+            static int s_n = 0;
+            float before;
+            std::memcpy(&before, rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), 4);
+            if (s_n < 40 && before != scale)
+            {
+                ++s_n;
+                std::fprintf(stderr, "[cam] v%llu camera 0x%x +0x274 was %g, now %g\n", static_cast<unsigned long long>(g_tick), camera, before, scale);
+            }
+        }
+        static const bool s_noWrite = std::getenv("HL_CAM_NOWRITE") != nullptr; // (the game's own scale left alone outside the wide scenes)
+        if (s_noWrite && scale == 1.0f)
+            return;
         std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
         // (the cameras the fight made wide: a picture may be built later from one of them without coming back here)
         static uint32_t s_cameras[16];
@@ -317,6 +332,20 @@ namespace
         g_appendOriginal(rdram, ctx, runtime);
     }
 #endif
+
+    // HL_CAM_LOG: who sets a camera's horizontal scale (0x10EED0: +0x274 = f12), with the caller
+    PS2Runtime::RecompiledFunction g_camSetOriginal = nullptr;
+    void cameraSetScale(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        static int s_n = 0;
+        if (s_n < 60)
+        {
+            ++s_n;
+            std::fprintf(stderr, "[camset] v%llu camera 0x%x scale %g ra 0x%x, init called from 0x%x\n", static_cast<unsigned long long>(g_tick),
+                         GPR_U32(ctx, 4), ctx->f[12], GPR_U32(ctx, 31), read32(GPR_U32(ctx, 29) + 0x40u));
+        }
+        g_camSetOriginal(rdram, ctx, runtime);
+    }
 
     void cameraMatrices(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -1066,6 +1095,8 @@ namespace
             g_cameraOriginal = runtime->lookupFunction(kCameraMatrices);
             if (g_cameraOriginal != nullptr)
                 runtime->registerFunction(kCameraMatrices, cameraMatrices);
+            if (std::getenv("HL_CAM_LOG") != nullptr && (g_camSetOriginal = runtime->lookupFunction(0x10EED0u)) != nullptr)
+                runtime->registerFunction(0x10EED0u, cameraSetScale);
             g_inputOriginal = runtime->lookupFunction(kFighterInput);
             ::g_hlFightStart = &fightStart;
             if (g_inputOriginal != nullptr)

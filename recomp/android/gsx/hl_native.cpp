@@ -2598,6 +2598,24 @@ void privRegs(const uint8_t* regs, uint32_t size)
 	uint64_t fb, disp;
 	std::memcpy(&fb, regs + 0x90, 8);
 	std::memcpy(&disp, regs + 0xA0, 8);
+	static const bool s_log = std::getenv("HL_DISP_LOG") != nullptr; // the CRTC's registers, each time one changes
+	if (s_log)
+	{
+		static uint64_t s_last[8];
+		static const uint32_t kAt[8] = {0x00, 0x10, 0x20, 0x70, 0x80, 0x90, 0xA0, 0xE0};
+		bool changed = false;
+		uint64_t now[8];
+		for (int i = 0; i < 8; ++i)
+		{
+			std::memcpy(&now[i], regs + kAt[i], 8);
+			changed |= now[i] != s_last[i];
+			s_last[i] = now[i];
+		}
+		if (changed)
+			std::fprintf(stderr, "[disp] pmode %llx smode1 %llx smode2 %llx dispfb1 %llx display1 %llx dispfb2 %llx display2 %llx bg %llx\n",
+				(unsigned long long)now[0], (unsigned long long)now[1], (unsigned long long)now[2], (unsigned long long)now[3],
+				(unsigned long long)now[4], (unsigned long long)now[5], (unsigned long long)now[6], (unsigned long long)now[7]);
+	}
 	const uint32_t w = static_cast<uint32_t>(((disp >> 32) & 0xFFFu) + 1u) / static_cast<uint32_t>(((disp >> 23) & 15u) + 1u);
 	if (w >= 256u && w <= 1024u)
 	{
