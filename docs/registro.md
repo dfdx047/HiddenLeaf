@@ -56,6 +56,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 06:45, manhã: A35 no Odin 2 Mini; o mod do desenvolvedor de volta
+
+- **A35 (`rec/o2_a35`, `hl_env_a35f.txt`, `libun5_un6_a35.so` regenerada às 05:10):**
+  - aviso do mod, logos, abertura e carga do save copiado;
+  - "Combate Livre", seleção, "Lutem!" e Aldeia Oculta da Folha;
+  - luta com o 3D completo e o Ougi da CPU (cena no céu);
+  - 59,9 fps (NTSC), mínimo de 52,2.
+- **Restaurado:** `modlib/mods.txt` (`1|un6-a35`) e `un5_mods.txt`, como estavam. O app foi parado.
+
 ### 2026-11-09 06:36, manhã: Odin 2 Mini (aparelho de teste a partir de agora): luta, Ougi, vitória, campanha
 
 - **Aparelhos:** pedido do desenvolvedor às 06:12: não usar mais o RP5, testar só no Odin 2 Mini
