@@ -20,7 +20,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Widescreen na luta | parcial | `2fee126` | RP5 | gravação de 11-03: 808 → 0 quadros com barra | câmera larga presa à entrada do lutador nos últimos 6 vsyncs (não ao estado da cena). Relato de regressão |
 | Widescreen na campanha | funciona | `d7faa17` | Odin 2 Mini (16:9), RP5 (20:9, 11-09 05:16) | rota de campanha e toque real | sem barras; 50 fps no Odin 2 Mini |
 | Widescreen nos menus | funciona | `d7faa17` | Odin 2 Mini (16:9) | rotas `o2_w2` e de campanha, toque real | 2D no formato da tela (`13256aa`), cópias de quadro intactas (`dd66468`), adereços 3D da seleção (`d7faa17`); filmes em 4:3; 20:9 não testado neste aparelho |
-| Widescreen em 20:9 | parcial | `a6c40f5` | Odin 3 (2400x1080) | rotas v3 e de campanha gravadas, `ana.py` | luta: câmera `x 0.600`, 0 barras; campanha: a cortina de transição não cobre a largura (~1 s por troca); menus esticados |
+| Widescreen em 20:9 | parcial | `967fc8e` | Odin 3 (2400x1080); Odin 2 Mini com `wm size 2400x1080` (menus, 11-09) | rotas v3 e de campanha gravadas, `ana.py`; menus por `gest/wide209.sh` | luta: câmera `x 0.600`, 0 barras; menus largos e na proporção (título, Mode Select, seleção, VS, NOW LOADING) no Odin 2 Mini; campanha: a cortina de transição não cobre a largura (~1 s por troca) |
 | Controles por cena | funciona | `3933c12` | Odin 2 Mini | toque real (11-09): luta, campanha, conversas, menus | luta: combo, pulo, chakra, jutsu, disputa, item, defesa, START, Back; conversas da campanha (desde a primeira) com os controles dos menus; toque mínimo de 80 ms |
 | Especial com um botão (Ougi) | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube | jogado por toque, gravado (`p2_cube`, `p3_odin60`, `p4_134`, `p6_cube`, `p8`–`p10`) | ligado e desligado; △△○ à mão e disputa vistos a 50 (Cube), 60 e 120 (Odin); falta o Ougi da CPU a 120 e o Cube a 60 |
 | Painel de pausa (menu do jogo) | funciona | `e3f0d17` | Odin 2 Mini; antes RP5, Cube, Odin 3 | `build/lab/gest/panel.sh` (11-09), rota de campanha (11-05) | menu com abas Gráficos (1x a 8x, 30 a 120 fps), Controles (com dicas) e Layout; "Sair do jogo" volta ao launcher |
@@ -55,6 +55,22 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-09 16:15, tarde: menus em 20:9 no Odin 2 Mini; campanha depois da mudança da câmera
+
+- **20:9** (`build/lab/gest/wide209.sh` pelo `withbase.sh`: `wm size 2400x1080` com `trap` que sempre devolve o
+  tamanho; rota v3 sem modo rápido; capturas nos vsyncs 2400 a 6500, lidos das linhas `[perf]`; saída em
+  `gest/w209/`):
+  - título, Mode Select, seleção com Linked Mode e "Battle!", VS e NOW LOADING ocupam os 2400 px, com o 2D na
+    proporção. A luta sai larga;
+  - a abertura (filme) fica em 4:3 com faixas, como em 16:9;
+  - a grade de rostos da seleção termina com um "?" cortado na borda do painel, o mesmo jeito da seleção do A35:
+    deve ser a janela de rolagem do jogo, ainda sem referência do PCSX2 nessa largura;
+  - linha "Widescreen em 20:9" da tabela atualizada; tirei de lá o "menus esticados".
+- **Campanha depois da mudança do gancho de câmera** (`withbase.sh gest/talk3.sh`, `gest/talk3/`): a cena sai larga
+  (`[cam] v3523 x 0.750`), a conversa avança por toque e o jogador fica livre, com HUD e controles da campanha.
+- **Luta do jogo base, mesma mudança** (`gest/fight/`): larga a 0,75, de volta à escala do jogo depois. O contador do
+  canto mostra 23,9 no filme do Ougi: é o ritmo do próprio filme. O executor segue a 50,0 fps (`[perf]`).
 
 ### 2026-11-09 16:05 (horário do relógio), tarde: o PC não estava travado; heap igual até o bloco 3650
 
