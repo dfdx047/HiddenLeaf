@@ -2423,7 +2423,16 @@ static void applyAspect()
 namespace wide2d
 {
 	uint32_t s_prim = 0u, s_prmodecont = 1u, s_prmode = 0u;
-	uint32_t s_ofx[2] = {}, s_fbw[2] = {};
+	uint32_t s_ofx[2] = {}, s_fbw[2] = {}, s_fbp[2] = {}, s_tbp[2] = {};
+	uint32_t s_targets[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}; // the frames drawn into lately (FBP): a texture at one of them is a copy of a picture
+	uint32_t s_targetNext = 0u;
+	bool isTarget(uint32_t tbp)
+	{
+		for (uint32_t t : s_targets)
+			if (t != 0xFFFFFFFFu && t * 32u == tbp)
+				return true;
+		return false;
+	}
 	uint32_t s_dispW = 512u, s_dispFbw = 8u;
 	struct Vert
 	{
@@ -2497,7 +2506,10 @@ namespace wide2d
 			lo = std::min(lo, s_verts[i].wx);
 			hi = std::max(hi, s_verts[i].wx);
 		}
-		const bool full = hi - lo >= s_dispW * 0.9f;
+		// a copy of a picture (the game composes the screen in one frame and copies it to the shown one in 64 px
+		// columns): its source was squeezed already, so it is left as it is
+		const bool copy = ((s_prim >> 4) & 1u) && isTarget(s_tbp[ctxt()]);
+		const bool full = copy || hi - lo >= s_dispW * 0.9f;
 		if (type == 2u || type == 4u || type == 5u)
 			s_runSqueeze = full ? 0 : 1;
 		for (int i = 0; i < s_count; ++i)
@@ -2540,7 +2552,22 @@ namespace wide2d
 			case 0x1A: s_prmodecont = v & 1u; break;
 			case 0x1B: s_prmode = v & 0x7FFu; break;
 			case 0x40: case 0x41: scissor(value, address - 0x40); break;
-			case 0x4C: case 0x4D: s_fbw[address - 0x4C] = (v >> 16) & 0x3Fu; break;
+			case 0x4C: case 0x4D:
+			{
+				const uint32_t c = address - 0x4C, fbp = v & 0x1FFu;
+				s_fbw[c] = (v >> 16) & 0x3Fu;
+				s_fbp[c] = fbp;
+				bool known = false;
+				for (uint32_t t : s_targets)
+					known = known || t == fbp;
+				if (!known)
+				{
+					s_targets[s_targetNext] = fbp;
+					s_targetNext = (s_targetNext + 1u) & 7u;
+				}
+				break;
+			}
+			case 0x06: case 0x07: s_tbp[address - 0x06] = v & 0x3FFFu; break;
 			default: break;
 		}
 	}
@@ -2599,6 +2626,7 @@ void widen2d(uint8_t* data, uint32_t size)
 						case 0x0: prim(static_cast<uint32_t>(q[0] | (q[1] << 8))); break;
 						case 0x4: case 0x5: vertex(q, ((b >> 47) & 1u) == 0u); break;
 						case 0xC: case 0xD: vertex(q, false); break;
+						case 0x6: case 0x7: reg(d, q); break; // (TEX0 in a packed loop)
 						case 0xE: reg(static_cast<uint32_t>(b & 0xFFu), q); break;
 						default: break;
 					}

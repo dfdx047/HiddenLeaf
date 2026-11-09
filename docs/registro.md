@@ -56,6 +56,28 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 08:20, manhã: menus em widescreen no Odin 2 Mini (16:9, "Tela cheia")
+
+- **Correção da hora:** a entrada abaixo diz 09:00, mas foi escrita às 08:05.
+- **Primeira gravação** (`rec/o2_w1`, `13256aa`): o 2D ficou na proporção, mas o fundo também foi apertado, com
+  faixas pretas ou brancas dos lados.
+- **Causa:**
+  - o jogo monta a tela no quadro `FBP 0` (o fundo é uma tira de um quadro inteiro, 0..511 × 0..447);
+  - depois copia esse quadro para o quadro mostrado (`FBP 0x70`, contexto 2) em 8 sprites de coluna de 64 × 512
+    (`gifprims.py`, pacotes 2515 a 2522 da captura da seleção);
+  - cada coluna era apertada de novo.
+- **Correção** (`widen2d`): primitiva com textura cujo `TBP0` é um quadro desenhado há pouco (`FBP × 32`, os últimos 8
+  `FRAME`) é cópia de imagem e fica como está. O `TEX0` também é lido nos laços packed (descritores 6 e 7).
+- **Segunda gravação** (`rec/o2_w2`):
+  - ocupam a tela toda, sem faixas, com texto, retratos e painéis na proporção:
+    - escolha de idioma, título (New Game / Load Game) e NOW LOADING;
+    - Mode Select, Select Character, a janela do Linked Mode, Stage Select e VS;
+  - os filmes (logos, abertura) ficam em 4:3 com faixas pretas, porque o quadro do filme não cobre 90% da largura.
+    Assim a proporção do filme fica certa;
+  - a luta, pelo nativo, não muda.
+- **Falta ver:** WINNER, a tela de resultado e a campanha (o mapa usa o nativo, mas os menus dela não), e 20:9 num
+  aparelho com essa tela.
+
 ### 2026-11-09 09:00, manhã: matriz de desempenho do Odin 2 Mini (resolução × fps × filtro) e o menu do jogo no aparelho
 
 **Matriz** (`build/lab/matrix.sh 192.168.1.206:5555 o2m`, `build/lab/matrix/o2m.tsv`):
