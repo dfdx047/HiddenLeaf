@@ -56,6 +56,30 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 16:00, tarde: o pool no endereço do PS2 também no PC; o executor do PC parou de chegar ao logo
+
+- **Horários:** as duas entradas anteriores ("15:10" e "15:50") foram escritas entre 15:05 e 15:14. Os títulos estão
+  adiantados.
+- **PC (`recomp/runtime/hl_bench.cpp`):** o mesmo ajuste do pool, em forma geral. O alvo é `$s7 + 0x10` (o `end` que o
+  jogo carrega em `0x118CCC`); pede 0x100 a mais e entrega o alvo se o bloco do runtime começa até 0x100 abaixo. Linha
+  `[hlb] pool ...` no log; `HLB_NOPOOL=1` desliga.
+  - Medido: `runtime 0x928900, given 0x928910`. As câmeras nascem em `b3eca0`, `b3ef60`, `b3f750`, `b3fa60` e
+    `bd9e50`, os mesmos endereços do PCSX2 (`basem`, v169 e v262). Antes, o PC tinha o heap 0x80 deslocado
+    (tabela "Lutas contra o PCSX2").
+  - O build do PC usa a cópia em `build/PS2Recomp/ps2xRuntime/src/runner/` (o `build.sh` copia no passo 7): depois de
+    editar `recomp/runtime/*.cpp`, copiar antes do `cmake --build`.
+- **Aberto: o executor do PC não passa do boot.** Para logo depois do `SNDBASE` e do teste do cartão, antes do
+  `LOGO_C.PSS`: nem o `hl_pad tick 650`, nem o "overlay 1". Na rodada `rv3` de 11-08 essas linhas vinham em seguida.
+  - Acontece com o executor novo, com `HLB_NOPOOL=1` e com o `ps2EntryRunner_r1` de 11-08 01:57, que funcionava. Então
+    não é código deste build: algo mudou no PC.
+  - O que mudou: a tela agora é 3440x1440 (antes 1422x800), e a saída de som padrão é uma soundbar USB.
+  - Descartado: o som (`PULSE_SINK` para a HDMI: igual); variáveis `HL_`/`HLB_` no ambiente (nenhuma); o cartão
+    (`build/disc/mc0` vazio desde 25/10, igual antes).
+  - No `gdb` (rodado de dentro dele: o `ptrace_scope` é 1), a thread do jogo está no GS de software
+    (`GSCpuBackend::SampleTexture` ← `DrawSprite`), a principal no `EndDrawing`, e o miniaudio no `pa_mainloop_poll`.
+    Falta saber o que o jogo espera.
+  - Até resolver, a comparação de lutas no PC está parada. O Android não é afetado.
+
 ### 2026-11-09 15:50, tarde: depois da correção do título do A35
 
 - **Seleção do A35** (Odin 2 Mini, `HL_PADROUTE` até 4100:CROSS, `gest/env_a35sel.txt`): as duas grades de rostos terminam

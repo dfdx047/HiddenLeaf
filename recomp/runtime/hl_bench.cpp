@@ -62,6 +62,28 @@ namespace
     bool s_mark = false;
     std::vector<uint32_t> s_ramAt;
     PS2Runtime::RecompiledFunction s_inputOriginal = nullptr;
+    // The game's pool at newlib's address, as hl_game.cpp does on Android: at boot (0x118D34, then 0x118D50) the game asks
+    // malloc for the RAM from its ELF's end ($s7) to its stack and keeps its own heap there; newlib gives end + 0x10, the
+    // runtime's heap something else (here 0x80 off the PCSX2 side). Asked for 0x100 more, the pool starts at end + 0x10
+    // when the runtime's block begins at most 0x100 under it ("pool" line in the text).
+    PS2Runtime::RecompiledFunction s_mallocOriginal = nullptr;
+    void gameMalloc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t ra = GPR_U32(ctx, 31);
+        if (ra != 0x118D3Cu && ra != 0x118D58u)
+        {
+            s_mallocOriginal(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t size = GPR_U32(ctx, 4), want = GPR_U32(ctx, 23) + 0x10u;
+        SET_GPR_U32(ctx, 4, size + 0x100u);
+        s_mallocOriginal(rdram, ctx, runtime);
+        const uint32_t got = GPR_U32(ctx, 2);
+        if (got != 0u && want >= got && want - got <= 0x100u)
+            SET_GPR_U32(ctx, 2, want);
+        if (got != 0u)
+            std::fprintf(stderr, "[hlb] pool 0x%x bytes: runtime 0x%x, given 0x%x (newlib end+0x10 = 0x%x)\n", size, got, GPR_U32(ctx, 2), want);
+    }
     // HLB_CDBUSY=N (an experiment): sceCdSync(non-blocking) says "busy" for N vsyncs after each sceCdRead, as a disc that
     // takes time to seek and read would
     constexpr uint32_t kCdRead = 0x174308u, kCdSync = 0x1738D0u;
@@ -359,6 +381,8 @@ namespace
             s_inputOriginal = runtime->lookupFunction(kFighterInput);
             if (s_inputOriginal != nullptr)
                 runtime->registerFunction(kFighterInput, fighterInput);
+            if (std::getenv("HLB_NOPOOL") == nullptr && (s_mallocOriginal = runtime->lookupFunction(0x17A610u)) != nullptr)
+                runtime->registerFunction(0x17A610u, gameMalloc);
             if (s_rngTo != 0u)
             {
                 s_mtOriginal = runtime->lookupFunction(kMtNext);
