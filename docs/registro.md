@@ -56,6 +56,23 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 05:10, madrugada: A35 com 3D preto na luta (código do mod velho); refeito, luta e Ougi de volta (RP5)
+
+- **Defeito:** com a `libun5_un6_a35.so` refeita às 04:51 só com os patches novos, a luta do A35 desenhava o primeiro
+  quadro e depois só o HUD (`rec/pc3_rp5_a35`). Era igual com o nativo e com o GS do ARMSX2 (`HL_NATIVE=0`,
+  `rec/pc3_rp5_a35gs`): o problema vinha do EE, não do desenho.
+- **Causa:** o código gerado do mod (`build/mods/un6-a35/gen`, de 11-05) é anterior ao unstub de `ba71a41`.
+  `sceGsExecLoadImage` e o par Store ainda iam para o tratador do runtime, e a Alpha não sofre disso porque usa o código
+  da base.
+- **Correção:** `recomp/build.sh --mod "UN6 A35.iso"` de novo (9573 funções, 0 erros no programa; overlays `mod` e
+  `textbra` com 189 e 44 erros, como antes) e `recomp/android/build.sh --mod un6-a35`.
+- **Teste (`rec/pc3_rp5_a35b`, `hl_env_a35f.txt`):** do aviso do mod até a luta e o Ougi.
+  - Menus: logos, abertura, carga do save, "Combate Livre", seleção, "Lutem!", Aldeia Oculta da Folha.
+  - Luta: 3D completo, Ougi da CPU com a cena no céu, fumaça e golpes.
+  - 59,1 a 59,5 fps no mínimo (o A35 é NTSC).
+- **Proteção:** `recomp/android/build.sh --mod` agora para se `tools/un5.py` for mais novo que o
+  `un5_config.toml` do mod (`HL_MOD_STALE_OK=1` passa assim mesmo).
+
 ### 2026-11-09 04:45, madrugada: Alpha 1.1X no RP5 com a `libun5.so` nova; ritmo das cargas (PC)
 
 - **Hora (correção):** a entrada de baixo, marcada 04:50, foi escrita às 04:39 (`85627b0`).

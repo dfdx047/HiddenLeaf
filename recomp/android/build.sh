@@ -24,6 +24,12 @@ pack=()
 if [ -n "$mod" ]; then
     out="$B/android_$mod"; ps2r="$B/mods/$mod/PS2Recomp"; lib="libun5_${mod//-/_}.so"; pack=(-DHL_PACK_ID="$mod")
     [ -d "$ps2r/ps2xRuntime/src/runner" ] || { echo "no $ps2r: recomp/build.sh --mod <the mod's ISO> first" >&2; exit 1; }
+    # the stubs and unstubs (tools/un5.py) go in when the code is generated: a mod generated before a change to them runs the
+    # old ones (2026-11-09: the A35 with the runtime's sceGsExecLoadImage, black 3D in the fight)
+    if [ "$here/tools/un5.py" -nt "$B/mods/$mod/gen/un5_config.toml" ] && [ -z "${HL_MOD_STALE_OK:-}" ]; then
+        echo "build/mods/$mod is older than tools/un5.py: recomp/build.sh --mod <the mod's ISO> again (HL_MOD_STALE_OK=1 to build anyway)" >&2
+        exit 1
+    fi
     # (the runtime's own sources follow the base's: only the generated code is the mod's)
     rsync -a --exclude /ps2xRuntime/src/runner/ --exclude /ps2xRuntime/include/ps2_recompiled_functions.h --exclude /ps2xRuntime/include/ps2_recompiled_stubs.h \
         --exclude /build-tools/ --exclude /build-rt/ --exclude /.git/ "$B/PS2Recomp/" "$ps2r/"
