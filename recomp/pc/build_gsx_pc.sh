@@ -2,8 +2,9 @@
 # recomp/pc/build_gsx_pc.sh: ARMSX2's GS runner for the PC (Linux x86_64, Vulkan), the same GS the Android build uses
 # (libbt4gsx: ARMSX2 replaying the live GS stream), so the PC can draw what the devices draw and compare it with PCSX2.
 #   build/armsx2-pc   a local clone of Dragon Rage's ARMSX2 (same commit, Dragon Rage's local changes, then
-#                     recomp/pc/armsx2-pc.patch: the x86 EE recompiler after ARMSX2's FPRreg change, and no AVX-512,
-#                     whose 64-byte aligned stores fault on objects PCSX2 allocates 32-aligned)
+#                     recomp/pc/armsx2-pc.patch on top: the x86 EE recompiler after ARMSX2's FPRreg change; no AVX-512,
+#                     whose 64-byte aligned stores fault on objects PCSX2 allocates 32-aligned; HL_EXTRA_CMAKE for
+#                     libbt4gsx (recomp/pc/hlgsx_pc.cmake); HL_DUMP_FROM/HL_DUMP_EVERY for -dumpdir)
 #   build/gsx-pc-deps plutovg and plutosvg from its 3rdparty (Linux PCSX2 expects them installed)
 #   build/gsx-pc      the build (clang: GCC rejects ARMSX2's designated initializers); bin/pcsx2-gsrunner
 # Dragon Rage's tree is not changed. Long the first time (the whole core).
@@ -17,6 +18,7 @@ if [ ! -d "$b/armsx2-pc/.git" ]; then
     git -C "$b/armsx2-pc" checkout -q "$(git -C "$A" rev-parse HEAD)"
     git -C "$A" diff > "$b/armsx2-dr.diff"
     git -C "$b/armsx2-pc" apply "$b/armsx2-dr.diff"
+    git -C "$b/armsx2-pc" -c user.name=hl -c user.email=hl@local commit -qam "Dragon Rage's local changes"
     git -C "$b/armsx2-pc" apply "$here/recomp/pc/armsx2-pc.patch"
 fi
 D="$b/gsx-pc-deps"
@@ -32,8 +34,9 @@ done
 if [ ! -e "$b/gsx-pc/build.ninja" ]; then
     cmake -S "$b/armsx2-pc" -B "$b/gsx-pc" -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON \
         -DENABLE_TESTS=OFF -DUSE_BACKTRACE=OFF -DWAYLAND_API=OFF -DCMAKE_PREFIX_PATH="$D" \
-        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DHL_EXTRA_CMAKE="$here/recomp/pc/hlgsx_pc.cmake" \
+        -DBT4GSX_DIR="$here/recomp/android/gsx" -DBT4GSX_RING_DIR="$here/build/PS2Recomp/ps2xRuntime/src/lib/gs"
 fi
-ninja -C "$b/gsx-pc" pcsx2-gsrunner
+ninja -C "$b/gsx-pc" pcsx2-gsrunner bt4gsx
 ln -sfn ../../armsx2-pc/bin/resources "$b/gsx-pc/bin/resources"
-echo "$b/gsx-pc/bin/pcsx2-gsrunner"
+echo "$b/gsx-pc/bin/pcsx2-gsrunner $b/gsx-pc/bin/libbt4gsx.so"

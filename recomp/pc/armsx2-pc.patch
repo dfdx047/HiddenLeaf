@@ -1,3 +1,16 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 82844c3b7..ccb0098d8 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -129,3 +129,8 @@ endif()
+ if(ARCH_ARM64)
+ 	message(STATUS "ARM64 build: EE, IOP, and VU0/VU1 recompilers are all available.")
+ endif()
++
++# Hidden Leaf (recomp/pc/armsx2-pc.patch): more targets from outside, as ARMSX2_EXTRA_CMAKE in the Android build
++if(HL_EXTRA_CMAKE)
++	include("${HL_EXTRA_CMAKE}")
++endif()
 diff --git a/cmake/BuildParameters.cmake b/cmake/BuildParameters.cmake
 index ce8cff12a..a103d2d00 100644
 --- a/cmake/BuildParameters.cmake
@@ -11,6 +24,25 @@ index ce8cff12a..a103d2d00 100644
  			endif()
  		endif()
  	endif()
+diff --git a/pcsx2-gsrunner/Main.cpp b/pcsx2-gsrunner/Main.cpp
+index 3c65852b4..8aa7a7831 100644
+--- a/pcsx2-gsrunner/Main.cpp
++++ b/pcsx2-gsrunner/Main.cpp
+@@ -773,7 +773,13 @@ void Host::BeginPresentFrame()
+ 			Console.WriteLn(fmt::format("Taking a GS dump at frame {} to '{}'.", s_dump_frame_number, s_take_gsdump_base));
+ 	}
+ 
+-	if (s_loop_number == 0 && !s_output_prefix.empty())
++	// Hidden Leaf (recomp/pc): HL_DUMP_FROM=<frame> and HL_DUMP_EVERY=<n> keep a long live run's -dumpdir to the frames wanted,
++	// and the live stream's frames are saved too
++	static const u32 s_hl_dump_from = std::getenv("HL_DUMP_FROM") ? static_cast<u32>(std::atoi(std::getenv("HL_DUMP_FROM"))) : 0u;
++	static const u32 s_hl_dump_every = std::getenv("HL_DUMP_EVERY") ? std::max(1, std::atoi(std::getenv("HL_DUMP_EVERY"))) : 1u;
++	// (a live stream runs with loop -1)
++	if ((s_loop_number == 0 || s_loop_number == -1) && !s_output_prefix.empty() && s_dump_frame_number >= s_hl_dump_from &&
++		(s_dump_frame_number - s_hl_dump_from) % s_hl_dump_every == 0)
+ 	{
+ 		// when we wrap around, don't race other files
+ 		GSJoinSnapshotThreads();
 diff --git a/pcsx2/x86/iCore.cpp b/pcsx2/x86/iCore.cpp
 index 98648685c..f8f0512ad 100644
 --- a/pcsx2/x86/iCore.cpp

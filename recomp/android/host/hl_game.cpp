@@ -19,7 +19,9 @@
 #include <sys/stat.h>
 #include <iostream>
 #include <string>
+#if defined(__ANDROID__)
 #include <sys/system_properties.h>
+#endif
 #include <thread>
 #include <vector>
 
@@ -161,8 +163,17 @@ namespace
                 known = known || s_cameras[i] == camera;
             if (!known && s_count < 16u)
             {
-                std::memcpy(&s_own[s_count], rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), 4);
+                // A camera the game made during the fight may not have its scale yet (0, or what the block held before:
+                // 1.7e-38, 5e+33...): given back at the end, a scale of 0 left the victory screen black in 16:9 and
+                // 20:9 (only the 2D name drawn; docs/registro.md, 2026-11-10). What is not a scale is the base game's 1.0.
+                float own;
+                std::memcpy(&own, rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), 4);
+                if (!(own >= 0.25f && own <= 4.0f))
+                    own = 1.0f;
+                s_own[s_count] = own;
                 s_cameras[s_count++] = camera;
+                if (s_camLog)
+                    std::fprintf(stderr, "[cam] v%llu camera 0x%x made wide, its own scale %g\n", static_cast<unsigned long long>(g_tick), camera, own);
             }
             std::memcpy(rdram + ((camera + kCameraXScale) & 0x1FFFFFFu), &scale, 4);
         }
@@ -1054,8 +1065,12 @@ namespace
             g_dumpDevice = d;
         else
         {
+#if defined(__ANDROID__)
             char model[PROP_VALUE_MAX] = {};
             __system_property_get("ro.product.model", model);
+#else
+            const char model[] = "pc"; // (recomp/pc)
+#endif
             for (const char *c = model; *c; ++c)
                 g_dumpDevice += std::isalnum(static_cast<unsigned char>(*c)) ? static_cast<char>(std::tolower(static_cast<unsigned char>(*c))) : '_';
             if (g_dumpDevice.empty())
@@ -1320,9 +1335,23 @@ namespace
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
+    // (chained: the PC's bench, recomp/runtime/hl_bench.cpp, keeps its own on the same hook, and the order of the two
+    // static constructors is not fixed)
+    void (*g_prevVsync)(PS2Runtime *, uint64_t) = nullptr;
+    void onVsyncChained(PS2Runtime *runtime, uint64_t tick)
+    {
+        if (g_prevVsync)
+            g_prevVsync(runtime, tick);
+        onVsync(runtime, tick);
+    }
+
     struct Install
     {
-        Install() { g_hlVsyncHook = &onVsync; }
+        Install()
+        {
+            g_prevVsync = g_hlVsyncHook;
+            g_hlVsyncHook = &onVsyncChained;
+        }
     } g_install;
 }
 

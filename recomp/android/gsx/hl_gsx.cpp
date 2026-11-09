@@ -23,8 +23,16 @@
 #include "pcsx2/MTGS.h"
 #include "pcsx2/VMManager.h"
 
+#if defined(__ANDROID__)
 #include <android/log.h>
 #include <android/native_window.h>
+#else
+// Hidden Leaf, the PC build (recomp/pc): no app window to hand over; the GS runner opens its own X11 window, or none
+// with -surfaceless (HL_GSX_ARGS)
+struct ANativeWindow;
+static inline void ANativeWindow_acquire(ANativeWindow*) {}
+static inline void ANativeWindow_release(ANativeWindow*) {}
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -476,6 +484,7 @@ namespace
 	}
 } // namespace
 
+#if defined(__ANDROID__)
 // pcsx2-gsrunner's window on Android (patched Main.cpp): the app's surface, or none while it has none.
 std::optional<WindowInfo> Bt4Gsx_WindowInfo()
 {
@@ -500,6 +509,7 @@ std::optional<WindowInfo> Bt4Gsx_WindowInfo()
 	wi.surface_scale = static_cast<float>(std::max(wi.surface_width, wi.surface_height)) / 800.0f;
 	return wi;
 }
+#endif
 
 void Bt4Gsx_ReleaseWindow()
 {
@@ -647,6 +657,24 @@ __attribute__((visibility("default"))) int Bt4Gsx_Run(const Bt4GsxArgs* a)
 		args.push_back(std::string(a->driverDir) + "/");
 		args.push_back(a->driverLib);
 		args.push_back(a->hookDir);
+	}
+	// HL_GSX_ARGS: more of the runner's arguments, space-separated (the PC's tests: "-surfaceless -dumpdir <dir>")
+	if (const char* extra = std::getenv("HL_GSX_ARGS"))
+	{
+		std::string word;
+		for (const char* c = extra;; ++c)
+		{
+			if (*c == ' ' || *c == '\0')
+			{
+				if (!word.empty())
+					args.push_back(word);
+				word.clear();
+				if (*c == '\0')
+					break;
+			}
+			else
+				word.push_back(*c);
+		}
 	}
 	args.push_back(dump);
 	std::vector<char*> argv;

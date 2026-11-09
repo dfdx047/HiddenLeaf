@@ -56,6 +56,46 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 01:30, madrugada: tela de vitória preta em 16:9 e 20:9, reproduzida no PC e corrigida (`hl_game.cpp`)
+
+Relato do desenvolvedor: quando o jogador ganha, a imagem fica toda preta e só aparece o nome do personagem.
+- **Correção da 00:40:** a `route_v3` sozinha não termina a luta; com o `HL_CPU_HP` da v3r termina. Rota do PC que
+  vence: `route_v3w.txt` = os passos de menu da `route_v3` + os passos `@1+`/`@2+` do `build/lab/hl_env_v3r.txt`, com
+  `HL_CPU_HP=@1+450,@2+450`. No `un5pc`: 3 lutas até v16000 em 94 s, com WINNER, resultado ("Ninja Song") e volta à
+  seleção; o "Vermillion Mode" do Naruto aparece (v5900, 4:3).
+- **Reproduzido:** em 4:3 a vitória sai certa; em 16:9 (`HL_SCREEN=1920x1080`) e 20:9 (`2400x1080`) fica preta só com
+  "Kakashi Hatake", igual ao aparelho. Não é o `widen2d` (`HL_WIDE2D_OFF=1`: continua preta); com `HL_ASPECT=1333`
+  (câmera 1,0) sai certa: é a escala das câmeras (`cameraScale`).
+- **Causa:** a câmera que aparece durante a luta tem o seu campo `+0x274` guardado para ser devolvido no fim; numa
+  câmera recém-feita ele ainda não é uma escala (0, 1,7e-38, 5e+33..., `HL_CAM_LOG`), e no fim da luta esse lixo
+  voltava: escala horizontal 0 na câmera do quadro da vitória, nada de 3D nem de fundo.
+- **Correção:** só se guarda um valor entre 0,25 e 4; fora disso, 1,0 (a escala do jogo base). `HL_CAM_LOG` mostra cada
+  câmera feita larga e o valor guardado.
+- **Teste no PC (`un5pc`, GS do ARMSX2, Vulkan):** v6500 a v6600 com WINNER, Kakashi e fundo em 16:9 e em 20:9; 4:3 igual
+  (brilho médio 157). `libun5.so` e `libun5_v80.so` recompiladas com a correção. **Falta:** a rota completa nos
+  aparelhos (Mi A3 primeiro), outros personagens e cenários, a vitória da luta 2 e 3 e os mods.
+
+### 2026-11-10 00:40, madrugada: o PC roda com o desenho do Android (`un5pc`); a rota v3 em 27 s, estado igual ao PCSX2
+
+- **`recomp/pc/`** (novo): `CMakeLists.txt` + `build.sh` fazem `build/pc/un5pc`, o runtime sem cabeça como no Android
+  (`PS2X_HEADLESS_HOST`, o fluxo do GS num anel), o mesmo `hl_game.cpp` e a VU1 do Nominum, com clang (`-march=native
+  -mno-avx512f` e as flags numéricas do Android); `hl_pc_main.cpp` faz o papel do `un5_main.cpp`: abre a `libbt4gsx.so`
+  do PC (`hlgsx_pc.cmake`, as mesmas fontes do Android: gsrunner + `hl_gsx.cpp` + `hl_native.cpp`), aplica a forma da
+  tela (`HL_SCREEN`, `HL_ASPECT`) como o `applyVideo`, escreve o mesmo `un5.ini` e roda o GS. Sem SPU2 (o do Android é
+  de ARM).
+- `hl_gsx.cpp`: o que é de Android (`ANativeWindow`, `Bt4Gsx_WindowInfo`) só no Android; `HL_GSX_ARGS` passa
+  argumentos ao gsrunner (`-surfaceless -dumpdir <dir>` salva cada quadro em PNG). `hl_game.cpp`: `__system_property_get`
+  só no Android; o gancho de vsync agora encadeia o anterior (o bench do PC usa o mesmo gancho; com a ordem dos
+  construtores ao contrário o bench sumia: a rota não andava e o jogo ficou no menu de idioma até v37000).
+- `armsx2-pc.patch`: `HL_DUMP_FROM`/`HL_DUMP_EVERY` para o `-dumpdir`, e o fluxo ao vivo (laço -1) também salva quadros
+  (só o laço 0 salvava). As mudanças do Dragon Rage viram um commit no clone, e o patch é só o nosso, por cima.
+- **Teste:** rota v3 até v8500 com o GS do ARMSX2 (Vulkan, sem superfície, 1x), um quadro a cada 50 a partir de v5000:
+  **27 s** (o GS por software levava 404 s), estado das duas lutas igual ao PCSX2 (posição, vida, chakra e ação em
+  todas as chamadas). Os quadros mostram o carregamento, START BATTLE, a luta pelo renderizador nativo e um Ougi.
+- **A rota v3 não chega à tela de vitória:** o relógio vai de 99 a 78 e ninguém cai; o que parecia "luta 2" vem depois
+  de um Ougi. É por isso que a vitória preta e outros bugs nunca apareceram nos meus testes. Próximo: rotas que
+  terminam lutas (vitória e resultado), em vários cenários e personagens, e as mesmas cenas em 4:3, 16:9 e 20:9.
+
 ### 2026-11-09 23:50, noite: o GS do Android (ARMSX2, Vulkan) compila e desenha o UN5 no PC
 
 Para comparar imagem no PC com o mesmo desenho do aparelho (os bugs de widescreen são do caminho do Android).
