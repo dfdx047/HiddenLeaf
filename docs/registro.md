@@ -56,6 +56,27 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 04:25, madrugada: as partículas a mais vêm do relógio das partículas, adiantado no recomp (PC)
+
+- **Hora (correção):** a entrada de baixo, marcada 04:30, foi escrita às 04:05 (`af8ed28`). O Odin 2 Mini
+  (`192.168.1.206`) tem a base, mas está com bloqueio por senha: o jogo não abriu (`rec/pc3_odin2`).
+- **Quem escolhe o microcódigo:** `0x195EE0` monta o DMA da VU1 com a entrada
+  `0x5C6630 + 16 × (obj[0x264] + obj[0x1F0] + obj[0x265])`, a partir de uma cópia do objeto no scratchpad. Cada entrada
+  da tabela é {alfa `512f`/`512a`, 0, endereço do programa, tamanho}, com 16 entradas por modo:
+  - modo 0: `0x3d5790` e `0x3d5da0`, MPG de 79 e 81 instruções;
+  - modo 1: `0x3da290`, 256 instruções em 0 e 106 palavras em 2048.
+- **Medido no mesmo vsync** (PCSX2 v5784 x recomp v5811): o PCSX2 sobe 14 programas do modo 0, e o recomp sobe 19 do
+  `0x3da290`.
+- **Os objetos** (`HLB_FNLOG=0x195ee0`, `a1` = o objeto; corridas `pfn`/`rfn`, 3 vsyncs a partir do quadro 199):
+  - 128 chamadas no PCSX2, 139 no recomp;
+  - 7 objetos só no recomp (quase todos de `0x19512C`), 2 só no PCSX2.
+- **Nos objetos comuns:** o byte `obj+0x264` está sempre 64 à frente no recomp (mod 256), e o `obj+0x265` ~122 à
+  frente. É o mesmo relógio do sistema de partículas da fase, com outra fase: não é lógica errada.
+- **Causa provável:** as cargas, que no recomp levam 44–80 vsyncs a mais (a luta 1 começa no v5414 contra v5386). Os
+  efeitos de fundo seguem andando durante a carga.
+- **Consequência:** igualar isso é igualar o tempo das cargas (ritmo de CD), o mesmo assunto do `HLB_CDBUSY`. Fica
+  aberto, de prioridade baixa: na tela nada muda, e o custo é de uns 10 lotes fora da tela.
+
 ### 2026-11-09 04:30, madrugada: as correções do PC no Android (RP5: rota do PC até a luta e o KO)
 
 **`libun5.so` nova**, com tudo o que entrou no PC desde 5/11: `0071`–`0082`, o unstub de `un5.py` e os setores reais.
