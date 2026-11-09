@@ -56,6 +56,22 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-09 23:50, noite: o GS do Android (ARMSX2, Vulkan) compila e desenha o UN5 no PC
+
+Para comparar imagem no PC com o mesmo desenho do aparelho (os bugs de widescreen são do caminho do Android).
+- `recomp/pc/build_gsx_pc.sh` (novo): clone local do ARMSX2 do Dragon Rage (mesmo commit, as mudanças locais do Dragon
+  Rage, depois `recomp/pc/armsx2-pc.patch`), `plutovg`/`plutosvg` do `3rdparty` num prefixo local, build com clang em
+  `build/gsx-pc`. A árvore do Dragon Rage não muda.
+- `armsx2-pc.patch`: o recompilador x86 do EE do ARMSX2 não compilava depois da troca do `FPRreg` (`f`/`UL` viraram
+  `UD`; só endereços, a palavra baixa no mesmo lugar) e sem `CHECK_FPUMULHACK`; e **sem AVX-512** (`-mno-avx512f`): com
+  `-march=native` no Zen 4 o construtor do `GSState` usa `vmovaps zmm` (alinhamento de 64) num objeto que o PCSX2 aloca
+  com 32: o gsrunner caía em ~2 de 3 partidas (`coredumpctl`: `GSState::GSState`, `vmovaps %zmm0,0xdcc0(%rbx)`).
+  O GCC também não serve (ordem dos inicializadores designados que o clang aceita).
+- **Teste:** `pcsx2-gsrunner -renderer vulkan -surfaceless -dumpdir <dir> -loop 1 pd1_v02900_gs.gs.zst` (dump do PCSX2):
+  6 de 6 partidas certas na RTX 4080, quadros PNG certos (tela de carregamento do UN5).
+- Falta: a `libbt4gsx` do PC (`hl_gsx.cpp` + `hl_native.cpp` + o gsrunner, com janela X11 ou sem superfície) e um
+  executor sem cabeça do PC (`PS2X_HEADLESS_HOST`, `hl_game.cpp`, Nominum) que a carrega como o `un5_main.cpp` do Android.
+
 ### 2026-11-09 23:15, noite: recomp do PC 7x mais rápido para comparar estado com o PCSX2 (`HL_GS_NODRAW`, `HL_PROF`)
 
 Pedido do desenvolvedor: certo antes de rápido, e o PC rápido para comparar com o PCSX2 em muitos cenários.

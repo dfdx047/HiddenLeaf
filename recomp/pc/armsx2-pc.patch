@@ -1,0 +1,139 @@
+diff --git a/cmake/BuildParameters.cmake b/cmake/BuildParameters.cmake
+index ce8cff12a..a103d2d00 100644
+--- a/cmake/BuildParameters.cmake
++++ b/cmake/BuildParameters.cmake
+@@ -136,7 +136,7 @@ if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64" OR "${CMAKE_SYSTEM_PROCESSOR}"
+ 		else()
+ 			# Can't use march=native on Apple Silicon.
+ 			if(NOT APPLE OR "${CMAKE_HOST_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
+-				add_compile_options("-march=native")
++				add_compile_options("-march=native" "-mno-avx512f")
+ 			endif()
+ 		endif()
+ 	endif()
+diff --git a/pcsx2/x86/iCore.cpp b/pcsx2/x86/iCore.cpp
+index 98648685c..f8f0512ad 100644
+--- a/pcsx2/x86/iCore.cpp
++++ b/pcsx2/x86/iCore.cpp
+@@ -254,7 +254,7 @@ int _allocFPtoXMMreg(int fpreg, int mode)
+ 
+ 		if (!(xmmregs[i].mode & MODE_READ) && (mode & MODE_READ))
+ 		{
+-			xMOVSSZX(xRegisterSSE(i), ptr[&fpuRegs.fpr[fpreg].f]);
++			xMOVSSZX(xRegisterSSE(i), ptr[&fpuRegs.fpr[fpreg].UD]);
+ 			xmmregs[i].mode |= MODE_READ;
+ 		}
+ 
+@@ -276,7 +276,7 @@ int _allocFPtoXMMreg(int fpreg, int mode)
+ 	xmmregs[xmmreg].counter = g_xmmAllocCounter++;
+ 
+ 	if (mode & MODE_READ)
+-		xMOVSSZX(xRegisterSSE(xmmreg), ptr[&fpuRegs.fpr[fpreg].f]);
++		xMOVSSZX(xRegisterSSE(xmmreg), ptr[&fpuRegs.fpr[fpreg].UD]);
+ 
+ 	return xmmreg;
+ }
+@@ -412,7 +412,7 @@ int _allocFPACCtoXMMreg(int mode)
+ 
+ 		if (!(xmmregs[i].mode & MODE_READ) && (mode & MODE_READ))
+ 		{
+-			xMOVSSZX(xRegisterSSE(i), ptr[&fpuRegs.ACC.f]);
++			xMOVSSZX(xRegisterSSE(i), ptr[&fpuRegs.ACC.UD]);
+ 			xmmregs[i].mode |= MODE_READ;
+ 		}
+ 
+@@ -435,7 +435,7 @@ int _allocFPACCtoXMMreg(int mode)
+ 
+ 	if (mode & MODE_READ)
+ 	{
+-		xMOVSSZX(xRegisterSSE(xmmreg), ptr[&fpuRegs.ACC.f]);
++		xMOVSSZX(xRegisterSSE(xmmreg), ptr[&fpuRegs.ACC.UD]);
+ 	}
+ 
+ 	return xmmreg;
+@@ -708,7 +708,7 @@ void _deleteFPtoXMMreg(int reg, int flush)
+ 				case DELETE_REG_FLUSH:
+ 					if (xmmregs[i].mode & MODE_WRITE)
+ 					{
+-						xMOVSS(ptr[&fpuRegs.fpr[reg].UL], xRegisterSSE(i));
++						xMOVSS(ptr[&fpuRegs.fpr[reg].UD], xRegisterSSE(i));
+ 						// get rid of MODE_WRITE since don't want to flush again
+ 						xmmregs[i].mode &= ~MODE_WRITE;
+ 						xmmregs[i].mode |= MODE_READ;
+@@ -748,7 +748,7 @@ void _writebackXMMreg(int xmmreg)
+ 			break;
+ 
+ 		case XMMTYPE_FPACC:
+-			xMOVSS(ptr[&fpuRegs.ACC.f], xRegisterSSE(xmmreg));
++			xMOVSS(ptr[&fpuRegs.ACC.UD], xRegisterSSE(xmmreg));
+ 			break;
+ 
+ 		default:
+diff --git a/pcsx2/x86/iFPU.cpp b/pcsx2/x86/iFPU.cpp
+index 9967cde2b..671494a67 100644
+--- a/pcsx2/x86/iFPU.cpp
++++ b/pcsx2/x86/iFPU.cpp
+@@ -5,6 +5,11 @@
+ #include "R5900OpcodeTables.h"
+ #include "iR5900.h"
+ 
++// Hidden Leaf (PC build of the GS runner): ARMSX2 dropped this macro with its x86 FPU recompiler
++#ifndef CHECK_FPUMULHACK
++#define CHECK_FPUMULHACK (EmuConfig.Gamefixes.FpuMulHack)
++#endif
++
+ using namespace x86Emitter;
+ 
+ alignas(16) const u32 g_minvals[4] = {0xff7fffff, 0xff7fffff, 0xff7fffff, 0xff7fffff};
+@@ -200,7 +205,7 @@ void recMFC1()
+ 	else
+ 	{
+ 		// mem -> gpr
+-		xMOVSX(xRegister64(regt), ptr32[&fpuRegs.fpr[_Fs_].UL]);
++		xMOVSX(xRegister64(regt), ptr32[&fpuRegs.fpr[_Fs_].UD]);
+ 	}
+ }
+ 
+@@ -233,7 +238,7 @@ void recMTC1()
+ 		else
+ 		{
+ 			pxAssert(!_hasXMMreg(XMMTYPE_FPREG, _Fs_));
+-			xMOV(ptr32[&fpuRegs.fpr[_Fs_].UL], g_cpuConstRegs[_Rt_].UL[0]);
++			xMOV(ptr32[&fpuRegs.fpr[_Fs_].UD], g_cpuConstRegs[_Rt_].UL[0]);
+ 		}
+ 	}
+ 	else
+@@ -253,7 +258,7 @@ void recMTC1()
+ 				if (xmmreg2 >= 0)
+ 					xMOVSS(xRegisterSSE(xmmreg2), xRegisterSSE(xmmgpr));
+ 				else
+-					xMOVSS(ptr[&fpuRegs.fpr[_Fs_].UL], xRegisterSSE(xmmgpr));
++					xMOVSS(ptr[&fpuRegs.fpr[_Fs_].UD], xRegisterSSE(xmmgpr));
+ 			}
+ 		}
+ 		else
+@@ -268,7 +273,7 @@ void recMTC1()
+ 			}
+ 			else
+ 			{
+-				xMOV(ptr32[&fpuRegs.fpr[_Fs_].UL], xRegister32(regt));
++				xMOV(ptr32[&fpuRegs.fpr[_Fs_].UD], xRegister32(regt));
+ 			}
+ 		}
+ 	}
+diff --git a/pcsx2/x86/iFPUd.cpp b/pcsx2/x86/iFPUd.cpp
+index 44acb449a..9b33149c8 100644
+--- a/pcsx2/x86/iFPUd.cpp
++++ b/pcsx2/x86/iFPUd.cpp
+@@ -6,6 +6,11 @@
+ #include "common/emitter/x86emitter.h"
+ #include "iR5900.h"
+ 
++// Hidden Leaf (PC build of the GS runner): ARMSX2 dropped this macro with its x86 FPU recompiler
++#ifndef CHECK_FPUMULHACK
++#define CHECK_FPUMULHACK (EmuConfig.Gamefixes.FpuMulHack)
++#endif
++
+ /* This is a version of the FPU that emulates an exponent of 0xff and overflow/underflow flags */
+ 
+ /* Can be made faster by not converting stuff back and forth between instructions. */
