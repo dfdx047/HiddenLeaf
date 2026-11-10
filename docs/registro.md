@@ -56,6 +56,31 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 03:00, madrugada: perfil da thread da VU1 do Nominum (`b2ff28b`) no Mi A3 (para a sessão do Nominum)
+
+Rota v3r, 1x 50, nativo, `NOMINUM_VU1=1`, `HL_PROF` (amostras de CPU da thread da VU1, 3185 em ~200 s; a `libc` do
+aparelho em `/apex/com.android.runtime/lib64/bionic/libc.so` para os nomes). Na luta 2 a VU1 gasta ~21-22 ms por quadro:
+com o EE já em ~19 ms, é ela que segura os 50 fps no Mi A3.
+
+| % | função |
+|---|---|
+| 9,0 + 1,3 | `memcpy` (`__memcpy_aarch64_simd` e o `memcpy` com tamanho) |
+| 8,9 | `core::Vif1::transfer` |
+| 7,7 | `vu1::macOf` |
+| 4,4 | `[vdso]`: o `steady_clock::now()` duas vezes por programa em `Vif1::runVu` (`counts.vuNanoseconds`) e em `core/worker.cpp` |
+| 4,3 + 1,2 + 1,1 + ... | os `recBlock<...>` do catálogo |
+| 3,1 / 3,1 | `normOperand`, `anySpecial` |
+| 2,3 | `hl_perf::switchTo` (o medidor do Hidden Leaf) |
+| 2,0 | `unordered_map<..., shared_ptr<...>>` (a busca do programa no catálogo por hash) |
+| 1,9 | `__strncmp_aarch64` (alguém chama `getenv` sem guardar o resultado, ou compara nomes, a cada chamada) |
+| 1,6 | `VU1Interpreter::addVfRead` (a análise de uso por instrução, refeita em tempo de execução) |
+| 1,6 | `syscall` (futex: acordar e esperar a worker) |
+
+Ideias para o lado do Nominum (não mexi lá): o relógio só com o medidor ligado (ou o contador `cntvct_el0`, como o
+`hl_perf`); achar o `strncmp`; guardar a análise do `addVfRead` com o programa; ver de onde vêm os `memcpy` (cópia das
+imagens do VIF para a VU ou do GIF para o anel). Os dados brutos ficam em `build/lab/mia3/prof4/hl_prof.txt` (formato
+do `tools/hlprof.py`; a lib sem strip é `build/android_v80/libun5.so`, nome no aparelho `libun5_v80.so`).
+
 ### 2026-11-10 02:30, madrugada: o IOP em lotes de 4096 ciclos do EE (`0091`)
 
 - `EeScheduler::accountCycles` levava o EE ao IOP (e aos timers) a cada 1024 ciclos: ~290 mil viagens por segundo, cada

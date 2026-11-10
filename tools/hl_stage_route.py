@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# hl_stage_route.py BASE STAGE: the v3w route (build/pcsx2-bench runs/route_v3w.txt) with the stage select moved STAGE times
-# down (0 = Hidden Leaf Village, the first of 24). The absolute steps after the stage select move later by the time the moves take.
+# hl_stage_route.py BASE STAGE [SELECT_VSYNC]: the v3w route (build/pcsx2-bench runs/route_v3w.txt) with the stage select moved STAGE times
+# down (0 = Hidden Leaf Village, the first of 24). SELECT_VSYNC: the route's CROSS on the stage select (4715 on the PC, 5331 in the
+# devices' v3r route). The absolute steps after the stage select move later by the time the moves take.
 import sys
 base=open(sys.argv[1]).read().strip().split(',')
-k=int(sys.argv[2]); sel=4715; gap=24
+k=int(sys.argv[2]); sel=int(sys.argv[3]) if len(sys.argv)>3 else 4715; gap=24
 out=[]
 for s in base:
     at,words=s.split(':',1)
