@@ -1,0 +1,172 @@
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -278,7 +278,26 @@
+     void run();
+     void requestStop();
+     void postEvent(EeEvent event);
+-    [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
++    // Hidden Leaf: the common case here, in line (it runs at every guest call and every backward branch): the cycles
++    // counted, and false when nothing is due. When something may be due, checkpointDueSlow() decides as before, in the
++    // same order (stop, DI/EI mask, pending event, deadline, time slice). A checkpoint that is not pending, before the
++    // deadline and inside the slice answered false in the old order too, masked or not, with nothing changed.
++    [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept
++    {
++        accountCycles(cycles);
++        if (m_stopRequested.load(std::memory_order_acquire))
++        {
++            m_hlSuspending = true;
++            return true;
++        }
++        const uint64_t nextEventCycle = m_nextDeadlineCycle.load(std::memory_order_acquire);
++        if (!m_checkpointPending.load(std::memory_order_acquire) && (nextEventCycle == 0u || m_eeCycle < nextEventCycle) &&
++            m_eeCycle < m_sliceEndCycle)
++        {
++            return false;
++        }
++        return checkpointDueSlow();
++    }
+     // Hidden Leaf: false on a host thread other than the one running the EE (once it started)
+     // Hidden Leaf: true from the moment a checkpoint is due until the dispatcher starts the next native run, while the
+     // generated code unwinds to it. dispatchGuestBranch then answers false whatever the pc says (see there).
+@@ -286,7 +305,17 @@
+     // Hidden Leaf: a dispatch checkpoint (the call from sourcePc to targetPc suspended), in the current thread's ring
+     void hlNoteCheckpoint(uint32_t sourcePc, uint32_t targetPc) noexcept;
+     [[nodiscard]] bool onExecutorThread() const noexcept { return m_executorThread == std::thread::id{} || m_executorThread == std::this_thread::get_id(); }
+-    void accountCycles(uint32_t cycles) noexcept;
++    // (in line, as checkpointDue; the trip to the timers and the IOP every m_hlIopBatch cycles stays out of line)
++    void accountCycles(uint32_t cycles) noexcept
++    {
++        const uint64_t elapsed = cycles > 1u ? cycles : 1u;
++        m_eeCycle += elapsed;
++        m_hlCyclesToAdvance += elapsed;
++        if (m_hlCyclesToAdvance >= m_hlIopBatch)
++            advanceBatchedCycles();
++        if (m_pendingEeTimerInterrupts != 0u)
++            m_checkpointPending.store(true, std::memory_order_release);
++    }
+     [[nodiscard]] bool isExecutingGuest() const noexcept;
+ 
+     // Kernel object API. All calls except postEvent/requestStop execute on the
+@@ -382,6 +411,12 @@
+     template <typename F>
+     void guarded(F &&body);
+     bool m_hlSuspending = false;
++    // Hidden Leaf: the EE cycles not yet taken to the timers and the IOP, and how many go in one trip (HL_IOP_BATCH,
++    // read at reset; 4096 by default, see accountCycles)
++    uint64_t m_hlCyclesToAdvance = 0u;
++    uint64_t m_hlIopBatch = 4096u;
++    [[nodiscard]] bool checkpointDueSlow() noexcept;
++    void advanceBatchedCycles() noexcept;
+     uint64_t m_hlLastYieldCycle = 0u; // (rotateReadyQueue: the yields that only hand the EE around)
+     uint32_t m_hlYieldStreak = 0u;
+     void *m_transferJump = nullptr; // the innermost guarded() (a jmp_buf on its frame)
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -136,6 +136,12 @@
+ {
+     m_executorThread = std::this_thread::get_id();
+     m_rdram = rdram;
++    if (const char *v = std::getenv("HL_IOP_BATCH"))
++    {
++        const uint64_t n = std::strtoull(v, nullptr, 10);
++        if (n != 0u)
++            m_hlIopBatch = n;
++    }
+     m_readyQueues = {};
+     m_threads.clear();
+     m_threadCacheId = -1;
+@@ -543,15 +549,9 @@
+     m_eventCv.notify_one();
+ }
+ 
+-bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
++bool EeScheduler::checkpointDueSlow() noexcept
+ {
+-    accountCycles(cycles);
+-
+-    if (m_stopRequested.load(std::memory_order_acquire))
+-    {
+-        m_hlSuspending = true;
+-        return true;
+-    }
++    // (checkpointDue, in the header, already counted the cycles and looked at the stop request)
+     if (guestInterruptsMasked())
+     {
+         // between DI and EI the EE takes no interrupt, so nothing switches threads: pending work waits for EI
+@@ -582,32 +582,15 @@
+     return false;
+ }
+ 
+-void EeScheduler::accountCycles(uint32_t cycles) noexcept
++// (the timers and the IOP in small batches, and the calls were most of the cost)
++// Hidden Leaf: 4096 EE cycles (12 us of the PS2) per trip to the IOP, not 1024: each trip costs the IOP's slice
++// setup, the SPU2's catch-up and the meter's switches. The game's state stays PCSX2's in the bench's fights; on the Mi
++// A3 the fights run 1-3 fps faster. 8192 changed how the route's fight went: not used. HL_IOP_BATCH=<cycles> sets it.
++void EeScheduler::advanceBatchedCycles() noexcept
+ {
+-    const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+-    m_eeCycle += elapsed;
+-    // (the timers and the IOP in small batches, and the calls were most of the cost)
+-    static uint64_t s_cyclesToAdvance = 0u; // (only the game thread comes here)
+-    // Hidden Leaf: 4096 EE cycles (12 us of the PS2) per trip to the IOP, not 1024: each trip costs the IOP's slice
+-    // setup, the SPU2's catch-up and the meter's switches. The game's state stays PCSX2's in the bench's fights; on the Mi
+-    // A3 the fights run 1-3 fps faster. 8192 changed how the route's fight went: not used. HL_IOP_BATCH=<cycles> sets it.
+-    static const uint64_t s_batch = []
+-    {
+-        const char *v = std::getenv("HL_IOP_BATCH");
+-        const uint64_t n = v ? std::strtoull(v, nullptr, 10) : 0u;
+-        return n ? n : 4096u;
+-    }();
+-    s_cyclesToAdvance += elapsed;
+-    if (s_cyclesToAdvance >= s_batch)
+-    {
+-        m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(s_cyclesToAdvance);
+-        m_runtime.advanceIopEeCycles(s_cyclesToAdvance);
+-        s_cyclesToAdvance = 0u;
+-    }
+-    if (m_pendingEeTimerInterrupts != 0u)
+-    {
+-        m_checkpointPending.store(true, std::memory_order_release);
+-    }
++    m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(m_hlCyclesToAdvance);
++    m_runtime.advanceIopEeCycles(m_hlCyclesToAdvance);
++    m_hlCyclesToAdvance = 0u;
+ }
+ 
+ bool EeScheduler::isExecutingGuest() const noexcept
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1563,7 +1563,17 @@
+         return false;
+     }
+ 
+-    if (!hasFunction(targetPc))
++    // Hidden Leaf: one lookup (the table, then the overlays) instead of hasFunction() and then lookupFunction(), which
++    // looked the same address up twice on every guest call
++    RecompiledFunction targetFn = nullptr;
++    {
++        uint32_t slot = 0u;
++        if (generatedFunctionTableSlot(targetPc, slot))
++            targetFn = g_ps2RecompiledFunctionTable[slot];
++        if (targetFn == nullptr && g_ps2OverlayResolver != nullptr)
++            targetFn = g_ps2OverlayResolver(this, targetPc);
++    }
++    if (targetFn == nullptr)
+     {
+         reportMissingFunction(rdram, ctx, targetPc, sourcePc, kind, debugName);
+ 
+@@ -1585,7 +1595,10 @@
+         return false;
+     }
+ 
+-    RecompiledFunction targetFn = lookupFunction(targetPc);
++    // (what lookupFunction() did besides the lookup: the dispatch history, and the note of a lookup off the EE's thread)
++    pushDispatchPc(targetPc);
++    if (m_eeScheduler && !m_eeScheduler->onExecutorThread())
++        (void)lookupFunction(targetPc);
+     const uint32_t entryPc = ctx->pc;
+     targetFn(rdram, ctx, this);
+ 

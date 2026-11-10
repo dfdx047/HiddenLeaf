@@ -56,6 +56,28 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 22:10, noite: otimização, terceira parte: despacho e checagem de ciclos mais baratos (`0094`)
+
+- **Mudança (`recomp/patches/0094-fast-dispatch-checkpoint.patch`):** `EeScheduler::checkpointDue` e `accountCycles`
+  passam para o cabeçalho, em linha; o caso comum (nada pendente, antes do prazo, dentro da fatia) responde `false` sem
+  sair da função. O resto (DI/EI, evento pendente, prazo, fatia) foi para `checkpointDueSlow`, na mesma ordem de antes;
+  a ida aos timers e ao IOP a cada 4096 ciclos (`HL_IOP_BATCH`) foi para `advanceBatchedCycles`, com o estado em membros
+  (antes estáticos). `dispatchGuestBranch` busca a função uma vez só (tabela e depois overlays), não `hasFunction` e
+  depois `lookupFunction`; o histórico de despacho e a nota de busca fora da thread do EE continuam.
+- **PC (`pc94`, rota v3 contra o PCSX2):** as duas lutas iguais em todas as 1445 + 1297 chamadas, v5417 e v7183, igual ao
+  build anterior (`pcg93`).
+- **Mi A3 (v3r, 2x, Nominum `d398993`, `prof8`):** trecho A 41,5 fps (mín 39,2), EE 14,5 ms; trecho B 38,3 fps (mín
+  27,9), EE 17,6 ms (era 18,5 no `prof7`), IOP 5,1, VU1 20,5. O EE ganhou 0,9 ms, mas o fps não mudou: o ganho fica
+  dentro do ruído entre rodadas e a thread do jogo (EE + IOP ≈ 22,7 ms) continua sendo o limite, com a VU1 logo atrás.
+- **Roteiro `build/lab/mia3run.sh`:** apaga o `un5_log.txt` da rodada anterior antes de começar (a primeira tentativa do
+  `prof8` leu o log velho e acabou em 5 s) e para com "device locked" quando a tela está bloqueada (o jogo fica pausado
+  atrás dela; o desbloqueio é do desenvolvedor).
+- **Lançador:** "16:9" e "20:9" passam a se chamar "Widescreen (16:9)" e "Ultrawide (20:9)" (`aspect_wide`,
+  `aspect_ultrawide`) nas Configurações e no painel do jogo, que agora também tem o Ultrawide. No Mi A3 (1560x720) o
+  Ultrawide fica limitado à largura da tela, igual a "Tela".
+- **Não feito:** IOP e SPU2 numa thread própria (a alavanca grande, arriscada para a sincronia); o `memcpy` de 12% na
+  thread da VU1 sem origem conhecida.
+
 ### 2026-11-10 20:30, noite: otimização, segunda parte: a VU1 do Nominum (`d398993`); só o Mi A3 daqui em diante
 
 - **Pedido do desenvolvedor:** mexer na VU1 no repositório do Nominum (`~/AndroidStudioProjects/Nominum-Render`), e **não
