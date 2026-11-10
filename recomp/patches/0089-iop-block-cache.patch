@@ -1,0 +1,901 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_blocks.h b/ps2xIOP/src/emulator/core/iop_blocks.h
+new file mode 100644
+index 0000000..d8e2f8c
+--- /dev/null
++++ b/ps2xIOP/src/emulator/core/iop_blocks.h
+@@ -0,0 +1,546 @@
++#pragma once
++// Hidden Leaf: the IOP's block cache. The IOP interpreter decodes and checks every instruction on its own
++// (IopEmulator::Impl::step: the interrupt test, the import test, the fetch, the decode, the load delay, the DMA start);
++// on the devices the sound modules (CRI's ADX driver, modhsyn, libsd) took ~25% of the EE thread through it. Here a run
++// of plain instructions (ALU, RAM loads and stores, one branch with its delay slot) is decoded once and run with the
++// interpreter's exact results: the same registers, the load delay slot, HI/LO, the branch delay slot. What the block does
++// not do it leaves to the interpreter, which then runs from that very instruction with the very same state: a trap (ADD,
++// ADDI, SUB overflow; a misaligned address), a load or store outside RAM (hardware, SPU2: they depend on the IOP's
++// clock), COP0, SYSCALL, BREAK, an import stub. The caller (step) runs a block only when no interrupt, DMA end, guest
++// callback or the end of the time slice falls inside it, so the IOP's state at every slice end is the interpreter's,
++// bit for bit (HL_IOP_HASH checks it). HL_IOP_BLOCKS=0 turns the cache off.
++#include "iop_cpu.h"
++#include "iop_memory.h"
++
++#include <cstdint>
++#include <cstring>
++#include <limits>
++#include <memory>
++#include <vector>
++
++namespace ps2x::iop::detail
++{
++    struct IopBlockCtx
++    {
++        uint32_t *gpr;
++        IopCpuState *cpu;
++        IopMemory *mem;
++        uint8_t *ram;
++        uint32_t curLoad;
++        uint32_t newLoad;
++        uint32_t branchTaken;
++        uint32_t branchTarget;
++    };
++
++    struct IopOp;
++    using IopOpFn = bool (*)(IopBlockCtx &, const IopOp &); // false: stop before this op (the interpreter does it)
++
++    struct IopOp
++    {
++        IopOpFn fn;
++        uint32_t imm; // the sign- or zero-extended immediate, the jump target, or the return address
++        uint32_t pc;
++        uint8_t rs, rt, rd, sa;
++        uint8_t applyReg; // the register of the previous op's load, written after this op (0: none)
++        uint8_t prevLoad; // the previous op's load register, still pending when this op starts (0: none)
++        uint8_t written;  // the register the interpreter's write() sets (0: none): for a load pending on entry
++    };
++
++    struct IopBlock
++    {
++        uint32_t start = 0;      // its first instruction (as the PC had it)
++        uint32_t phys = 0;
++        uint32_t count = 0;      // 0: nothing to run from here (the interpreter)
++        uint32_t branchAt = ~0u; // the index of its branch (its delay slot is the last op)
++        uint32_t genFirst = 0, genLast = 0;
++        uint8_t lastLoadReg = 0; // the register the last op loads (its load is still pending at the end)
++        std::vector<IopOp> ops;
++    };
++
++    namespace iopops
++    {
++        using C = IopBlockCtx;
++        using O = IopOp;
++        inline bool nop(C &, const O &) { return true; }
++        inline bool sll(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rt] << o.sa; return true; }
++        inline bool srl(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rt] >> o.sa; return true; }
++        inline bool sra(C &c, const O &o) { c.gpr[o.rd] = static_cast<uint32_t>(static_cast<int32_t>(c.gpr[o.rt]) >> o.sa); return true; }
++        inline bool sllv(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rt] << (c.gpr[o.rs] & 31u); return true; }
++        inline bool srlv(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rt] >> (c.gpr[o.rs] & 31u); return true; }
++        inline bool srav(C &c, const O &o) { c.gpr[o.rd] = static_cast<uint32_t>(static_cast<int32_t>(c.gpr[o.rt]) >> (c.gpr[o.rs] & 31u)); return true; }
++        inline bool mfhi(C &c, const O &o) { c.gpr[o.rd] = c.cpu->hi; return true; }
++        inline bool mflo(C &c, const O &o) { c.gpr[o.rd] = c.cpu->lo; return true; }
++        inline bool mthi(C &c, const O &o) { c.cpu->hi = c.gpr[o.rs]; return true; }
++        inline bool mtlo(C &c, const O &o) { c.cpu->lo = c.gpr[o.rs]; return true; }
++        inline bool mult(C &c, const O &o)
++        {
++            const int64_t r = static_cast<int64_t>(static_cast<int32_t>(c.gpr[o.rs])) * static_cast<int64_t>(static_cast<int32_t>(c.gpr[o.rt]));
++            c.cpu->lo = static_cast<uint32_t>(r);
++            c.cpu->hi = static_cast<uint32_t>(static_cast<uint64_t>(r) >> 32u);
++            return true;
++        }
++        inline bool multu(C &c, const O &o)
++        {
++            const uint64_t r = static_cast<uint64_t>(c.gpr[o.rs]) * c.gpr[o.rt];
++            c.cpu->lo = static_cast<uint32_t>(r);
++            c.cpu->hi = static_cast<uint32_t>(r >> 32u);
++            return true;
++        }
++        inline bool div(C &c, const O &o)
++        {
++            const int32_t l = static_cast<int32_t>(c.gpr[o.rs]), r = static_cast<int32_t>(c.gpr[o.rt]);
++            if (r == 0)
++            {
++                c.cpu->lo = l >= 0 ? 0xFFFFFFFFu : 1u;
++                c.cpu->hi = static_cast<uint32_t>(l);
++            }
++            else if (l == std::numeric_limits<int32_t>::min() && r == -1)
++            {
++                c.cpu->lo = static_cast<uint32_t>(l);
++                c.cpu->hi = 0u;
++            }
++            else
++            {
++                c.cpu->lo = static_cast<uint32_t>(l / r);
++                c.cpu->hi = static_cast<uint32_t>(l % r);
++            }
++            return true;
++        }
++        inline bool divu(C &c, const O &o)
++        {
++            const uint32_t l = c.gpr[o.rs], r = c.gpr[o.rt];
++            if (r == 0u)
++            {
++                c.cpu->lo = 0xFFFFFFFFu;
++                c.cpu->hi = l;
++            }
++            else
++            {
++                c.cpu->lo = l / r;
++                c.cpu->hi = l % r;
++            }
++            return true;
++        }
++        inline bool add(C &c, const O &o)
++        {
++            const int64_t r = static_cast<int64_t>(static_cast<int32_t>(c.gpr[o.rs])) + static_cast<int32_t>(c.gpr[o.rt]);
++            if (r > std::numeric_limits<int32_t>::max() || r < std::numeric_limits<int32_t>::min())
++                return false;
++            if (o.rd)
++                c.gpr[o.rd] = static_cast<uint32_t>(static_cast<int32_t>(r));
++            return true;
++        }
++        inline bool sub(C &c, const O &o)
++        {
++            const int64_t r = static_cast<int64_t>(static_cast<int32_t>(c.gpr[o.rs])) - static_cast<int32_t>(c.gpr[o.rt]);
++            if (r > std::numeric_limits<int32_t>::max() || r < std::numeric_limits<int32_t>::min())
++                return false;
++            if (o.rd)
++                c.gpr[o.rd] = static_cast<uint32_t>(static_cast<int32_t>(r));
++            return true;
++        }
++        inline bool addi(C &c, const O &o)
++        {
++            const int64_t r = static_cast<int64_t>(static_cast<int32_t>(c.gpr[o.rs])) + static_cast<int32_t>(o.imm);
++            if (r > std::numeric_limits<int32_t>::max() || r < std::numeric_limits<int32_t>::min())
++                return false;
++            if (o.rt)
++                c.gpr[o.rt] = static_cast<uint32_t>(static_cast<int32_t>(r));
++            return true;
++        }
++        inline bool addu(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] + c.gpr[o.rt]; return true; }
++        inline bool subu(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] - c.gpr[o.rt]; return true; }
++        inline bool and_(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] & c.gpr[o.rt]; return true; }
++        inline bool or_(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] | c.gpr[o.rt]; return true; }
++        inline bool xor_(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] ^ c.gpr[o.rt]; return true; }
++        inline bool nor(C &c, const O &o) { c.gpr[o.rd] = ~(c.gpr[o.rs] | c.gpr[o.rt]); return true; }
++        inline bool slt(C &c, const O &o) { c.gpr[o.rd] = static_cast<int32_t>(c.gpr[o.rs]) < static_cast<int32_t>(c.gpr[o.rt]) ? 1u : 0u; return true; }
++        inline bool sltu(C &c, const O &o) { c.gpr[o.rd] = c.gpr[o.rs] < c.gpr[o.rt] ? 1u : 0u; return true; }
++        inline bool addiu(C &c, const O &o) { c.gpr[o.rt] = c.gpr[o.rs] + o.imm; return true; }
++        inline bool slti(C &c, const O &o) { c.gpr[o.rt] = static_cast<int32_t>(c.gpr[o.rs]) < static_cast<int32_t>(o.imm) ? 1u : 0u; return true; }
++        inline bool sltiu(C &c, const O &o) { c.gpr[o.rt] = c.gpr[o.rs] < o.imm ? 1u : 0u; return true; }
++        inline bool andi(C &c, const O &o) { c.gpr[o.rt] = c.gpr[o.rs] & o.imm; return true; }
++        inline bool ori(C &c, const O &o) { c.gpr[o.rt] = c.gpr[o.rs] | o.imm; return true; }
++        inline bool xori(C &c, const O &o) { c.gpr[o.rt] = c.gpr[o.rs] ^ o.imm; return true; }
++        inline bool lui(C &c, const O &o) { c.gpr[o.rt] = o.imm; return true; }
++
++        // branches: the condition and the target (the delay slot runs next; the block ends after it)
++        inline bool beq(C &c, const O &o) { c.branchTaken = c.gpr[o.rs] == c.gpr[o.rt]; c.branchTarget = o.imm; return true; }
++        inline bool bne(C &c, const O &o) { c.branchTaken = c.gpr[o.rs] != c.gpr[o.rt]; c.branchTarget = o.imm; return true; }
++        inline bool blez(C &c, const O &o) { c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) <= 0; c.branchTarget = o.imm; return true; }
++        inline bool bgtz(C &c, const O &o) { c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) > 0; c.branchTarget = o.imm; return true; }
++        inline bool bltz(C &c, const O &o) { c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) < 0; c.branchTarget = o.imm; return true; }
++        inline bool bgez(C &c, const O &o) { c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) >= 0; c.branchTarget = o.imm; return true; }
++        inline bool bltzal(C &c, const O &o)
++        {
++            c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) < 0; // (the interpreter tests before it writes RA)
++            c.branchTarget = o.imm;
++            c.gpr[31] = o.pc + 8u;
++            return true;
++        }
++        inline bool bgezal(C &c, const O &o)
++        {
++            c.branchTaken = static_cast<int32_t>(c.gpr[o.rs]) >= 0;
++            c.branchTarget = o.imm;
++            c.gpr[31] = o.pc + 8u;
++            return true;
++        }
++        inline bool j(C &c, const O &o) { c.branchTaken = 1u; c.branchTarget = o.imm; return true; }
++        inline bool jal(C &c, const O &o) { c.branchTaken = 1u; c.branchTarget = o.imm; c.gpr[31] = o.pc + 8u; return true; }
++        inline bool jr(C &c, const O &o) { c.branchTaken = 1u; c.branchTarget = c.gpr[o.rs]; return true; }
++        inline bool jalr(C &c, const O &o)
++        {
++            c.branchTaken = 1u;
++            c.branchTarget = c.gpr[o.rs]; // (read before the write: JALR rs, rs)
++            c.gpr[o.rd] = o.pc + 8u;
++            return true;
++        }
++
++        // loads and stores: RAM only (the rest depends on the IOP's clock: the interpreter does it)
++        inline bool ramAt(uint32_t address, uint32_t size, uint32_t &phys)
++        {
++            phys = IopMemory::physicalAddress(address);
++            return phys <= IopMemory::RamSize - size;
++        }
++        inline bool lb(C &c, const O &o)
++        {
++            uint32_t p;
++            if (!ramAt(c.gpr[o.rs] + o.imm, 1u, p))
++                return false;
++            c.newLoad = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(c.ram[p])));
++            return true;
++        }
++        inline bool lbu(C &c, const O &o)
++        {
++            uint32_t p;
++            if (!ramAt(c.gpr[o.rs] + o.imm, 1u, p))
++                return false;
++            c.newLoad = c.ram[p];
++            return true;
++        }
++        inline bool lh(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if ((a & 1u) || !ramAt(a, 2u, p))
++                return false;
++            int16_t v;
++            std::memcpy(&v, c.ram + p, 2);
++            c.newLoad = static_cast<uint32_t>(static_cast<int32_t>(v));
++            return true;
++        }
++        inline bool lhu(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if ((a & 1u) || !ramAt(a, 2u, p))
++                return false;
++            uint16_t v;
++            std::memcpy(&v, c.ram + p, 2);
++            c.newLoad = v;
++            return true;
++        }
++        inline bool lw(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if ((a & 3u) || !ramAt(a, 4u, p))
++                return false;
++            std::memcpy(&c.newLoad, c.ram + p, 4);
++            return true;
++        }
++        inline bool lwl(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if (!ramAt(a & ~3u, 4u, p))
++                return false;
++            uint32_t m;
++            std::memcpy(&m, c.ram + p, 4);
++            static constexpr uint32_t masks[4] = {0x00FFFFFFu, 0x0000FFFFu, 0x000000FFu, 0x00000000u};
++            static constexpr uint32_t shifts[4] = {24u, 16u, 8u, 0u};
++            c.newLoad = (c.gpr[o.rt] & masks[a & 3u]) | (m << shifts[a & 3u]);
++            return true;
++        }
++        inline bool lwr(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if (!ramAt(a & ~3u, 4u, p))
++                return false;
++            uint32_t m;
++            std::memcpy(&m, c.ram + p, 4);
++            static constexpr uint32_t masks[4] = {0x00000000u, 0xFF000000u, 0xFFFF0000u, 0xFFFFFF00u};
++            static constexpr uint32_t shifts[4] = {0u, 8u, 16u, 24u};
++            c.newLoad = (c.gpr[o.rt] & masks[a & 3u]) | (m >> shifts[a & 3u]);
++            return true;
++        }
++        inline bool sb(C &c, const O &o)
++        {
++            uint32_t p;
++            if (!ramAt(c.gpr[o.rs] + o.imm, 1u, p))
++                return false;
++            c.mem->write8(p, static_cast<uint8_t>(c.gpr[o.rt]));
++            return true;
++        }
++        inline bool sh(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if ((a & 1u) || !ramAt(a, 2u, p))
++                return false;
++            c.mem->write16(p, static_cast<uint16_t>(c.gpr[o.rt]));
++            return true;
++        }
++        inline bool sw(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if ((a & 3u) || !ramAt(a, 4u, p))
++                return false;
++            c.mem->write32(p, c.gpr[o.rt]);
++            return true;
++        }
++        inline bool swl(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if (!ramAt(a & ~3u, 4u, p))
++                return false;
++            uint32_t old;
++            std::memcpy(&old, c.ram + p, 4);
++            const uint32_t v = c.gpr[o.rt];
++            uint32_t r = old;
++            switch (a & 3u)
++            {
++            case 0u: r = (old & 0xFFFFFF00u) | (v >> 24u); break;
++            case 1u: r = (old & 0xFFFF0000u) | (v >> 16u); break;
++            case 2u: r = (old & 0xFF000000u) | (v >> 8u); break;
++            case 3u: r = v; break;
++            }
++            c.mem->write32(p, r);
++            return true;
++        }
++        inline bool swr(C &c, const O &o)
++        {
++            const uint32_t a = c.gpr[o.rs] + o.imm;
++            uint32_t p;
++            if (!ramAt(a & ~3u, 4u, p))
++                return false;
++            uint32_t old;
++            std::memcpy(&old, c.ram + p, 4);
++            const uint32_t v = c.gpr[o.rt];
++            uint32_t r = old;
++            switch (a & 3u)
++            {
++            case 0u: r = v; break;
++            case 1u: r = (old & 0x000000FFu) | (v << 8u); break;
++            case 2u: r = (old & 0x0000FFFFu) | (v << 16u); break;
++            case 3u: r = (old & 0x00FFFFFFu) | (v << 24u); break;
++            }
++            c.mem->write32(p, r);
++            return true;
++        }
++    }
++
++    // One decoded instruction: its handler, what it writes (for the load delay rule), whether it is a load, a branch.
++    struct IopDecoded
++    {
++        IopOpFn fn = nullptr; // nullptr: not for a block
++        uint8_t written = 0;  // the register the interpreter's write() sets (0: none)
++        uint8_t loadReg = 0;  // a load: the register it schedules (0: none)
++        bool branch = false;
++        bool registerTarget = false; // JR/JALR (the target comes from the register)
++        uint32_t target = 0;  // the target of a PC-relative or J/JAL branch
++    };
++
++    inline IopDecoded iopDecode(uint32_t pc, uint32_t in, IopOp &op)
++    {
++        using namespace iopops;
++        IopDecoded d;
++        const uint32_t opcode = in >> 26u, rs = (in >> 21u) & 31u, rt = (in >> 16u) & 31u, rd = (in >> 11u) & 31u;
++        const uint32_t sa = (in >> 6u) & 31u, funct = in & 63u, imm = in & 0xFFFFu;
++        const uint32_t simm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(imm)));
++        op.rs = static_cast<uint8_t>(rs);
++        op.rt = static_cast<uint8_t>(rt);
++        op.rd = static_cast<uint8_t>(rd);
++        op.sa = static_cast<uint8_t>(sa);
++        op.pc = pc;
++        op.imm = 0;
++        auto alu = [&](IopOpFn fn, uint32_t dest)
++        {
++            d.fn = dest ? fn : &nop; // (the interpreter's write() leaves R0 alone)
++            d.written = static_cast<uint8_t>(dest);
++        };
++        auto branch = [&](IopOpFn fn)
++        {
++            d.fn = fn;
++            d.branch = true;
++            d.target = pc + 4u + (simm << 2u);
++        };
++        switch (opcode)
++        {
++        case 0x00:
++            switch (funct)
++            {
++            case 0x00: alu(&sll, rd); break;
++            case 0x02: alu(&srl, rd); break;
++            case 0x03: alu(&sra, rd); break;
++            case 0x04: alu(&sllv, rd); break;
++            case 0x06: alu(&srlv, rd); break;
++            case 0x07: alu(&srav, rd); break;
++            case 0x08: d.fn = &jr; d.branch = true; d.registerTarget = true; break;
++            case 0x09:
++                if (rd == 0u)
++                    op.rd = 31u;
++                d.fn = &jalr;
++                d.branch = true;
++                d.registerTarget = true;
++                d.written = op.rd;
++                break;
++            case 0x10: alu(&mfhi, rd); break;
++            case 0x11: d.fn = &mthi; break;
++            case 0x12: alu(&mflo, rd); break;
++            case 0x13: d.fn = &mtlo; break;
++            case 0x18: d.fn = &mult; break;
++            case 0x19: d.fn = &multu; break;
++            case 0x1A: d.fn = &div; break;
++            case 0x1B: d.fn = &divu; break;
++            case 0x20: d.fn = &add; d.written = static_cast<uint8_t>(rd); break;
++            case 0x21: alu(&addu, rd); break;
++            case 0x22: d.fn = &sub; d.written = static_cast<uint8_t>(rd); break;
++            case 0x23: alu(&subu, rd); break;
++            case 0x24: alu(&and_, rd); break;
++            case 0x25: alu(&or_, rd); break;
++            case 0x26: alu(&xor_, rd); break;
++            case 0x27: alu(&nor, rd); break;
++            case 0x2A: alu(&slt, rd); break;
++            case 0x2B: alu(&sltu, rd); break;
++            default: break; // SYSCALL, BREAK and the rest: the interpreter
++            }
++            break;
++        case 0x01:
++            switch (rt)
++            {
++            case 0x00: branch(&bltz); break;
++            case 0x01: branch(&bgez); break;
++            case 0x10: branch(&bltzal); d.written = 31u; break;
++            case 0x11: branch(&bgezal); d.written = 31u; break;
++            default: break;
++            }
++            break;
++        case 0x02:
++        case 0x03:
++            d.fn = opcode == 0x02 ? &j : &jal;
++            d.branch = true;
++            d.target = ((pc + 4u) & 0xF0000000u) | ((in & 0x03FFFFFFu) << 2u);
++            if (opcode == 0x03)
++                d.written = 31u;
++            break;
++        case 0x04: branch(&beq); break;
++        case 0x05: branch(&bne); break;
++        case 0x06: branch(&blez); break;
++        case 0x07: branch(&bgtz); break;
++        case 0x08: d.fn = &addi; d.written = static_cast<uint8_t>(rt); op.imm = simm; break;
++        case 0x09: alu(&addiu, rt); op.imm = simm; break;
++        case 0x0A: alu(&slti, rt); op.imm = simm; break;
++        case 0x0B: alu(&sltiu, rt); op.imm = simm; break;
++        case 0x0C: alu(&andi, rt); op.imm = imm; break;
++        case 0x0D: alu(&ori, rt); op.imm = imm; break;
++        case 0x0E: alu(&xori, rt); op.imm = imm; break;
++        case 0x0F: alu(&lui, rt); op.imm = imm << 16u; break;
++        case 0x20: d.fn = &lb; break;
++        case 0x24: d.fn = &lbu; break;
++        case 0x21: d.fn = &lh; break;
++        case 0x25: d.fn = &lhu; break;
++        case 0x22: d.fn = &lwl; break;
++        case 0x23: d.fn = &lw; break;
++        case 0x26: d.fn = &lwr; break;
++        case 0x28: d.fn = &sb; break;
++        case 0x29: d.fn = &sh; break;
++        case 0x2A: d.fn = &swl; break;
++        case 0x2B: d.fn = &sw; break;
++        case 0x2E: d.fn = &swr; break;
++        default: break; // COP0 and the rest: the interpreter
++        }
++        if (opcode >= 0x20u && opcode <= 0x26u)
++        {
++            op.imm = simm;
++            d.loadReg = static_cast<uint8_t>(rt); // (a load into R0 schedules nothing)
++        }
++        else if (opcode >= 0x28u && opcode <= 0x2Eu)
++            op.imm = simm;
++        if (d.branch && !d.registerTarget)
++            op.imm = d.target;
++        return d;
++    }
++
++    // Runs a block from its first instruction, at most limit instructions. Returns how many it ran (0: none; the
++    // interpreter runs the first) and leaves cpu exactly as the interpreter would after them.
++    inline uint32_t iopRunBlock(const IopBlock &b, IopCpuState &cpu, IopMemory &mem, uint32_t limit)
++    {
++        IopBlockCtx c;
++        c.gpr = cpu.gpr.data();
++        c.cpu = &cpu;
++        c.mem = &mem;
++        c.ram = mem.ramData();
++        c.curLoad = 0;
++        c.newLoad = 0;
++        c.branchTaken = 0;
++        c.branchTarget = 0;
++        const IopOp *ops = b.ops.data();
++        const uint32_t n = b.count;
++        const uint32_t stop = limit < n ? limit : n; // (limit: an event of the IOP's falls inside; stop before it)
++        uint32_t i = 0;
++        // a load still pending from before the block (the last op of the block before): applied after op 0, as the
++        // interpreter does, unless op 0 writes that register itself
++        if (cpu.pendingLoad && stop != 0u)
++        {
++            const IopOp &op = ops[0];
++            if (!op.fn(c, op))
++                return 0u;
++            if (cpu.pendingLoadReg != op.written)
++                c.gpr[cpu.pendingLoadReg] = cpu.pendingLoadValue;
++            c.curLoad = c.newLoad;
++            i = 1u;
++        }
++        for (; i < stop; ++i)
++        {
++            const IopOp &op = ops[i];
++            if (!op.fn(c, op))
++                break;
++            if (op.applyReg)
++                c.gpr[op.applyReg] = c.curLoad;
++            c.curLoad = c.newLoad;
++        }
++        cpu.exception = false;
++        cpu.yielded = false;
++        if (i == n)
++        {
++            cpu.pendingLoad = b.lastLoadReg != 0u;
++            cpu.pendingLoadReg = b.lastLoadReg;
++            if (cpu.pendingLoad)
++                cpu.pendingLoadValue = c.curLoad;
++            cpu.branchPending = false;
++            cpu.pc = (b.branchAt != ~0u && c.branchTaken) ? c.branchTarget : b.start + n * 4u;
++            return n;
++        }
++        // stopped before op i: the state after op i-1 (its load still pending; inside a taken delay slot, the branch
++        // pending)
++        if (i == 0u)
++            return 0u;
++        const uint8_t pendingReg = ops[i].prevLoad;
++        cpu.pendingLoad = pendingReg != 0u;
++        cpu.pendingLoadReg = pendingReg;
++        if (cpu.pendingLoad)
++            cpu.pendingLoadValue = c.curLoad;
++        cpu.pc = b.start + i * 4u;
++        cpu.branchPending = false;
++        if (b.branchAt != ~0u && i == b.branchAt + 1u && c.branchTaken)
++        {
++            cpu.branchPending = true;
++            cpu.branchTarget = c.branchTarget;
++        }
++        return i;
++    }
++}
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 3119932..d15ae17 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -38,6 +38,8 @@ namespace ps2x::iop::detail
+         m_interruptMask = 0;
+         m_interruptControl = 1;
+         m_dmaStart.reset();
++        for (uint32_t page = 0; page < kCodePages; ++page)
++            noteCodeWrite(page << kCodePageShift);
+     }
+ 
+     namespace
+@@ -210,6 +212,7 @@ namespace ps2x::iop::detail
+         if (address > RamSize || size > RamSize - address)
+             return;
+         std::fill(m_owned.begin() + address, m_owned.begin() + address + size, uint8_t{1});
++        noteCodeWrites(address, size);
+     }
+ 
+     bool IopMemory::isHardwareAddress(uint32_t address) const
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index 0e3e88a..fb7ec70 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -3,6 +3,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
++#include <array>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -79,6 +80,7 @@ namespace ps2x::iop::detail
+             {
+                 std::memcpy(m_ram.data() + phys, &value, sizeof(value));
+                 std::memset(m_owned.data() + phys, 1, sizeof(value));
++                noteCodeWrite(phys);
+                 return;
+             }
+             write32Slow(address, value);
+@@ -110,6 +112,29 @@ namespace ps2x::iop::detail
+ 
+         [[nodiscard]] static uint32_t physicalAddress(uint32_t address) noexcept { return address & 0x1FFFFFFFu; }
+ 
++        // Hidden Leaf: the IOP block cache (iop_blocks.h) watches the 1 KB pages its blocks were decoded from; a write
++        // to a watched page moves the page's generation on, and the blocks of the old generation are decoded again.
++        static constexpr uint32_t kCodePageShift = 10u;
++        static constexpr uint32_t kCodePages = RamSize >> kCodePageShift;
++        [[nodiscard]] uint32_t codeGeneration(uint32_t phys) const noexcept { return m_codeGen[phys >> kCodePageShift]; }
++        void watchCode(uint32_t phys) noexcept { m_codeWatched[phys >> kCodePageShift] = 1u; }
++        void noteCodeWrite(uint32_t phys) noexcept
++        {
++            const uint32_t page = phys >> kCodePageShift;
++            if (m_codeWatched[page])
++            {
++                m_codeWatched[page] = 0u;
++                ++m_codeGen[page];
++            }
++        }
++        void noteCodeWrites(uint32_t phys, size_t size) noexcept
++        {
++            if (size == 0u)
++                return;
++            for (uint32_t page = phys >> kCodePageShift; page <= (phys + size - 1u) >> kCodePageShift && page < kCodePages; ++page)
++                noteCodeWrite(page << kCodePageShift);
++        }
++
+     private:
+         [[nodiscard]] uint32_t read32Slow(uint32_t address) const;
+         void write32Slow(uint32_t address, uint32_t value);
+@@ -127,5 +152,7 @@ namespace ps2x::iop::detail
+         uint32_t m_interruptMask = 0;
+         uint32_t m_interruptControl = 1;
+         std::optional<DmaStart> m_dmaStart;
++        std::array<uint8_t, kCodePages> m_codeWatched{};
++        std::array<uint32_t, kCodePages> m_codeGen{};
+     };
+ }
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index f51377f..55d2dbc 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -1,6 +1,7 @@
+ #include "iop_emulator.h"
+ #include "imports/iop_cdvd.h"
+ #include "core/iop_cpu.h"
++#include "core/iop_blocks.h"
+ #include "imports/iop_heaplib.h"
+ #include "imports/iop_imports.h"
+ #include "imports/iop_intrman.h"
+@@ -19,11 +20,14 @@
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <cstdio>
++#include <cstring>
+ #include <cstdlib>
+ #include <iostream>
+ #include <string>
+ #include <vector>
+ #include <map>
++#include <memory>
+ #include <optional>
+ #include <span>
+ #include <sstream>
+@@ -31,6 +35,7 @@
+ 
+ namespace ps2x::iop::detail
+ {
++    inline bool g_iopStepLog = false;
+     namespace
+     {
+         constexpr uint32_t kRamSize = IopMemory::RamSize;
+@@ -402,6 +407,105 @@ namespace ps2x::iop::detail
+             return ImportDisposition::Missing;
+         }
+ 
++        static constexpr uint32_t kMaxBlock = 64u;
++        static inline const bool s_blocksOn = []
++        {
++            const char *v = std::getenv("HL_IOP_BLOCKS");
++            return !(v && v[0] == '0') && !std::getenv("HL_IOP_PROF");
++        }();
++        std::vector<std::unique_ptr<IopBlock>> blocks;
++        uint64_t budgetEnd = UINT64_MAX; // runCpu's: the instruction count its slice ends at
++
++        bool isImportStub(uint32_t pc, uint32_t word) const
++        {
++            return word == 0x03E00008u && imports.decode(pc).has_value();
++        }
++
++        IopBlock &buildBlock(uint32_t pc, uint32_t phys)
++        {
++            std::unique_ptr<IopBlock> &slot = blocks[phys >> 2];
++            if (!slot)
++                slot = std::make_unique<IopBlock>();
++            IopBlock &b = *slot;
++            b.ops.clear();
++            b.start = pc;
++            b.phys = phys;
++            b.branchAt = ~0u;
++            uint8_t pending = 0;
++            for (uint32_t i = 0;; ++i)
++            {
++                if (i >= kMaxBlock && b.branchAt == ~0u) // (a branch's delay slot may go one past)
++                    break;
++                const uint32_t a = phys + i * 4u;
++                if (a > kRamSize - 4u)
++                    break;
++                const uint32_t word = memory.read32(a);
++                if (isImportStub(pc + i * 4u, word))
++                    break;
++                IopOp op{};
++                const IopDecoded d = iopDecode(pc + i * 4u, word, op);
++                if (!d.fn)
++                    break;
++                const bool delaySlot = b.branchAt != ~0u;
++                if (d.branch)
++                {
++                    if (delaySlot || a + 4u > kRamSize - 4u)
++                        break;
++                    const uint32_t next = memory.read32(a + 4u);
++                    IopOp slotOp{};
++                    const IopDecoded slotDecoded = iopDecode(pc + i * 4u + 4u, next, slotOp);
++                    if (!slotDecoded.fn || slotDecoded.branch || isImportStub(pc + i * 4u + 4u, next))
++                        break;
++                }
++                op.fn = d.fn;
++                op.written = d.written;
++                op.prevLoad = pending;
++                op.applyReg = (pending != 0u && pending != d.written) ? pending : 0u;
++                b.ops.push_back(op);
++                pending = d.loadReg;
++                if (d.branch)
++                    b.branchAt = i;
++                if (delaySlot)
++                    break;
++            }
++            b.count = static_cast<uint32_t>(b.ops.size());
++            b.lastLoadReg = pending;
++            const uint32_t last = phys + (b.count ? b.count - 1u : 0u) * 4u;
++            memory.watchCode(phys);
++            memory.watchCode(last);
++            b.genFirst = memory.codeGeneration(phys);
++            b.genLast = memory.codeGeneration(last);
++            return b;
++        }
++
++        uint32_t runBlockAt(CpuState &cpu)
++        {
++            const uint32_t phys = IopMemory::physicalAddress(cpu.pc);
++            if (blocks.empty())
++                blocks.resize(kRamSize / 4u);
++            IopBlock *b = blocks[phys >> 2].get();
++            if (!b || b->start != cpu.pc || b->genFirst != memory.codeGeneration(phys) ||
++                b->genLast != memory.codeGeneration(phys + (b->count ? b->count - 1u : 0u) * 4u))
++                b = &buildBlock(cpu.pc, phys);
++            // (a DMA started by an import waits for the next instruction's schedulePendingDma: the interpreter's)
++            if (b->count == 0u || memory.dmaStartPending())
++                return 0u;
++            // the events the interpreter tests after each instruction: none may fall inside what runs
++            uint64_t limit = b->count;
++            if (budgetEnd - totalInstructions < limit)
++                limit = budgetEnd > totalInstructions ? budgetEnd - totalInstructions : 0u;
++            if (!servicingDmaInterrupts && !pendingDmaInterrupts.empty())
++                limit = std::min<uint64_t>(limit, nextDmaDue > totalCycles ? nextDmaDue - totalCycles : 0u);
++            if (!servicingGuestCallbacks && !pendingGuestCallbacks.empty())
++            {
++                const uint64_t due = pendingGuestCallbacks.begin()->first;
++                limit = std::min<uint64_t>(limit, due > totalCycles ? due - totalCycles : 0u);
++            }
++            if (limit == 0u)
++                return 0u;
++            return iopRunBlock(*b, cpu, memory, static_cast<uint32_t>(limit));
++        }
++
+         bool step(CpuState &cpu)
+         {
+             if (cpu.stopped)
+@@ -444,6 +548,33 @@ namespace ps2x::iop::detail
+                 std::cerr << out.str() << std::endl;
+             }
+ 
++            if (g_iopStepLog)
++                std::fprintf(stderr, "[iop-step] pc %x i %llu c %llu pl %d bp %d\n", cpu.pc, static_cast<unsigned long long>(totalInstructions),
++                             static_cast<unsigned long long>(totalCycles), cpu.pendingLoad, cpu.branchPending);
++            // Hidden Leaf: the block cache (core/iop_blocks.h): a run of plain instructions at once, with the same result
++            // One block after another while nothing the interpreter tests between two instructions can change: inside
++            // the blocks no interrupt is raised or enabled, no DMA starts, nothing stops or yields; the stop is the PC
++            // leaving RAM or reaching a sentinel, a branch left pending, or an event due (runBlockAt's limit).
++            if (s_blocksOn && !cpu.branchPending && s_tracePcs.empty())
++            {
++                uint32_t ran = runBlockAt(cpu);
++                if (ran)
++                {
++                    for (;;)
++                    {
++                        totalInstructions += ran;
++                        totalCycles += ran;
++                        if (cpu.branchPending || cpu.pc == kThreadReturnSentinel || cpu.pc == kCallReturnSentinel ||
++                            physicalAddress(cpu.pc) >= kRamSize)
++                            break;
++                        ran = runBlockAt(cpu);
++                        if (!ran)
++                            break;
++                    }
++                    return !cpu.stopped;
++                }
++            }
++
+             if (memory.read32(cpu.pc) == 0x03E00008u) // (decode's first test: an import stub starts with JR RA)
+             {
+                 if (const auto import = imports.decode(cpu.pc))
+@@ -459,6 +590,34 @@ namespace ps2x::iop::detail
+                 }
+             }
+ 
++            // Hidden Leaf: HL_IOP_PROF=1 counts the instructions per address and prints the hottest every 2^28
++            static uint32_t *const s_iopHist = std::getenv("HL_IOP_PROF") ? static_cast<uint32_t *>(std::calloc(kRamSize / 4u, 4u)) : nullptr;
++            if (s_iopHist)
++            {
++                ++s_iopHist[(physicalAddress(cpu.pc) & (kRamSize - 1u)) >> 2];
++                if ((totalInstructions & ((1ull << 26) - 1u)) == 0u && totalInstructions != 0u)
++                {
++                    std::vector<std::pair<uint32_t, uint32_t>> top;
++                    for (uint32_t i = 0; i < kRamSize / 4u; ++i)
++                        if (s_iopHist[i] != 0u)
++                            top.emplace_back(s_iopHist[i], i * 4u);
++                    std::sort(top.rbegin(), top.rend());
++                    static const char *s_histPath = std::getenv("HL_IOP_PROF");
++                    if (s_histPath[0] == '/')
++                        if (FILE *hf = std::fopen(s_histPath, "a"))
++                        {
++                            std::fprintf(hf, "# %llu\n", static_cast<unsigned long long>(totalInstructions));
++                            for (const auto &[count, addr] : top)
++                                std::fprintf(hf, "%x %u\n", addr, count);
++                            std::fclose(hf);
++                        }
++                    std::fprintf(stderr, "[iop-prof] %llu instructions; hottest:", static_cast<unsigned long long>(totalInstructions));
++                    for (size_t i = 0; i < top.size() && i < 40u; ++i)
++                        std::fprintf(stderr, " %x:%u", top[i].second, top[i].first);
++                    std::fprintf(stderr, "\n");
++                    std::memset(s_iopHist, 0, kRamSize);
++                }
++            }
+             const bool running = cpuCore.executeInstruction(cpu);
+             schedulePendingDma();
+             ++totalInstructions;
+@@ -471,6 +630,8 @@ namespace ps2x::iop::detail
+             CpuState *previous = activeCpu;
+             activeCpu = &cpu;
+             const uint64_t start = totalInstructions;
++            const uint64_t previousBudgetEnd = budgetEnd;
++            budgetEnd = start + instructionBudget;
+             while (!cpu.stopped && !cpu.yielded && totalInstructions - start < instructionBudget)
+             {
+                 if (!step(cpu))
+@@ -481,6 +642,7 @@ namespace ps2x::iop::detail
+                     servicePendingGuestCallbacks();
+             }
+             activeCpu = previous;
++            budgetEnd = previousBudgetEnd;
+             return static_cast<uint32_t>(totalInstructions - start);
+         }
+ 
+@@ -869,6 +1031,13 @@ namespace ps2x::iop::detail
+         return m_impl->stopModule(moduleId, result);
+     }
+ 
++    // HL_IOP_STEPLOG=N: every step of the Nth runEeCycles call (pc, instructions, cycles)
++    static const uint64_t s_stepLogCall = []
++    {
++        const char *v = std::getenv("HL_IOP_STEPLOG");
++        return v ? std::strtoull(v, nullptr, 10) : 0ull;
++    }();
++
+     void IopEmulator::runEeCycles(uint64_t eeCycles) noexcept
+     {
+         const uint64_t total = m_impl->eeCycleCarry + eeCycles;
+@@ -876,6 +1045,28 @@ namespace ps2x::iop::detail
+         m_impl->eeCycleCarry = total % 8u;
+         if (iopCycles)
+             m_impl->runCycles(iopCycles);
++        // Hidden Leaf: HL_IOP_HASH=N prints the IOP's RAM, registers and clock every N calls (the block cache's test)
++        static const uint64_t s_hashEvery = []
++        {
++            const char *v = std::getenv("HL_IOP_HASH");
++            return v ? std::strtoull(v, nullptr, 10) : 0ull;
++        }();
++        static uint64_t s_calls = 0;
++        static const uint64_t s_hashFrom = []
++        {
++            const char *v = std::getenv("HL_IOP_HASH_FROM");
++            return v ? std::strtoull(v, nullptr, 10) : 0ull;
++        }();
++        if (s_hashEvery && (++s_calls % s_hashEvery == 0u || (s_hashFrom && s_calls >= s_hashFrom && s_calls < s_hashFrom + 2000u)))
++        {
++            uint64_t h = 1469598103934665603ull;
++            for (const uint8_t byte : m_impl->memory.ram())
++                h = (h ^ byte) * 1099511628211ull;
++            std::fprintf(stderr, "[iop-hash] call %llu cycles %llu instructions %llu ram %016llx\n",
++                         static_cast<unsigned long long>(s_calls), static_cast<unsigned long long>(m_impl->totalCycles),
++                         static_cast<unsigned long long>(m_impl->totalInstructions), static_cast<unsigned long long>(h));
++        }
++        g_iopStepLog = s_stepLogCall != 0u && s_calls + 1u == s_stepLogCall; // (the next call is the Nth)
+     }
+ 
+     RpcResult IopEmulator::handleRpc(const RpcRequest &request)

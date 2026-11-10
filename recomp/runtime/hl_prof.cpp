@@ -2,7 +2,7 @@
 // perf) and for the devices. A CPU-time timer (ITIMER_PROF, HL_PROF_US microseconds, default 1000) interrupts whichever
 // thread is running; the handler keeps the interrupted instruction address and the thread id. hlProfDump() (at exit, and
 // by the bench before its _Exit) writes hl_prof.txt: "module offset tid count" per sampled address, for
-// tools/hlprof.py (addr2line on the module) to turn into functions.
+// tools/hlprof.py (addr2line on the module) to turn into functions. HL_PROF_EVERY=<s> also writes it while running.
 #if defined(__linux__) || defined(__ANDROID__)
 #include <atomic>
 #include <csignal>
@@ -12,6 +12,8 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <map>
+#include <thread>
+#include <chrono>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <ucontext.h>
@@ -19,6 +21,11 @@
 #include <utility>
 
 void hlProfDump();
+
+namespace hl_prof_detail
+{
+    void write(bool final);
+}
 
 namespace hl_prof_detail
 {
@@ -44,12 +51,12 @@ namespace hl_prof_detail
         g_tid[i] = static_cast<int32_t>(syscall(SYS_gettid));
     }
 
-    struct ProfInstall
+    void start()
     {
-        ProfInstall()
         {
+            static std::atomic<bool> s_started{false};
             const char *on = std::getenv("HL_PROF");
-            if (on == nullptr || on[0] == '\0' || on[0] == '0')
+            if (on == nullptr || on[0] == '\0' || on[0] == '0' || s_started.exchange(true))
                 return;
             g_pc = static_cast<uintptr_t *>(std::calloc(kMax, sizeof(uintptr_t)));
             g_tid = static_cast<int32_t *>(std::calloc(kMax, sizeof(int32_t)));
@@ -68,10 +75,31 @@ namespace hl_prof_detail
             t.it_value = t.it_interval;
             setitimer(ITIMER_PROF, &t, nullptr);
             std::atexit(&hlProfDump);
+            // HL_PROF_EVERY=<seconds>: also written while running (the devices: the app is killed, atexit never runs)
+            if (const char *every = std::getenv("HL_PROF_EVERY"))
+            {
+                const int seconds = std::atoi(every);
+                if (seconds > 0)
+                    std::thread([seconds] {
+                        for (;;)
+                        {
+                            std::this_thread::sleep_for(std::chrono::seconds(seconds));
+                            write(false);
+                        }
+                    }).detach();
+            }
             std::fprintf(stderr, "[prof] sampling every %ld us (HL_PROF)\n", us);
         }
+    }
+
+    struct ProfInstall
+    {
+        ProfInstall() { start(); }
     } profInstall;
 }
+
+// The Android host sets the variables of hl_env.txt after the libraries are loaded: it calls this then.
+void hlProfStart() { hl_prof_detail::start(); }
 
 void hlProfDump()
 {
@@ -80,6 +108,14 @@ void hlProfDump()
         return;
     itimerval off{};
     setitimer(ITIMER_PROF, &off, nullptr);
+    write(true);
+}
+
+void hl_prof_detail::write(bool final)
+{
+    using namespace hl_prof_detail;
+    if (g_pc == nullptr)
+        return;
     const uint32_t n = std::min(g_count.load(), kMax);
     std::map<std::pair<uintptr_t, int32_t>, uint32_t> counts;
     for (uint32_t i = 0; i < n; ++i)
@@ -102,8 +138,9 @@ void hlProfDump()
         std::fprintf(f, "%s 0x%zx %d %u\n", module, static_cast<size_t>(offset), c.first.second, c.second);
     }
     std::fclose(f);
-    std::fprintf(stderr, "[prof] %u samples in %s\n", n, path);
+    std::fprintf(stderr, "[prof] %u samples in %s%s\n", n, path, final ? "" : " (so far)");
 }
 #else
+void hlProfStart() {}
 void hlProfDump() {}
 #endif

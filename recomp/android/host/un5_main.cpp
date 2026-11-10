@@ -40,6 +40,7 @@ namespace hl_nominum_vu1
 {
     void setup(); // NOMINUM_VU1=1: Nominum's VIF1 and VU1 (hl_nominum_vu1.cpp)
 }
+void hlProfStart();                            // recomp/runtime/hl_prof.cpp
 void hl_spu2_install();                        // the sound (recomp/android/spu2/hl_spu2.cpp)
 void hl_spu2_pause(bool paused);
 
@@ -435,6 +436,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     redirectOutput(root);
     std::fprintf(stderr, "un5: Hidden Leaf, Ultimate Ninja 5 engine\n");
     loadEnvFile(root + "/hl_env.txt");
+    hlProfStart(); // (HL_PROF: the sampling profiler, recomp/runtime/hl_prof.cpp, with the variables just read)
 #if defined(HL_WATCH_BUILD)
     hl_watch::setup();
 #endif

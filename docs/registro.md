@@ -56,6 +56,26 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 05:30, madrugada: Mi A3 no wifi, perfil no aparelho e o IOP em blocos (patch `0089`)
+
+- **Mi A3:** wifi `192.168.1.136:5555`, tela 720x1560, LineageOS / Android 17. Roteiro de teste `build/lab/mia3run.sh`
+  (escreve o `hl_env.txt`, abre pelo `PlayShortcutActivity`, captura telas por vsync, temperatura e o log).
+- **Perfil no aparelho:** `HL_PROF` agora também liga pelo `hl_env.txt` (`hlProfStart` no `un5_main.cpp`) e
+  `HL_PROF_EVERY=<s>` grava o arquivo durante a execução (o app é morto, o `atexit` não roda).
+- **O que pesa no Mi A3** (luta, 1x, 50 fps, Nominum; thread do EE): IOP 24%, SPU2 15%, código do jogo 11%, checagens
+  de memória 9%, despacho/escalonador 8%, sse2neon 8%. `HL_IOP_PROF=<arquivo>` (histograma por endereço do IOP):
+  69% das instruções do IOP são o `CRI_ADXI.IRX` (o ADX) e 28% o `modhsyn`.
+- **`0089-iop-block-cache.patch`:** o IOP roda blocos pré-decodificados (até 64 instruções e o delay slot), com o
+  resultado exato do interpretador: o load delay, os delay slots, as exceções (ADD/SUB com estouro, endereço
+  desalinhado) e todo acesso fora da RAM ficam com o interpretador, que segue da mesma instrução; nenhum bloco atravessa
+  uma interrupção, o fim de um DMA, um callback ou o fim da fatia. Páginas de 1 KB vigiadas refazem os blocos quando o
+  código muda. `HL_IOP_BLOCKS=0` desliga. **Teste:** `HL_IOP_HASH=500` (hash da RAM do IOP, ciclos e instruções a cada
+  500 chamadas): idêntico com e sem os blocos nos 14.689 pontos da rota v3w (3 lutas, v8500). Um erro achado assim
+  (desvio na 64ª instrução perdia o delay slot) foi corrigido; `HL_IOP_STEPLOG=N` mostra cada passo de uma chamada.
+- **Medidas no Mi A3** (mesma rota, fps médio / IOP ms por quadro): v5500-7100 37,8 / 7,2 antes, 39,4 / 5,4 com os
+  blocos encadeados; v7300-8500 33,5 / 7,5 antes, 35,1 / 5,3. No PC a thread do EE caiu 35%. O que sobra no IOP é quase
+  todo o SPU2 (19% da thread do EE). No fim da luta o limite é o EE (20 ms) e o VU1 (22 ms).
+
 ### 2026-11-10 01:30, madrugada: tela de vitória preta em 16:9 e 20:9, reproduzida no PC e corrigida (`hl_game.cpp`)
 
 Relato do desenvolvedor: quando o jogador ganha, a imagem fica toda preta e só aparece o nome do personagem.
