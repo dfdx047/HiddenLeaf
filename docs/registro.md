@@ -56,6 +56,47 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 08:25, manhã: o travamento do Mi A3 em 2x era o tamanho do envio à GPU (corrigido); pad virtual nos menus; `0086` no commit
+
+- **Memória (`hl_gsx.cpp`):** o núcleo do PCSX2 abaixo do GS aloca o PS2 inteiro (a RAM do EE e a do IOP, declarada com
+  128 MB neste núcleo) e o `memReset` zera tudo, então as páginas ficam residentes. Agora elas voltam ao sistema
+  (`madvise(MADV_REMOVE)`) antes do primeiro pacote; `HL_GSX_KEEPMEM=1` as mantém. Mi A3, arena 13, 2x: o PSS do jogo
+  caiu de 828 para 589 MB no mesmo ponto (v7109), e de 693 para 438 MB no boot.
+- **Mas o travamento continuou, no mesmo quadro (v7109)**, de novo com `order:7` no `adreno_ringbuffer_submitcmd`.
+  Rodadas para separar as causas (arena 13, `MEMEVERY=5`):
+
+  | rodada | v7109 | Graphics |
+  |---|---|---|
+  | 1x, nativo | passa (até v7609) | 142 MB |
+  | 2x, nativo | trava | 149 MB |
+  | 2x, só o GS do ARMSX2 (`HL_NATIVE=0`) | trava | 122 MB |
+
+  Não é o renderizador nativo nem o total de memória da GPU: é o GS em 2x nesse quadro. O kgsl copia a lista de IBs
+  de um envio num `kmalloc` contíguo; o driver faz IBs por render pass e por bin, e em 2x há mais bins. O sistema
+  fica perto da marca mínima de memória livre (~40 MB, normal no Android) e sem blocos de 512 KB, e esse envio não
+  passa. (A `RenderThread` do sistema também falhou em ordem 7 logo depois; sem root não dá para ver o tamanho de cada
+  pedido.)
+- **Correção (`hl_native.cpp`):** o GS do Dragon Rage tem um envio no meio do quadro, numa fronteira de pass e só quando o
+  próximo command buffer já está livre (nunca espera); ele só ligava perto de uma leitura da VRAM. Agora ele fica ligado
+  em todo quadro (a cada vsync, na thread do GS: `m_readback_frame` = o quadro, `m_readback_kick_passes` = o limite),
+  e o renderizador nativo divide os seus passes do mesmo jeito. O limite é `max(8, 96 / escala²)` passes (96 em 1x, 24
+  em 2x); `HL_GS_KICK_PASSES=<n>` muda, 0 desliga. A linha `[native] command buffers` mostra, a cada 250 vsyncs, o
+  maior número de passes num command buffer numa vsync.
+- **Teste no Mi A3 (2x, 50, nativo, Nominum):** a arena 13 passou duas vezes (`kick_st12` até v7639, `st_12` até v7511),
+  com 25 fps no quadro de v7109 (era 11–17 antes de travar). As arenas que faltavam na varredura (19 a 24) passaram
+  (`build/lab/mia3stages.sh`): as 24 arenas chegam ao fim da luta 1 em 2x (as 0–11 e 13–17 com o build anterior).
+  Fps médio das 40 últimas linhas: 38,2 / 40,0 / 40,4 / 42,2 / 43,8 / 46,9 / 42,9 (arenas 13, 19–24). **Atenção:** a
+  arena 13 ainda chega a 261 passes num command buffer (a 20, 114) quando a GPU está atrasada e o envio espera. Passou,
+  mas não está provado que nunca trava. Desempenho em 1x não remedido (o limite de 96 quase não age).
+- **Pad virtual nos menus (prioridade 1 do lançamento, `docs/plano.md`):** os menus abrem com o controle virtual
+  (direcional, △ ○ ✕ □, L1/R1, SELECT, START) em vez dos gestos. A opção é gravada como `menuGestures` (desligada); o
+  `menuTouch` que as versões anteriores gravaram como ligado não é mais lido. A opção "Menus por gestos" saiu do painel;
+  o código dos gestos fica parado até o toque direto nos menus. L1/R1 nos menus sem o "Item" (é o nome da função na
+  luta). **Teste no Mi A3** (toque injetado com `input swipe`): ↓ no idioma passa a FRANÇAIS, ✕ confirma e o jogo
+  segue ao logo da Bandai. Falta passar por todos os menus por toque real.
+- **`0086` e o `InitThread` real no commit:** já estavam em todos os builds desde 11-09 19:27 (código gerado e runtime):
+  bancada do PC com estado igual ao PCSX2 e toda a varredura do Mi A3 desta madrugada.
+
 ### 2026-11-10 06:30, Mi A3 travado na arena 13 (2x): o kernel sem memória contígua para a GPU
 
 - **O que o desenvolvedor viu:** o Mi A3 parado numa tela branca, sem reagir. Era a rodada `st_12` da varredura

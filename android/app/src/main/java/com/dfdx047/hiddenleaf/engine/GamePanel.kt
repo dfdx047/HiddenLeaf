@@ -252,9 +252,6 @@ class GamePanel(
             setTouch(touch().copy(scale = it / 100f))
         }
         section(context.getString(R.string.gp_touch_more))
-        label(context.getString(R.string.gp_menu_touch))
-        onOff(c.menuTouch) { setTouch(touch().copy(menuTouch = it)) }
-        hint(context.getString(R.string.gp_menu_touch_hint))
         label(context.getString(R.string.gp_float_stick))
         onOff(c.sticksFloat) { setTouch(touch().copy(sticksFloat = it)) }
         label(context.getString(R.string.gp_haptics))

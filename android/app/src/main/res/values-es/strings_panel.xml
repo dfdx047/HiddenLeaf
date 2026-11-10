@@ -46,8 +46,6 @@
     <string name="gp_opacity">Opacidad</string>
     <string name="gp_size">Tamaño</string>
     <string name="gp_touch_more">Táctil</string>
-    <string name="gp_menu_touch">Menús por gestos</string>
-    <string name="gp_menu_touch_hint">Desactivado, los menús vuelven a tener cruceta y botones en pantalla.</string>
     <string name="gp_float_stick">Stick flotante</string>
     <string name="gp_haptics">Vibración</string>
     <string name="gp_edit_layout">Mover y redimensionar botones</string>

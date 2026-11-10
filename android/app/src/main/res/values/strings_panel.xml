@@ -46,8 +46,6 @@
     <string name="gp_opacity">Opacity</string>
     <string name="gp_size">Size</string>
     <string name="gp_touch_more">Touch</string>
-    <string name="gp_menu_touch">Menus by gestures</string>
-    <string name="gp_menu_touch_hint">Off, the menus get the D-pad and buttons on screen again.</string>
     <string name="gp_float_stick">Floating stick</string>
     <string name="gp_haptics">Vibration</string>
     <string name="gp_edit_layout">Move and resize buttons</string>

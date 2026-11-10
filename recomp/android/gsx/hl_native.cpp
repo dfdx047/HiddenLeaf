@@ -1736,6 +1736,84 @@ void main()
 		friend typename Tag::Type privateMember(Tag) { return Member; }
 	};
 	template struct ExposePrivate<InitialState, &GSDeviceVK::SetInitialState>;
+	// (and the render passes the device began in the command buffer being recorded)
+	struct DevicePasses
+	{
+		using Type = u32 GSDeviceVK::*;
+		friend Type privateMember(DevicePasses);
+	};
+	template struct ExposePrivate<DevicePasses, &GSDeviceVK::m_command_buffer_render_passes>;
+
+	// (and the device's mid-frame kick: when it last read back, its frame, the kick's spacing in passes)
+	struct ReadbackFrame
+	{
+		using Type = u32 GSDeviceVK::*;
+		friend Type privateMember(ReadbackFrame);
+	};
+	template struct ExposePrivate<ReadbackFrame, &GSDeviceVK::m_readback_frame>;
+	struct KickPasses
+	{
+		using Type = u32 GSDeviceVK::*;
+		friend Type privateMember(KickPasses);
+	};
+	template struct ExposePrivate<KickPasses, &GSDeviceVK::m_readback_kick_passes>;
+	struct DeviceFrame
+	{
+		using Type = u32 GSDevice::*;
+		friend Type privateMember(DeviceFrame);
+	};
+	template struct ExposePrivate<DeviceFrame, &GSDevice::m_frame>;
+
+	// How many render passes one command buffer carries before it goes to the GPU. The Adreno kernel driver (kgsl) takes
+	// a submit as a list of IBs, which the userspace driver makes per render pass and per bin of each pass (more bins at
+	// a higher scale), and copies that list into one contiguous kmalloc. On the Mi A3 at 2x, arena 13, one frame (v7109)
+	// asked for 512 KB (order 7), the kernel had none, and the GPU stayed waiting on a fence that never came: the same
+	// with the native renderer and with PCSX2's GS alone, never at 1x (docs/registro.md, 2026-11-10). So: the device's
+	// own mid-frame kick (made for readbacks: at a pass boundary, and only when the next command buffer is already free,
+	// so it never waits) stays armed every frame, and our passes split the same way. The spacing goes down with the
+	// square of the scale (the bins); HL_GS_KICK_PASSES=<n> sets it (0: neither).
+	u32 kickPasses()
+	{
+		static const int fixed = [] {
+			const char* e = std::getenv("HL_GS_KICK_PASSES");
+			return e ? static_cast<int>(std::strtol(e, nullptr, 10)) : -1;
+		}();
+		if (fixed >= 0)
+			return static_cast<u32>(fixed);
+		const float scale = std::max(GSConfig.UpscaleMultiplier, 1.0f);
+		return static_cast<u32>(std::max(8.0f, std::floor(96.0f / (scale * scale))));
+	}
+	struct SubmitCount
+	{
+		u64 fence = ~0ull;  // the command buffer counted (its fence counter)
+		u32 passes = 0;     // our passes in it
+		u32 most = 0;       // the most passes (ours and the device's) a command buffer held since the last log line
+		u32 splits = 0;     // how many times we sent one early since the last log line
+		u32 vsyncs = 0;
+	};
+	SubmitCount s_submit;
+
+	// At each vsync, on the GS thread: the device's kick armed for the next frame, and the count of what it held.
+	void armKick()
+	{
+		GSDeviceVK* dev = GSDeviceVK::GetInstance();
+		const u32 kick = kickPasses();
+		if (!dev)
+			return;
+		const u32 ours = s_submit.fence == dev->GetCurrentFenceCounter() ? s_submit.passes : 0u;
+		s_submit.most = std::max(s_submit.most, (dev->*privateMember(DevicePasses{})) + ours);
+		if (kick)
+		{
+			dev->*privateMember(KickPasses{}) = kick;
+			dev->*privateMember(ReadbackFrame{}) = dev->*privateMember(DeviceFrame{});
+		}
+		if (++s_submit.vsyncs >= 250u)
+		{
+			std::fprintf(stderr, "[native] command buffers: at most %u passes at a vsync (kick every %u), %u of ours sent early in %u vsyncs\n",
+				s_submit.most, kick, s_submit.splits, s_submit.vsyncs);
+			s_submit.most = s_submit.splits = s_submit.vsyncs = 0;
+		}
+	}
 
 	// The textures a frame brought, as GPU images (once per frame, the first time it is drawn)
 	void createTextures(const Frame& frame)
@@ -1872,7 +1950,7 @@ void main()
 							depth->CommitClear();
 							if (s_white->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 								s_white->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
-							const u64 fence = dev->GetCurrentFenceCounter();
+							u64 fence = dev->GetCurrentFenceCounter();
 							for (const Draw& d : f->draws)
 							{
 								if (d.key.tex < 0)
@@ -1924,6 +2002,30 @@ void main()
 									depth->TransitionToLayout(GSTextureVK::Layout::DepthStencilAttachment);
 								const int w = withDepth ? std::min(out->GetWidth(), depth->GetWidth()) : out->GetWidth();
 								const int h = withDepth ? std::min(out->GetHeight(), depth->GetHeight()) : out->GetHeight();
+								{
+									// (the passes of the command buffer: send what is recorded before this pass if it would go over, see kickPasses)
+									if (s_submit.fence != fence)
+									{
+										s_submit.fence = fence;
+										s_submit.passes = 0;
+									}
+									const u32 kick = kickPasses();
+									const u32 held = s_submit.passes + (dev->*privateMember(DevicePasses{}));
+									if (kick && s_submit.passes && held + 1u > kick)
+									{
+										s_submit.most = std::max(s_submit.most, held);
+										++s_submit.splits;
+										dev->ExecuteCommandBuffer(false);
+										cmd = dev->GetCurrentCommandBuffer();
+										fence = dev->GetCurrentFenceCounter();
+										s_submit.fence = fence;
+										s_submit.passes = 0;
+										out->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
+										if (withDepth)
+											depth->TransitionToLayout(GSTextureVK::Layout::DepthStencilAttachment);
+									}
+									++s_submit.passes;
+								}
 								VkRenderPassBeginInfo rpi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
 								rpi.renderPass = withDepth ? s_renderPass : s_renderPassColor;
 								rpi.framebuffer = out->GetLinkedFramebuffer(withDepth ? depth : nullptr, false, false);
@@ -2727,6 +2829,7 @@ bool transfer(uint8_t path, uint8_t* data, uint32_t size)
 
 void vsync()
 {
+	MTGS::RunOnGSThread([]() { armKick(); });
 	if (s_scanLog)
 		MTGS::RunOnGSThread([]() {
 			static uint64_t s_last = ~0ull;

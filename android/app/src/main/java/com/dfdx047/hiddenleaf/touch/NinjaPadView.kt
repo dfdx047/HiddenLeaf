@@ -779,7 +779,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
 
     /** L1 / R1, Start, Select: a plate with cut corners. */
     private fun drawPlate(c: Canvas, e: El, k: Float, down: Boolean) {
-        val col = if (e.ctl == Ctl.ITEM_PREV || e.ctl == Ctl.ITEM_NEXT) LEE else STEEL
+        val col = if ((e.ctl == Ctl.ITEM_PREV || e.ctl == Ctl.ITEM_NEXT) && scene != PadScene.MENU) LEE else STEEL
         val l = e.cx - e.w / 2
         val t = e.cy - e.h / 2
         val rgt = e.cx + e.w / 2
@@ -800,7 +800,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         text.color = a(if (down) Color.rgb(20, 18, 16) else Color.WHITE, k)
         text.textSize = e.h * 0.42f
         val fm = text.fontMetrics
-        val sub = if (e.ctl == Ctl.ITEM_PREV || e.ctl == Ctl.ITEM_NEXT) context.getString(R.string.pad_item) else null
+        // ("Item" is what L1/R1 do in a fight; in the menus they are plain L1/R1)
+        val sub = if ((e.ctl == Ctl.ITEM_PREV || e.ctl == Ctl.ITEM_NEXT) && scene != PadScene.MENU) context.getString(R.string.pad_item) else null
         if (sub != null) {
             c.drawText(label, e.cx, e.cy - e.h * 0.06f - (fm.ascent + fm.descent) / 2 - e.h * 0.12f, text)
             text.textSize = e.h * 0.26f

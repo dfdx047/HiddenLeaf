@@ -711,7 +711,7 @@ STUB_AT = {
 # flash textures (high bytes of the frame and Z pages) were never sent, and took its packets from its own heap
 # (docs/registro.md, 2026-11-09).
 UNSTUB = re.compile(r"_?sceVu0\w+|__ieee754_rem_pio2f|__kernel_cosf|__kernel_sinf|atan|cos|fabs|floor|sin|rand"
-                    r"|sceGs(SetDef|Exec)(Load|Store)Image")
+                    r"|sceGs(SetDef|Exec)(Load|Store)Image|InitThread")
 # HL_SDR=0 at build time leaves the three libsdr calls as stubs (no sound in the logos and films)
 if os.environ.get("HL_SDR", "1") != "0":
     UNSTUB = re.compile(UNSTUB.pattern + r"|sceSdRemoteInit|sceSdRemote|sceSdTransToIOP")

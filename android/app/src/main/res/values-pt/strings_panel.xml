@@ -46,8 +46,6 @@
     <string name="gp_opacity">Opacidade</string>
     <string name="gp_size">Tamanho</string>
     <string name="gp_touch_more">Toque</string>
-    <string name="gp_menu_touch">Menus por gestos</string>
-    <string name="gp_menu_touch_hint">Desligado, os menus voltam a ter direcional e botões na tela.</string>
     <string name="gp_float_stick">Analógico flutuante</string>
     <string name="gp_haptics">Vibração</string>
     <string name="gp_edit_layout">Mover e redimensionar botões</string>

@@ -802,3 +802,16 @@ Android para mods que mudam código, e só depois de validado no PC; até lá a 
 tudo normal (personagens esticados e sumindo na seleção, e outros do mesmo tipo). O caminho de widescreen inteiro (menus
 "Esticar" e "Desenhar em 16:9", widescreen da luta e o do aspecto do aparelho) vai ser analisado de novo do zero; todo
 bug visual é conferido primeiro em 4:3, 16:9 e 20:9 na mesma cena.
+
+## Prioridades do lançamento (pedido de 2026-11-10)
+
+O desenvolvedor quer lançar nesta semana. Ordem:
+1. **Botões na tela:** nos menus, por agora, só o controle virtual (direcional, ○ ✕ △ □, START), com layout. O toque direto
+   no item do menu (item 1 da seção de 2026-11-09 21h30) fica para depois do lançamento.
+2. **Otimização** (desempenho; inclui o travamento da GPU do Mi A3 em 2x).
+3. **Widescreen certo.** Nomes: "widescreen" é o 16:9; "ultrawide" é o formato dos celulares (~20:9). Renomear nas
+   opções para não confundir.
+4. **Pacote de mod** (os mods de código rodando).
+5. **Efeitos** a conferir.
+
+Fica para depois do lançamento: o toque direto nos menus e o modo "Ougi de um botão".

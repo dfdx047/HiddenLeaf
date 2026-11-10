@@ -185,7 +185,10 @@ data class TouchConfig(
     val autoMode: Boolean = true,   // the scene follows the game (the SCENE button still overrides)
     val classicPlaces: Map<String, Placement> = emptyMap(), // the classic layout's own moved controls (by ClassicCtl name)
     val macros: List<Macro> = emptyList(),
-    val menuTouch: Boolean = true,  // the game's menus by gestures, no buttons on screen (NinjaPadView.menuGesture)
+    // the game's menus by gestures, no buttons on screen (NinjaPadView.menuGesture). Off: the virtual pad in the menus too
+    // (2026-11-10, for the launch; tapping a menu item directly comes later). Stored as "menuGestures": the "menuTouch"
+    // that earlier versions saved as true is not read, so everyone gets the pad.
+    val menuTouch: Boolean = false,
 ) {
     fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
@@ -201,7 +204,7 @@ data class TouchConfig(
         put("places", JSONObject().apply { places.forEach { (k, p) -> put(k, p.json()) } })
         put("layout", layout.name)
         put("autoMode", autoMode)
-        put("menuTouch", menuTouch)
+        put("menuGestures", menuTouch)
         put("classicPlaces", JSONObject().apply { classicPlaces.forEach { (n, p) -> put(n, p.json()) } })
         put("macros", JSONArray().apply {
             macros.forEach { m ->
@@ -259,7 +262,7 @@ data class TouchConfig(
                 autoMode = o.optBoolean("autoMode", true),
                 classicPlaces = classic,
                 macros = macros,
-                menuTouch = o.optBoolean("menuTouch", true),
+                menuTouch = o.optBoolean("menuGestures", false),
             )
         }
 

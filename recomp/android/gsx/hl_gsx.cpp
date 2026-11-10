@@ -21,6 +21,7 @@
 #include "pcsx2/GSDumpReplayer.h"
 #include "pcsx2/Host.h"
 #include "pcsx2/MTGS.h"
+#include "pcsx2/MemoryTypes.h"
 #include "pcsx2/VMManager.h"
 
 #if defined(__ANDROID__)
@@ -34,6 +35,10 @@ static inline void ANativeWindow_acquire(ANativeWindow*) {}
 static inline void ANativeWindow_release(ANativeWindow*) {}
 #endif
 
+#include <sys/mman.h>
+#ifndef MADV_REMOVE
+#define MADV_REMOVE 9 // (Linux; glibc hides it without _GNU_SOURCE)
+#endif
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -361,9 +366,37 @@ namespace
 	};
 
 	// GSDumpReplayer's live source, on the VM's CPU thread: the next whole packet of the stream.
+	// The PCSX2 core under the GS allocates the whole PS2 (the EE's 128 MB of devkit RAM, and the IOP's, declared 128 MB in this
+	// core) and memReset zeroes it, which makes every page resident: ~250 MB of a phone's RAM for memory nothing here uses
+	// (measured on the Mi A3: the game's PSS 828 -> 589 MB at the same point; the recomp has its own RAM; this
+	// library only runs the GS). The pages go back to the system once, before the first packet: they are zeros, and a page
+	// read again later is a new zero page, so nothing changes for the code. On the Mi A3 (3.6 GB) the game took ~890 MB and a
+	// GPU submit failed for want of contiguous kernel memory (docs/registro.md, 2026-11-10; the size of that
+	// submit is hl_native's budget, this only gives the system room). HL_GSX_KEEPMEM=1 keeps them.
+	void releaseUnusedPs2Memory()
+	{
+		if (const char* keep = std::getenv("HL_GSX_KEEPMEM"); keep && keep[0] == '1')
+			return;
+		const auto drop = [](void* p, size_t size, const char* what) {
+			const int r = p ? madvise(p, size, MADV_REMOVE) : -1;
+			std::fprintf(stderr, "[gsx] unused %s RAM (%zu MB) back to the system: %s\n", what, size >> 20,
+				r == 0 ? "done" : std::strerror(errno));
+		};
+		if (eeMem)
+			drop(eeMem->Main, sizeof(eeMem->Main), "EE");
+		if (iopMem)
+			drop(iopMem->Main, sizeof(iopMem->Main), "IOP");
+	}
+
 	bool live_next(GSDumpReplayer::LivePacket* out)
 	{
 		static LivePacketHeld s_held;
+		static bool s_memoryReleased = false;
+		if (!s_memoryReleased)
+		{
+			s_memoryReleased = true;
+			releaseUnusedPs2Memory();
+		}
 		for (;;)
 		{
 			if (s_stop || s_ring->consumerQuit)
