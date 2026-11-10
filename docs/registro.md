@@ -56,6 +56,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 06:30, Mi A3 travado na arena 13 (2x): o kernel sem memória contígua para a GPU
+
+- **O que o desenvolvedor viu:** o Mi A3 parado numa tela branca, sem reagir. Era a rodada `st_12` da varredura
+  (arena 13, 2x, 50 fps, nativo, Nominum, lib com o `0091`), na luta 1, em v7109 (relógio do aparelho 15:22; ele ficou
+  assim cerca de 4 horas).
+- **Causa (logcat do kernel):** em 15:22:47 a thread `GS` do jogo pediu ao `kgsl` um envio de comandos e o kernel não
+  achou 512 KB contíguos (`page allocation failure: order:7` em `adreno_ringbuffer_submitcmd`); o mesmo aconteceu com a
+  `RenderThread` da interface do sistema. `kgsl-3d0: |sendcmd| Unable to submit command to the ringbuffer -12`, e às
+  15:22:52 `possible gpu syncpoint deadlock for context 3` (o contexto do jogo esperando uma cerca que não vem). Antes
+  disso o `lmkd` já matava apps em segundo plano: o jogo ocupa ~890 MB num aparelho de 3,6 GB, depois de 5 horas de
+  rodadas seguidas (a memória do kernel fragmentada). É falta de memória do sistema na hora do envio, não um erro de
+  desenho: a cena (2,9 MB de GS por quadro, GS 54 ms) era das pesadas, mas o mesmo quadro passou em outras arenas.
+- **Por que demorou:** o `mia3run.sh` esperava o `screencap`, que travou junto com a GPU; o teste de "log parado" nunca
+  rodou. Agora toda chamada `adb` tem limite de 25 s, e um `screencap` que não volta encerra a rodada e guarda o
+  `logcat -b kernel` em `kernel.txt`. O `force-stop` também passou do limite; o processo saiu sozinho em seguida e o
+  aparelho voltou à tela inicial (19:25 no relógio dele).
+- **A fazer:** medir a memória do jogo em 2x (o que cresce com a escala: alvos do renderizador nativo, texturas) e ver
+  se dá para baixar; até lá, a varredura segue com reinício do app entre rodadas, que já existia, e com o limite novo.
+
 ### 2026-11-10 02:20, madrugada: a busca de thread guardada e o `hl_pad` a cada 10 vsyncs (`0092`); rotas com outros lutadores
 
 - **Perfil da thread do EE no Mi A3** (prof4): `unordered_map<int, GuestThread>::find` + `__constrain_hash` ~3,1%
