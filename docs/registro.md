@@ -56,6 +56,20 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 02:30, madrugada: o IOP em lotes de 4096 ciclos do EE (`0091`)
+
+- `EeScheduler::accountCycles` levava o EE ao IOP (e aos timers) a cada 1024 ciclos: ~290 mil viagens por segundo, cada
+  uma com a preparação da fatia do IOP, o SPU2 se atualizando e as trocas do medidor. Agora 4096 (12 us do PS2);
+  `HL_IOP_BATCH=<ciclos>` muda.
+- **PC, bancada contra o PCSX2 (rota v3):** 1024, 4096 e 8192 dão o estado do jogo igual em todas as chamadas das duas
+  lutas; a luta 1 começa 3-4 vsyncs depois (v5417 / v5418 contra v5414).
+- **Mi A3, 1x 50, nativo, Nominum** (`build/lab/fstats.py`: janelas pelo início da luta 1; A = f+0..440, B =
+  f+460..2400; fps médio, EE / IOP ms): 1024 43,8 (16,3 / 4,9) e 35,6 (19,8 / 5,3); 4096 44,5 (16,9 / 4,4) e 38,1 (19,5
+  / 4,9); 8192 45,3 e 46,1, mas com VU1 13,9 ms contra 21-22 na janela B: a luta da rota seguiu outro caminho. Fica 4096.
+  O som toca nos três (`[snd]`: fila mediana ~29-31 mil amostras em todos).
+- **Atenção às medidas:** comparar só janelas relativas ao início da luta (`fstats.py`); as janelas por vsync absoluta
+  misturam cenas quando a rota muda de tempo.
+
 ### 2026-11-10 01:30, madrugada: matriz de escala, fps e renderizador no Mi A3; as 24 arenas no PC; endereço da RAM primeiro (`0090`)
 
 *(Correção de horário: as entradas "05:30" e "01:30" desta madrugada foram escritas com hora estimada; a ordem certa é a

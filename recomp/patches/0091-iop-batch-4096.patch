@@ -1,0 +1,26 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 7f03b87..88b48f4 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -585,10 +585,19 @@ void EeScheduler::accountCycles(uint32_t cycles) noexcept
+ {
+     const uint64_t elapsed = std::max<uint64_t>(1u, cycles);
+     m_eeCycle += elapsed;
+-    // (the timers and the IOP in small batches: 1024 EE cycles are 3 us of the PS2, and the calls were most of the cost)
++    // (the timers and the IOP in small batches, and the calls were most of the cost)
+     static uint64_t s_cyclesToAdvance = 0u; // (only the game thread comes here)
++    // Hidden Leaf: 4096 EE cycles (12 us of the PS2) per trip to the IOP, not 1024: each trip costs the IOP's slice
++    // setup, the SPU2's catch-up and the meter's switches. The game's state stays PCSX2's in the bench's fights; on the Mi
++    // A3 the fights run 1-3 fps faster. 8192 changed how the route's fight went: not used. HL_IOP_BATCH=<cycles> sets it.
++    static const uint64_t s_batch = []
++    {
++        const char *v = std::getenv("HL_IOP_BATCH");
++        const uint64_t n = v ? std::strtoull(v, nullptr, 10) : 0u;
++        return n ? n : 4096u;
++    }();
+     s_cyclesToAdvance += elapsed;
+-    if (s_cyclesToAdvance >= 1024u)
++    if (s_cyclesToAdvance >= s_batch)
+     {
+         m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(s_cyclesToAdvance);
+         m_runtime.advanceIopEeCycles(s_cyclesToAdvance);
