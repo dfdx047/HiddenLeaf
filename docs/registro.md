@@ -56,6 +56,34 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 20:30, noite: otimização, segunda parte: a VU1 do Nominum (`d398993`); só o Mi A3 daqui em diante
+
+- **Pedido do desenvolvedor:** mexer na VU1 no repositório do Nominum (`~/AndroidStudioProjects/Nominum-Render`), e **não
+  usar outros aparelhos, só o Mi A3** (a rodada no RP5 e no Cube da entrada anterior não devia ter sido feita).
+- **Perfil da thread da VU1 no Mi A3** (`prof6`, 4463 amostras): `__memcpy_aarch64_simd` 9,9%, `Vif1::transfer` 9,5%,
+  `macOf` 6,5%, `anySpecial` 4,1%, o relógio (`[vdso]`) 3,9%, `codeHash` 2,6%. A ponte daqui (`hl_nominum_vu1.cpp`) não
+  pesa: são 0,6 transferências por vsync (cada uma leva a cadeia do quadro inteira).
+- **Nominum `d398993`** (commit local de lá; detalhe no `docs/registro.md` dele): o MPG só muda a geração do código quando
+  os bytes mudam (o UN5 manda o mesmo programa a cada quadro: 198 mil MPG na rota), o relógio por programa só com
+  `Vif1::timing`, o `macOf` do NEON com uma soma entre as lanes em vez de três, e o XGKICK direto da memória da VU1 quando
+  o pacote não dá a volta. Testes de lá: 106 de 106 no PC e 130 de 130 no arm64 (qemu), bit a bit nos 26 dumps.
+- **Aqui:** `recomp/android/build.sh` e `recomp/pc/build.sh` usam o `d398993` (o catálogo `build/vu1rec` copiado do
+  Nominum, o mesmo dos testes de lá); a linha `[nvu1]` do log mostra os MPG no lugar do tempo da VU1.
+- **Mi A3, mesma rota** (`fstats.py`; fps médio / mínimo / EE ms / VU1 ms):
+
+  | build | A (f+0..440) | B (f+460..2400) |
+  |---|---|---|
+  | `fa5d58a` (`prof5`) | 41,5 / 36,6 / 16,4 / 18,5 | 36,9 / 28,5 / 20,1 / 21,5 |
+  | `0093` (`prof6`) | 41,3 / 38,8 / 15,3 / 19,4 | 38,2 / 30,8 / 18,5 / 21,5 |
+  | `0093` + Nominum `d398993` (`prof7`) | 41,9 / 39,7 / 14,6 / 17,1 | 38,3 / 28,0 / 18,5 / 20,1 |
+
+  A thread da VU1 caiu de 4463 para 3366 amostras na rota; `codeHash` e o relógio saíram do perfil, o `macOf` de 291 para
+  174. O fps quase não muda: na janela B o limite agora é a thread do EE (EE 18,5 + IOP 5,0 ms). A imagem da luta certa
+  (`prof7/shot_v6761.png`). Ainda há 12% de `memcpy` na thread da VU1, de origem não achada.
+- **PC (bancada, `runs/pcn398`):** estado das duas lutas igual ao PCSX2 e ao `pcg93` em todas as chamadas. Mas o `un5pc`
+  **não liga a VU1 do Nominum** (o `hl_pc_main.cpp` não chama `hl_nominum_vu1::setup()`): a bancada não passa pelo código
+  novo da VU1.
+
 ### 2026-11-10 14:30, tarde: otimização, primeira parte: registradores do jogo como inteiros (`0093`)
 
 - **Perfil da thread do EE no Mi A3** (rota v3r, 2x 50, nativo, Nominum, `build/lab/env_a3_prof2x.txt`, `prof5`, 9081

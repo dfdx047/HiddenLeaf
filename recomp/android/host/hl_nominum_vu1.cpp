@@ -63,10 +63,10 @@ namespace
         *shared.pendingImageDirectHl = p.imageDirectHl;
         *shared.path3Masked = p.path3Masked;
         if ((++s_transfers % 3000u) == 0u)
-            std::fprintf(stderr, "[nvu1] %llu transfers, %llu MSCAL, %llu MSCNT, %llu kicks, VU1 %.1f ms in all; micro memory loaded by address %llu times\n",
+            std::fprintf(stderr, "[nvu1] %llu transfers, %llu MSCAL, %llu MSCNT, %llu kicks, %llu MPG; micro memory loaded by address %llu times\n",
                          static_cast<unsigned long long>(s_transfers), static_cast<unsigned long long>(v.counts.mscal),
                          static_cast<unsigned long long>(v.counts.mscnt), static_cast<unsigned long long>(v.counts.kicks),
-                         static_cast<double>(v.counts.vuNanoseconds) / 1e6, static_cast<unsigned long long>(s_codeLoads));
+                         static_cast<unsigned long long>(v.counts.mpg), static_cast<unsigned long long>(s_codeLoads));
         return codeChanged;
     }
 }
