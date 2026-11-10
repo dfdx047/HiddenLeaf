@@ -56,6 +56,32 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 01:30, madrugada: matriz de escala, fps e renderizador no Mi A3; as 24 arenas no PC; endereço da RAM primeiro (`0090`)
+
+*(Correção de horário: as entradas "05:30" e "01:30" desta madrugada foram escritas com hora estimada; a ordem certa é a
+dos commits. Esta é posterior a ambas.)*
+
+- **Matriz no Mi A3** (`build/lab/mia3matrix.sh`, rota v3r, Nominum, luta 1 v5500-7100 / luta 2 v7300-8500, fps médio):
+
+  | renderizador | 1x 50 | 1x 60 | 2x 50 | 2x 60 | 3x 50 | 3x 60 |
+  |---|---|---|---|---|---|---|
+  | nativo | 39,8 / 35,4 | 39,1 / 34,5 | 38,5 / 34,7 | 37,8 / 34,2 | 27,0 / 21,7 | 26,7 / 23,0 |
+  | emulado (`HL_NATIVE=0`) | 37,7 / 32,2 | 38,5 / 34,2 | 37,4 / 33,3 | 37,7 / 33,1 | 25,6 / 19,5 | 25,6 / 19,4 |
+
+  Até 2x o limite é a CPU (EE ~20 ms + IOP/SPU2 ~5,4 ms na mesma thread; VU1 ~22 ms na luta 2): 2x sai de graça. Em 3x
+  passa a ser a GPU (GS 28-31 ms). O nativo gasta 16-19 ms no GS contra 25-31 ms do emulado.
+- **`0090-ram-first-address-check.patch`:** `Ps2IsSpecialAddress` responde primeiro para a RAM principal (todas as
+  faixas especiais estão acima de 32 MB): o mesmo resultado, menos testes em cada acesso do código do jogo. Mi A3, 1x 50
+  nativo: EE 18,3 → 17,0 ms (luta 1) e 20,4 → 19,5 ms (luta 2); fps 39,4 → 41,2 e 35,1 → 36,1.
+- **As 24 arenas no PC (16:9):** `tools/hl_stage_route.py` gera a rota v3w com o cursor da seleção de arena descido N
+  vezes. Todas carregam e lutam; nos quadros de luta não vi defeito de desenho. Rodar várias em paralelo na mesma
+  `build/disc` mistura o cartão de memória (telas de "Return to title" e "No data"): uma por vez.
+- **Menus em 4:3 / 16:9 / 20:9 no PC** (seleção de personagem quadro a quadro na troca de personagem): os sprites
+  saem iguais aos do 4:3; o que muda são enfeites fora da área 4:3 que ficam visíveis (um cano horizontal de ponta a
+  ponta, arcos nas laterais) e, em 20:9, a seleção de arena deslocada com um vazio à esquerda. **Não reproduzi** os
+  personagens esticando e sumindo: falta saber em que tela e com que opção de menu ("Esticar" / "Desenhar em 16:9").
+- **Travamento intermitente no PC:** uma rodada em 20:9 parou na v500 (repetida, passou em 7 s). Anotado para vigiar.
+
 ### 2026-11-10 05:30, madrugada: Mi A3 no wifi, perfil no aparelho e o IOP em blocos (patch `0089`)
 
 - **Mi A3:** wifi `192.168.1.136:5555`, tela 720x1560, LineageOS / Android 17. Roteiro de teste `build/lab/mia3run.sh`
