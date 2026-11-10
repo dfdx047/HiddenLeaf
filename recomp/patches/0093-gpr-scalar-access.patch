@@ -1,0 +1,89 @@
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -1255,17 +1255,39 @@
+ #define PS2_VSQRT(x) sqrtf(x)
+ #define PS2_VRSQRT(x) (1.0f / sqrtf(x))
+ 
+-#define GPR_U32(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0U : static_cast<uint32_t>(PS2_EXTRACT_EPI32_0(ctx_ptr->r[reg_idx])))
+-#define GPR_S32(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0 : PS2_EXTRACT_EPI32_0(ctx_ptr->r[reg_idx]))
+-#define GPR_U64(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0ULL : static_cast<uint64_t>(PS2_EXTRACT_EPI64_0(ctx_ptr->r[reg_idx])))
+-#define GPR_S64(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0LL : PS2_EXTRACT_EPI64_0(ctx_ptr->r[reg_idx]))
++// Hidden Leaf: the low 32 or 64 bits of a GPR read and written as plain integers in memory (the host is little-endian,
++// so they are the register's first bytes). Taking them out of the 128-bit vector cost a vector load and a move to an
++// integer register on every read, and a load, an insert and a 128-bit store on every write (ARM64, sse2neon).
++static inline uint32_t Ps2GprLoadU32(const R5900Context *ctx, int reg)
++{
++    uint32_t v;
++    std::memcpy(&v, &ctx->r[reg], sizeof(v));
++    return v;
++}
++
++static inline uint64_t Ps2GprLoadU64(const R5900Context *ctx, int reg)
++{
++    uint64_t v;
++    std::memcpy(&v, &ctx->r[reg], sizeof(v));
++    return v;
++}
++
++static inline void Ps2GprStoreU64(R5900Context *ctx, int reg, uint64_t v)
++{
++    std::memcpy(&ctx->r[reg], &v, sizeof(v));
++}
++
++#define GPR_U32(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0U : Ps2GprLoadU32((ctx_ptr), (reg_idx)))
++#define GPR_S32(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0 : static_cast<int32_t>(Ps2GprLoadU32((ctx_ptr), (reg_idx))))
++#define GPR_U64(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0ULL : Ps2GprLoadU64((ctx_ptr), (reg_idx)))
++#define GPR_S64(ctx_ptr, reg_idx) ((reg_idx == 0) ? 0LL : static_cast<int64_t>(Ps2GprLoadU64((ctx_ptr), (reg_idx))))
+ #define GPR_VEC(ctx_ptr, reg_idx) ((reg_idx == 0) ? _mm_setzero_si128() : ctx_ptr->r[reg_idx])
+ 
+ static inline void Ps2SetGprLow64(R5900Context *ctx, int reg, __m128i new_low)
+ {
+     if (reg != 0)
+     {
+-        ctx->r[reg] = _mm_castpd_si128(_mm_move_sd(_mm_castsi128_pd(ctx->r[reg]), _mm_castsi128_pd(new_low)));
++        Ps2GprStoreU64(ctx, reg, static_cast<uint64_t>(_mm_cvtsi128_si64(new_low)));
+     }
+ }
+ 
+@@ -1274,9 +1296,7 @@
+     {                                                                     \
+         if ((reg_idx) != 0)                                               \
+         {                                                                 \
+-            __m128i _newVal = _mm_cvtsi64_si128((int64_t)(int32_t)(val)); \
+-                                                                          \
+-            Ps2SetGprLow64(ctx_ptr, reg_idx, _newVal);                    \
++            Ps2GprStoreU64(ctx_ptr, reg_idx, (uint64_t)(int64_t)(int32_t)(val)); \
+         }                                                                 \
+     } while (0)
+ 
+@@ -1286,8 +1306,7 @@
+     {                                                                     \
+         if ((reg_idx) != 0)                                               \
+         {                                                                 \
+-            __m128i _newVal = _mm_cvtsi64_si128((int64_t)(uint32_t)(val)); \
+-            Ps2SetGprLow64(ctx_ptr, reg_idx, _newVal);                    \
++            Ps2GprStoreU64(ctx_ptr, reg_idx, (uint64_t)(uint32_t)(val));   \
+         }                                                                 \
+     } while (0)
+ 
+@@ -1296,8 +1315,7 @@
+     {                                                                     \
+         if ((reg_idx) != 0)                                               \
+         {                                                                 \
+-            __m128i _newVal = _mm_cvtsi64_si128((int64_t)(int32_t)(val)); \
+-            Ps2SetGprLow64(ctx_ptr, reg_idx, _newVal);                    \
++            Ps2GprStoreU64(ctx_ptr, reg_idx, (uint64_t)(int64_t)(int32_t)(val)); \
+         }                                                                 \
+     } while (0)
+ 
+@@ -1306,8 +1324,7 @@
+     {                                                            \
+         if ((reg_idx) != 0)                                      \
+         {                                                        \
+-            __m128i _newVal = _mm_cvtsi64_si128((int64_t)(val)); \
+-            Ps2SetGprLow64(ctx_ptr, reg_idx, _newVal);           \
++            Ps2GprStoreU64(ctx_ptr, reg_idx, (uint64_t)(val));      \
+         }                                                        \
+     } while (0)
+ 

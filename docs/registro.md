@@ -56,6 +56,39 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 14:30, tarde: otimização, primeira parte: registradores do jogo como inteiros (`0093`)
+
+- **Perfil da thread do EE no Mi A3** (rota v3r, 2x 50, nativo, Nominum, `build/lab/env_a3_prof2x.txt`, `prof5`, 9081
+  amostras): SPU2 19%, IOP 14,5%, código do jogo 11%, ajudantes de SIMD dentro do código do jogo 11%
+  (`Ps2SetGprLow64` 3,2%, `Ps2ExtractEpi32` 2,5%, `_mm_move_sd` 2,4%), escalonador 10% (`accountCycles` 2,5%,
+  `checkpointDue` 2,1%), acessos à memória 8%, cópia das cadeias de DMA para a worker da VU 5,4% (o laço do
+  `vector::insert` em `ps2_memory.cpp`: são os ~2,5 MB por quadro mesmo, não um laço byte a byte), `libc` 5%.
+- **Causa dos ajudantes:** os registradores do EE são `__m128i`. Ler os 32 ou 64 bits de baixo era `ldr q` + mover para um
+  registrador inteiro, e escrever era `ldr q` + inserir + `str q` (no `addiu sp, sp, -0x20`, 10 instruções em vez de 4).
+- **`0093-gpr-scalar-access.patch`:** `GPR_U32/S32/U64/S64` e `SET_GPR_*` (e o `Ps2SetGprLow64`) leem e escrevem os
+  primeiros 4 ou 8 bytes do registrador direto na memória (`memcpy`; o host é little-endian). Os bits de cima ficam como
+  estavam, como antes. A `libun5.so` caiu de 171,7 para 161,0 MB.
+- **PC, bancada (rota v3, `un5pc`, `runs/pcg93`):** as duas lutas iguais ao build anterior (`pcth`) em todas as
+  chamadas (1445 e 1297), e o estado do jogo igual ao PCSX2 em todas; as lutas começam nas mesmas vsyncs (5417, 7183).
+- **Mi A3, mesma rota, antes e depois** (`fstats.py`, janelas pelo início da luta 1; fps médio / mínimo / EE ms):
+
+  | build | A (f+0..440) | B (f+460..2400) |
+  |---|---|---|
+  | `fa5d58a` (`prof5`) | 41,5 / 36,6 / 16,4 | 36,9 / 28,5 / 20,1 |
+  | `0093` (`prof6`) | 41,3 / 38,8 / 15,3 | 38,2 / 30,8 / 18,5 |
+
+  O EE ficou 7-8% mais barato; na janela A quem segura é a VU1 (19,4 ms). No perfil novo os três ajudantes saíram do
+  topo e a thread do EE tem 8045 amostras (eram 9081).
+- **RP5 e Cube (conferência, não valem como medida):** no RP5 a rota foi até o fim, mas o launcher do Fractal ficou na
+  frente o tempo todo (o jogo rodou em segundo plano; a CPU estava limitada a 1,86 GHz e os ajustes são outros, efeitos
+  ligados, 4,2 MB por quadro). No Cube o jogo não está instalado (o atalho abre o launcher), e o launcher abriu o aviso
+  "Sua GPU" (fechado com "Agora não").
+- **Achado no launcher:** o aviso "Sua GPU" diz "manter as lutas em 30 quadros por segundo" e "os 30 do próprio jogo"
+  (`gpu_offer_apply`, `gpu_opt_interp_off`, `debug_gpu_opt_text` em `values-pt/strings.xml`): texto do Dragon Rage, o
+  UN5 roda a 50/60. Falta corrigir.
+- A `libun5_un6_a35.so` ainda é a de 11-09 (sem o `0093`): regerar com `--mod` na etapa do pack de mods.
+- Ajustes do Mi A3 nestas medidas (`un5_settings.txt`): `frame_skip=1`, `fx_off=48`, `filter=0`, `interp=0`.
+
 ### 2026-11-10 08:25, manhã: o travamento do Mi A3 em 2x era o tamanho do envio à GPU (corrigido); pad virtual nos menus; `0086` no commit
 
 - **Memória (`hl_gsx.cpp`):** o núcleo do PCSX2 abaixo do GS aloca o PS2 inteiro (a RAM do EE e a do IOP, declarada com
