@@ -1,0 +1,90 @@
+diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
+index 146a4a8..3de232c 100644
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -428,6 +428,10 @@ private:
+     uint8_t *m_rdram = nullptr;
+     std::array<std::deque<int>, kPriorityCount> m_readyQueues{};
+     std::unordered_map<int, GuestThread> m_threads;
++    // Hidden Leaf: the last thread(id) found (the current thread, asked for on every dispatch); an unordered_map keeps its
++    // nodes where they are when it grows, so only an erase or a clear forgets it
++    int m_threadCacheId = -1;
++    GuestThread *m_threadCache = nullptr;
+     std::unordered_map<int, EeSemaphore> m_semaphores;
+     std::unordered_map<int, EeEventFlag> m_eventFlags;
+     std::unordered_map<int, EeAlarm> m_alarms;
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 88b48f4..6e48935 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -138,6 +138,7 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+     m_rdram = rdram;
+     m_readyQueues = {};
+     m_threads.clear();
++    m_threadCacheId = -1;
+     m_semaphores.clear();
+     m_eventFlags.clear();
+     m_alarms.clear();
+@@ -683,6 +684,7 @@ int EeScheduler::deleteThread(int id, uint32_t &ownedStack)
+     }
+     releaseInvocationStacks(id);
+     m_threads.erase(it);
++    m_threadCacheId = -1;
+     publishSnapshot();
+     return KE_OK;
+ }
+@@ -732,6 +734,7 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+     {
+         releaseInvocationStacks(id);
+         m_threads.erase(id);
++        m_threadCacheId = -1;
+     }
+     if (ownedStack != 0u)
+     {
+@@ -1681,14 +1684,22 @@ void EeScheduler::completeExternalWait(uint32_t type, uint64_t token, int result
+ 
+ GuestThread *EeScheduler::thread(int id)
+ {
++    if (id == m_threadCacheId)
++        return m_threadCache;
+     auto it = m_threads.find(id);
+-    return it == m_threads.end() ? nullptr : &it->second;
++    if (it == m_threads.end())
++        return nullptr;
++    m_threadCacheId = id;
++    m_threadCache = &it->second;
++    return m_threadCache;
+ }
+ 
+ const GuestThread *EeScheduler::thread(int id) const
+ {
++    if (id == m_threadCacheId)
++        return m_threadCache;
+     auto it = m_threads.find(id);
+-    return it == m_threads.end() ? nullptr : &it->second;
++    return it == m_threads.end() ? nullptr : &it->second; // (only the game thread writes the cache)
+ }
+ 
+ EeSemaphore *EeScheduler::semaphore(int id)
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index e6cb82e..3cf88ac 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -339,8 +339,15 @@ namespace ps2_stubs
+                     std::ofstream("hl_pad", std::ios::app) << step.words << ' ';
+                     ++routeNext;
+                 }
+-                std::ifstream file("hl_pad");
+-                if (file)
++                // (the file is looked for every 10 vsyncs, not on each one: an open() that fails still costs a system
++                // call on the game thread; the route above writes it on its own vsync and it is read at once)
++                static size_t s_routeRead = 0u;
++                const bool look = routeNext != s_routeRead || tick % 10u == 0u;
++                s_routeRead = routeNext;
++                std::ifstream file;
++                if (look)
++                    file.open("hl_pad");
++                if (file.is_open())
+                 {
+                     std::string word;
+                     while (file >> word)

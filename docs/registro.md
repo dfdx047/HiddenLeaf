@@ -56,6 +56,40 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 02:20, madrugada: a busca de thread guardada e o `hl_pad` a cada 10 vsyncs (`0092`); rotas com outros lutadores
+
+- **Perfil da thread do EE no Mi A3** (prof4): `unordered_map<int, GuestThread>::find` + `__constrain_hash` ~3,1%
+  (`EeScheduler::thread(id)`, pedido a cada despacho pelo `currentThread()`), `__openat` 0,8% (o `applyPadFile` abria
+  `hl_pad` a cada vsync, mesmo sem arquivo, no jogo normal também).
+- **`0092-thread-lookup-cache-pad-file.patch`:** `thread(id)` guarda o último encontrado (o `unordered_map` não move os
+  nós ao crescer; `erase` e `clear` esquecem). O `hl_pad` é procurado a cada 10 vsyncs, e na vsync em que a rota
+  escreve nele (a rota continua lendo o passo na mesma vsync).
+- **Bancada no PC (rota v3, contra o PCSX2):** estado do jogo igual em todas as chamadas, luta 1 em v5417 (a mesma do
+  `0091`). A primeira versão deixava um `ifstream` não aberto passar no `if (file)` e logava "0 queued" a cada vsync:
+  corrigido com `is_open()` antes do commit. Medida no aparelho: depois da varredura das arenas.
+- **`tools/hl_route_mix.py`:** `--char "DOWN RIGHT"` move o cursor antes da escolha do 1P (v4373 na v3r; com este
+  memcard: "RIGHT RIGHT" Neji com Tenten, "DOWN" Sakura com Naruto, "DOWN RIGHT" Kakashi com Naruto; RIGHT ou LEFT
+  sozinhos caem num bloqueado e a rota para). `--mix` troca os ○ da luta por uma mistura de jogador (ataque, andar,
+  pulo, chakra, item □, defesa R2, troca de item L1/R1). No PC, Kakashi com `--mix` e o especial de um botão: Ougi em
+  v7031 (o "Ultimate Jutsu" dos cães; o minijogo pede 7, 1, 3, 2, 1 e cada toque responde), Vermillion Mode do
+  Naruto da CPU, vitória "Kakashi Hatake" e Ninja Song. As listras horizontais do minijogo saem iguais no GS emulado.
+
+### 2026-11-10 01:55, madrugada: o Ougi de um botão no PC, e a rota das arenas no aparelho
+
+- **Correção de horário:** as duas entradas abaixo, com título "02:30" e "03:00", foram escritas antes das 01:50 (horas
+  estimadas de novo). A ordem delas está certa; os títulos não.
+- **Rota das arenas no aparelho:** na rota v3r a seleção de arena é o passo de v5501, não o de v5331 (esse é o "Linked
+  Mode", Manual/Auto, na tela de personagem; os ↓ ali trocavam o modo e a arena ficava a 1/24). Conferido no PC com a
+  rota do aparelho: a s2 dá 3/24, "Five-Seal Barrier Cliff". `tools/hl_stage_route.py BASE K 5501`. A varredura no Mi
+  A3 recomeçou da arena 1 (a 0 valia).
+- **Ougi de um botão no PC:** no `un5pc` ele vem desligado (`HL_SPECIAL_ONE=1 HL_SPECIAL_BUTTON=32` liga, como o
+  launcher). Com `HL_SP_ONCE=5600` na rota v3: `[sp] v5601 fighter d6a080 ougi, chakra 15.0`, aparece "Unleash
+  Ultimate Jutsu" com o ícone do botão, o Ougi corre, e em v6050-6090 vem o "now!" com o mesmo ícone. O ícone (um disco
+  escuro dentro de um olho branco) sai **igual no GS emulado e no nativo** (`HL_NATIVE=0`, v5618): é o desenho do
+  jogo, não defeito de renderização. Nesse Ougi a sequência de botões (`0x36E690`) não chegou a pedir botão ao
+  jogador (nenhum `[sp] ... wants`); só o "now!" (`0x6C99B0`). O "todo bugado" relatado ainda não foi reproduzido:
+  falta saber em qual personagem e em qual parte (a sequência, o "now!" ou a disputa).
+
 ### 2026-11-10 03:00, madrugada: perfil da thread da VU1 do Nominum (`b2ff28b`) no Mi A3 (para a sessão do Nominum)
 
 Rota v3r, 1x 50, nativo, `NOMINUM_VU1=1`, `HL_PROF` (amostras de CPU da thread da VU1, 3185 em ~200 s; a `libc` do
