@@ -56,6 +56,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-10 23:00, noite: widescreen revisto do zero no Mi A3 e no PC (4:3, 16:9, tela); nomes Widescreen/Ultrawide
+
+- **Mi A3 (1560x720, 19,5:9; `a71f5cc`, v3r, 2x, `build/lab/env_ws_{1333,1778,0}.txt`, `mia3/ws_*`):** a mesma rota
+  nas três formas, 11 capturas cada, do corredor do título à luta 2 (NOW LOADING, Mode Select, Select Character, Linked
+  Mode, luta 1, KO, Ougi, luta 2):
+  - menus: na forma da tela a seleção fica com retratos, textos e painéis na proporção e o fundo estendido dos lados
+    (o `widen2d` de 11-09 vale no Mi A3); a primeira folha de comparação parecia esticada porque achatava as capturas;
+  - luta: 16:9 e tela mostram mais do cenário, HUD sem esticar; fps igual nas três (B 38,2 / 38,3 / 38,4).
+- **Lutador todo branco** em duas capturas da tela (v6663, v7733): é o brilho do golpe do jogo. No PC (`un5pc`,
+  `HL_SCREEN=2400x1080`, `HL_ASPECT` 1333/1778/0, `HL_DUMP_FROM=6600 HL_DUMP_EVERY=4`,
+  `~/build/pcsx2-bench/runs/ws_pc_*`) os mesmos quadros, de 6600 a 7788, têm o mesmo conteúdo nas três formas, e a
+  fração de branco cai só na razão da largura (1 : 0,75 : 0,6).
+- **Lançador:** "Widescreen (16:9)" e "Ultrawide (20:9)" vistos nos Ajustes do Mi A3. A dica dizia que menus e filmes
+  eram esticados; agora diz o que acontece (menus largos sem esticar, filmes em 4:3 com faixas, forma limitada à
+  largura da tela).
+- **Falta:** a campanha e a tela de vitória nesta revisão (a rota v3r para na luta 2), 20:9 de verdade (o Mi A3 é
+  19,5:9), e o relato antigo de personagens esticando e sumindo na seleção, que não apareceu.
+
 ### 2026-11-10 22:10, noite: otimização, terceira parte: despacho e checagem de ciclos mais baratos (`0094`)
 
 - **Mudança (`recomp/patches/0094-fast-dispatch-checkpoint.patch`):** `EeScheduler::checkpointDue` e `accountCycles`

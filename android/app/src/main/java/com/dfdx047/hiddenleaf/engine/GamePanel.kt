@@ -139,7 +139,10 @@ class GamePanel(
         hint(context.getString(R.string.gp_filter_hint))
         section(context.getString(R.string.gp_shape))
         choices(
-            listOf("4:3" to 1333, "16:9" to 1778, context.getString(R.string.panel_full_screen) to 0),
+            listOf(
+                "4:3" to 1333, context.getString(R.string.aspect_wide) to 1778, context.getString(R.string.aspect_ultrawide) to 2222,
+                context.getString(R.string.panel_full_screen) to 0,
+            ),
             settings.get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT),
         ) {
             settings.set(EngineSettings.ASPECT, it)

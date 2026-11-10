@@ -102,7 +102,8 @@ fun SettingsScreen(vm: AppViewModel) {
             Text(stringResource(R.string.aspect), style = MaterialTheme.typography.titleSmall)
             ChipRow(
                 options = listOf(
-                    "4:3" to 1333, "16:9" to 1778, "20:9" to 2222, stringResource(R.string.aspect_screen) to 0,
+                    "4:3" to 1333, stringResource(R.string.aspect_wide) to 1778, stringResource(R.string.aspect_ultrawide) to 2222,
+                    stringResource(R.string.aspect_screen) to 0,
                 ),
                 selected = get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT),
                 onSelect = { vm.setting(EngineSettings.ASPECT, it) },
