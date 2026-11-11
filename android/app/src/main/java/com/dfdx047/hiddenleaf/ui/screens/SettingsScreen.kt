@@ -79,7 +79,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 value = at, range = 0..steps.lastIndex,
                 onChange = { i ->
                     vm.setting(EngineSettings.SCALE4, steps[i])
-                    vm.setting(EngineSettings.SCALE, (steps[i] + 2) / 4)
+                    vm.setting(EngineSettings.SCALE, EngineSettings.wholeScale(steps[i]))
                 },
             )
             Text(

@@ -117,7 +117,7 @@
     <string name="settings_sub">Se aplican la próxima vez que se inicie el juego</string>
     <string name="video">Video</string>
     <string name="resolution">Resolución interna</string>
-    <string name="resolution_hint">1x es la resolución original de PS2. En celulares y portátiles, 2x o 3x suele ser el punto ideal; en GPUs más débiles (Mali, Adreno 6xx), prueba de 1.25x a 1.75x.</string>
+    <string name="resolution_hint">1x es la resolución original de PS2. En celulares y portátiles, 2x o 3x suele ser el punto ideal; en GPUs más débiles (Mali, Adreno 6xx), prueba de 1.25x a 1.75x. En celulares débiles, 0.75x o 0.5x dibujan menos píxeles que la PS2 y dejan margen para los fps (la imagen queda más suave).</string>
     <string name="screen_filter">Filtro de pantalla</string>
     <string name="filter_bilinear">Bilineal</string>
     <string name="filter_sharp">Bilineal nítido</string>
@@ -290,7 +290,7 @@
     <string name="debug_model">Modelo</string>
     <string name="debug_tier">Nivel de la GPU</string>
     <string name="debug_gpu_opt">Optimizaciones de la GPU</string>
-    <string name="debug_gpu_opt_text">Ajustes recomendados para el nivel de tu GPU, hechos para mantener las peleas a 30 cuadros por segundo estables. Lo ves todo antes de cambiar.</string>
+    <string name="debug_gpu_opt_text">Ajustes recomendados para el nivel de tu GPU, hechos para mantener las peleas a la velocidad completa del juego (50 cuadros por segundo). Lo ves todo antes de cambiar.</string>
     <string name="debug_gpu_opt_button">Ver los ajustes recomendados</string>
     <string name="debug_perf">Log de rendimiento</string>
     <string name="debug_perf_log">Registrar rendimiento</string>
@@ -308,14 +308,14 @@
     <string name="tier_unknown">Aún fuera de la lista</string>
     <string name="gpu_offer_title">Tu GPU</string>
     <string name="gpu_offer_found">Detectamos tu GPU: %1$s (%2$s).</string>
-    <string name="gpu_offer_apply">Para mantener las peleas a 30 cuadros por segundo estables, vamos a aplicar estas optimizaciones:</string>
+    <string name="gpu_offer_apply">Para mantener las peleas a la velocidad completa del juego (50 cuadros por segundo), vamos a aplicar estas optimizaciones:</string>
     <string name="gpu_offer_later">Todo se puede cambiar después en Ajustes (y ofrecer de nuevo en Depuración).</string>
     <string name="gpu_offer_yes">Aplicar</string>
     <string name="gpu_offer_no">Ahora no</string>
     <string name="gpu_applied">Optimizaciones aplicadas. Valen desde el próximo inicio del juego.</string>
     <string name="gpu_unknown_tier">%1$s aún no está en la lista: los ajustes quedan como están. Manda tu log en Discord para agregarla.</string>
     <string name="gpu_opt_resolution">Resolución interna %1$s</string>
-    <string name="gpu_opt_interp_off">Movimiento suave apagado (los 30 del juego)</string>
+    <string name="gpu_opt_interp_off">Movimiento suave apagado (los 50 del juego)</string>
     <string name="gpu_opt_interp_60">Movimiento suave a 60</string>
     <string name="gpu_opt_depth_off">Profundidad precisa apagada (más rápido)</string>
     <string name="gpu_opt_depth_on">Profundidad precisa activada</string>

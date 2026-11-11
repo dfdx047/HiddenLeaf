@@ -120,11 +120,11 @@ class GamePanel(
         val scale4 = settings.get(EngineSettings.SCALE4, 4)
         section(context.getString(R.string.resolution))
         choices(
-            listOf("1x · 448p" to 4, "2x · 896p" to 8, "3x · 1344p" to 12, "4x · 1792p" to 16, "6x · 2688p" to 24, "8x · 4K" to 32),
+            listOf("0.5x · 224p" to 2, "0.75x · 336p" to 3, "1x · 448p" to 4, "2x · 896p" to 8, "3x · 1344p" to 12, "4x · 1792p" to 16, "6x · 2688p" to 24, "8x · 4K" to 32),
             scale4,
         ) {
             settings.set(EngineSettings.SCALE4, it)
-            settings.set(EngineSettings.SCALE, it / 4)
+            settings.set(EngineSettings.SCALE, EngineSettings.wholeScale(it))
             onApply()
         }
         hint(context.getString(R.string.gp_resolution_hint))

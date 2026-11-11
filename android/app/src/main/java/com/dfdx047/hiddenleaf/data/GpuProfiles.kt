@@ -85,7 +85,7 @@ object GpuProfiles {
     /** Writes the profile's settings (the player said yes); the tier is kept so that it is not offered again. */
     fun apply(p: Profile, s: EngineSettings) {
         s.set(EngineSettings.SCALE4, p.scale4)
-        s.set(EngineSettings.SCALE, (p.scale4 + 2) / 4)
+        s.set(EngineSettings.SCALE, EngineSettings.wholeScale(p.scale4))
         s.set(EngineSettings.INTERP, p.interp)
         s.set(EngineSettings.FRAG_DEPTH, p.fragDepth)
         s.set(EngineSettings.FRAME_SKIP, p.frameSkip)

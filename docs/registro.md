@@ -56,6 +56,38 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-11 22:50, noite: resoluções 0,5x e 0,75x; aviso do A35 lendo os slots; textos de 30 fps; toque no fim da conversa
+
+- **Resoluções fracionadas (launcher):** `SCALE_STEPS` começa em 2 e 3 (0,5x 256×224 e 0,75x 384×336) em Ajustes, e
+  "0.5x · 224p" e "0.75x · 336p" no painel do jogo. O `scale` inteiro antigo nunca fica 0
+  (`EngineSettings.wholeScale`). O motor já levava `scale4/4` ao GS. O `bt4gsx` aceita no mínimo 0,5x e o GS só
+  limita por cima; o renderizador nativo usa a mesma escala do GS (o limite de passes por envio conta como 1x).
+- **Teste no Mi A3 (rota de luta, 50, Nominum, `env_frac_*`):** a imagem sai certa nas três (0,5x mais suave, HUD e
+  efeitos no lugar; `mia3/frac_*`, `live/frac_cmp.png`).
+
+  | escala | A fps / mín | B fps / mín | EE B | VU1 B |
+  |---|---|---|---|---|
+  | 1x | 48,8 / 45,6 | 42,2 / 33,7 | 16,9 | 19,1 |
+  | 0,75x | 49,0 / 45,9 | 42,3 / 33,1 | 16,8 | 19,1 |
+  | 0,5x | 48,8 / 45,4 | 42,3 / 32,8 | 16,8 | 19,1 |
+
+  Campanha (`env_campfrac_*`, v8300–10300): 35,2 fps em 1x e em 0,5x. **No Mi A3 não ganha nada:** em 1x o limite já
+  é a CPU (VU1 e EE); o "GS" do `[perf]` é a CPU da thread do GS, não a GPU. A margem vale para aparelhos limitados
+  pela GPU (preenchimento de pixels). Para comparação, o 2x do Mi A3 (`prof8`) dá 41,5 / 38,3.
+- **Aviso do A35 com save sem jogo (corrigido):** o save do UN5 criado no Mode Select tem `data01`–`data04` todos
+  `0xFF`; o de 11-02 com um jogo no slot 1 tem `data01` e a cópia `data04` escritos (`build/lab/d2/sv/1`).
+  `ModSaves.hasGame` lê isso. O cartão avisa quando nem o save do mod nem o do UN5 têm jogo; antes ele só avisava sem
+  pasta nenhuma. Um save do mod sem jogo é refeito a partir do UN5 quando este tiver um (antes, uma vez criado, nunca
+  mais era trocado). Visto no Mi A3: o cartão do A35 agora mostra o aviso.
+- **Textos de 30 fps (corrigido):** `gpu_offer_apply`, `gpu_opt_interp_off` e `debug_gpu_opt_text` (pt, en, es)
+  falam dos 50 quadros do jogo.
+- **Toque no fim da conversa (corrigido):** quando a cena passa de 4 (conversa) para 3 (campanha), os botões de ação
+  ignoram toques novos por 700 ms (`NinjaPadView.TALK_END_GUARD_MS`); analógico e direcional valem na hora. Era o ✕
+  do menu caindo no Ataque/○ e reabrindo a conversa (entrada de 20:55).
+- **Gradle:** o `/tmp` desta máquina tem cota por usuário e encheu ("Cota de disco excedida" no `packageDebug`).
+  Compilar com `TMPDIR` e `-Djava.io.tmpdir` em `build/tmp`.
+- **Bibliotecas:** as quatro `libun5*.so` foram recompiladas com a correção da conversa de 20:55 (`d50ae13`).
+
 ### 2026-11-11 20:55, noite: Master Mode jogado por toque no Mi A3; jogador preso na sala da Hokage (corrigido)
 
 - **Como:** jogo base (mod desligado), 2x, Nominum, toque injetado (`input swipe`/`motionevent`) olhando a tela a cada

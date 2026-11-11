@@ -243,6 +243,10 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     private var lastEngineScene = 0
     private var candidateScene = 0
     private var candidateSince = 0L
+    // When a conversation of the campaign ends (4 → 3), the menu's ✕ the player was tapping to move the text on sits where
+    // the campaign's Attack/○ (Talk) is: the next tap opened the same conversation again (docs/registro.md 2026-11-11).
+    // For a moment after that change, a new touch on a button does nothing; the stick and the d-pad work at once.
+    private var talkEndedAt = 0L
     private val scenePoll = object : Runnable {
         override fun run() {
             if (!isAttachedToWindow) return
@@ -256,6 +260,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                 // (an area's loading screen is a moment of "menu": leaving play takes longer than coming back to it)
                 val hold = if (s == 1 && lastEngineScene > 1) SCENE_LEAVE_MS else SCENE_HOLD_MS
                 if (s != 0 && s != lastEngineScene && now - candidateSince >= hold) {
+                    if (lastEngineScene == 4 && s == 3) talkEndedAt = now
                     lastEngineScene = s
                     android.util.Log.i("un5", "touch: scene $s")
                     releaseAll()
@@ -442,6 +447,11 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val t = Track(e, x, y, e?.cx ?: x, e?.cy ?: y)
         if (e == null && stick != null && config.sticksFloat && x < width * 0.45f && y > height * 0.3f) {
             e = stick; t.el = stick; t.originX = x; t.originY = y
+        }
+        if (e != null && e.kind == CtlKind.BUTTON && scene == PadScene.CAMPAIGN &&
+            SystemClock.uptimeMillis() - talkEndedAt < TALK_END_GUARD_MS
+        ) {
+            t.el = null; e = null // (the finger stays tracked: lifted, it presses nothing)
         }
         tracks[id] = t
         if (e == null) return
@@ -1173,6 +1183,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     companion object {
         private const val SCENE_HOLD_MS = 500L
         private const val SCENE_LEAVE_MS = 2500L
+        private const val TALK_END_GUARD_MS = 700L
         private const val MIN_HOLD_MS = 80L           // (a button down at least this long: 2 vsyncs and a margin)
         private const val MENU_PRESS_MS = 90L          // (2 to 4 of the game's frames)
         private const val MENU_HOLD_MS = 550L

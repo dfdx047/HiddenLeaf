@@ -34,7 +34,7 @@ data class FileMod(
     val pack: Boolean = true,
     val boot: String = "",
     val baseCode: Boolean = false,
-    // the mod only loads a save in its own card folder and there is neither that folder nor a base save to make it from
+    // the mod only loads a game saved in its own card folder, and neither that folder nor the base save has one
     val needsBaseSave: Boolean = false,
 )
 
@@ -72,8 +72,8 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
                 boot = p.getProperty("boot", ""),
                 baseCode = KnownVersions.MODS.firstOrNull { it.id == id }?.baseCode ?: false,
                 needsBaseSave = KnownVersions.MODS.firstOrNull { it.id == id }?.cardFolder.orEmpty().let { folder ->
-                    folder.isNotEmpty() && !File(paths.saves, folder).exists() &&
-                        !File(File(paths.saves, ModSaves.BASE_FOLDER), ModSaves.BASE_FOLDER).isFile
+                    folder.isNotEmpty() && !ModSaves.hasGame(File(paths.saves, folder)) &&
+                        !ModSaves.hasGame(File(paths.saves, ModSaves.BASE_FOLDER))
                 },
             )
         }

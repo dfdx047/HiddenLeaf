@@ -118,7 +118,7 @@
     <string name="settings_sub">They apply the next time the game starts</string>
     <string name="video">Video</string>
     <string name="resolution">Internal resolution</string>
-    <string name="resolution_hint">1x is the PS2\'s own resolution. On phones and handhelds, 2x or 3x is usually the sweet spot; on weaker GPUs (Mali, Adreno 6xx), try 1.25x to 1.75x.</string>
+    <string name="resolution_hint">1x is the PS2\'s own resolution. On phones and handhelds, 2x or 3x is usually the sweet spot; on weaker GPUs (Mali, Adreno 6xx), try 1.25x to 1.75x. On weak phones, 0.75x or 0.5x draw fewer pixels than the PS2 and leave room for the frame rate (the picture gets softer).</string>
     <string name="screen_filter">Screen filter</string>
     <string name="filter_bilinear">Bilinear</string>
     <string name="filter_sharp">Sharp bilinear</string>
@@ -291,7 +291,7 @@
     <string name="debug_model">Model</string>
     <string name="debug_tier">GPU tier</string>
     <string name="debug_gpu_opt">GPU optimizations</string>
-    <string name="debug_gpu_opt_text">Recommended settings for your GPU\'s tier, made to keep fights at a steady 30 pictures a second. Shown before anything changes.</string>
+    <string name="debug_gpu_opt_text">Recommended settings for your GPU\'s tier, made to keep fights at the game\'s full speed (50 pictures a second). Shown before anything changes.</string>
     <string name="debug_gpu_opt_button">See the recommended settings</string>
     <string name="debug_perf">Performance log</string>
     <string name="debug_perf_log">Record performance</string>
@@ -309,14 +309,14 @@
     <string name="tier_unknown">Not in the list yet</string>
     <string name="gpu_offer_title">Your GPU</string>
     <string name="gpu_offer_found">We found your GPU: %1$s (%2$s).</string>
-    <string name="gpu_offer_apply">To keep fights at a steady 30 pictures a second, we will apply:</string>
+    <string name="gpu_offer_apply">To keep fights at the game\'s full speed (50 pictures a second), we will apply:</string>
     <string name="gpu_offer_later">Everything can be changed later in Settings (and offered again in Debug).</string>
     <string name="gpu_offer_yes">Apply</string>
     <string name="gpu_offer_no">Not now</string>
     <string name="gpu_applied">Optimizations applied. They count from the next start of the game.</string>
     <string name="gpu_unknown_tier">%1$s is not in the list yet: the settings stay as they are. Send your log on Discord so it can be added.</string>
     <string name="gpu_opt_resolution">Internal resolution %1$s</string>
-    <string name="gpu_opt_interp_off">Smooth motion off (the game\'s own 30)</string>
+    <string name="gpu_opt_interp_off">Smooth motion off (the game\'s own 50)</string>
     <string name="gpu_opt_interp_60">Smooth motion at 60</string>
     <string name="gpu_opt_depth_off">Precise depth off (faster)</string>
     <string name="gpu_opt_depth_on">Precise depth on</string>

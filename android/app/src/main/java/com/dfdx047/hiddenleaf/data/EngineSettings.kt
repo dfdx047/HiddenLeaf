@@ -54,7 +54,7 @@ class EngineSettings(private val file: File) {
     companion object Keys {
         // The engine's own (defaults as in port/src/gs/gs_draw.c)
         const val SCALE = "scale"                 // internal resolution 1..8, default 2 (whole; kept for older engines)
-        const val SCALE4 = "scale4"               // the same in quarters: 4 = 1x, 6 = 1.5x .. 32 = 8x (wins over "scale")
+        const val SCALE4 = "scale4"               // the same in quarters: 2 = 0.5x, 4 = 1x, 6 = 1.5x .. 32 = 8x (wins over "scale")
         const val ASPECT = "aspect_milli"         // 1333, 1600, 1778, 2389, 3556
         const val FX_OFF = "fx_off"               // bits: 1 outline, 2 see-through tint, 4 depth tint, 8 glow, 16 blur
         const val GLOW = "glow"                   // 0..200 %, default 60
@@ -87,8 +87,14 @@ class EngineSettings(private val file: File) {
 
         const val GLOW_DEFAULT = 60
         const val SCALE_DEFAULT = 1
-        /** The internal resolutions offered, in quarters (the engine's settings window has the same list). */
-        val SCALE_STEPS = listOf(4, 5, 6, 7, 8, 10, 12, 16, 20, 24, 32)
+        /**
+         * The internal resolutions offered, in quarters (the engine's settings window has the same list). 0.5x and 0.75x
+         * draw fewer pixels than the PS2 for weak phones (the GS's floor is 0.5x).
+         */
+        val SCALE_STEPS = listOf(2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 20, 24, 32)
+
+        /** The whole "scale" older engines read, from quarters (at least 1). */
+        fun wholeScale(scale4: Int): Int = maxOf(1, (scale4 + 2) / 4)
         const val ASPECT_DEFAULT = 0              // the screen's own shape (the engine measures it); 1333 is the game's 4:3
     }
 }
