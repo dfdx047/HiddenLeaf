@@ -33,9 +33,11 @@ object KnownVersions {
      * accepts (a known mod from an image that matches none is not imported: damaged, or another build). [pack]: the engine has its code pack. [cardFolder]: the memory
      * card folder the mod loads and never makes itself (the A35: "no data of Ultimate Ninja 5 in slot 1", for New game too);
      * the launcher makes it from the base game's save ([ModSaves]).
+     * [baseCode]: the mod's program differs from the base's only in its data (same code ranges), so the base engine runs
+     * it whole without a pack (un5_main.cpp, sameCodeAsBase).
      */
     data class KnownMod(val id: String, val name: String, val elf: String, val elfSha256: String, val changesCode: Boolean, val pack: Boolean,
-                        val cardFolder: String = "", val isoSha256: List<String> = emptyList())
+                        val cardFolder: String = "", val isoSha256: List<String> = emptyList(), val baseCode: Boolean = false)
 
     val MODS = listOf(
         KnownMod("un6-a35", "Ultimate Ninja 6 (Alpha 3.5)", "SLUS_556.06",
@@ -43,7 +45,7 @@ object KnownVersions {
             cardFolder = "BASLUS-55606NARUTO6",
             isoSha256 = listOf("37e0117331f8a557349be5445d7871352f6d6ce631e8fb9dc9c3ebfd4025007d")),
         KnownMod("un6-a11x", "Ultimate Ninja 6 (Alpha 1.1X)", "SLES_556.05",
-            "20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056", changesCode = true, pack = false,
+            "20872b06f4ef8b5ff49291b297a97941bc9131525b79e1cab2b1717156ca0056", changesCode = true, pack = false, baseCode = true,
             isoSha256 = listOf("bd95521e21f01c6fd88bfc1fb4a77ede0042e916d9e4e9459c79ef9ab5fdd6d9")),
         // the Brazilian version: its ELF is packed (SjCRUNCH) but unpacked it is the European code; a data mod
         KnownMod("un5-br", "Versão Brasileira", "SLES_556.05",

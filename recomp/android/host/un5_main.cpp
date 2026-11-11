@@ -520,6 +520,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
             return 1;
         }
         std::fprintf(stderr, "un5: mod %s, program %s\n", HL_PACK_ID, modElf.c_str());
+        // the IOP in batches of 1024 EE cycles, as before 0091: with 4096 the A35's IOP spun at 83 ms a frame from its
+        // first logos and the game ran at 12 fps on the Mi A3 (2026-11-11); the base and the Alpha 1.1X keep 4096
+        setenv("HL_IOP_BATCH", "1024", 0);
 #endif
     }
     static std::string saves = root + "/saves";

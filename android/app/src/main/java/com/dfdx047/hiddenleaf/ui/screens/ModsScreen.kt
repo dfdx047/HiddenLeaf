@@ -142,7 +142,20 @@ private fun ModCard(
                 if (m.changesCode) Tag(stringResource(R.string.mod_kind_code), Icons.Rounded.Code, Konoha.SasukeBlueLight)
                 else Tag(stringResource(R.string.mod_kind_data), Icons.Rounded.Translate, Konoha.LeeGreenLight)
             }
-            if (m.changesCode && !m.pack) {
+            if (m.needsBaseSave) {
+                Text(
+                    stringResource(R.string.mod_needs_base_save),
+                    style = MaterialTheme.typography.bodySmall, color = Konoha.ChakraAmber,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            }
+            if (m.changesCode && !m.pack && m.baseCode) {
+                Text(
+                    stringResource(R.string.mod_base_code),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            } else if (m.changesCode && !m.pack) {
                 Text(
                     stringResource(R.string.mod_no_pack),
                     style = MaterialTheme.typography.bodySmall, color = Konoha.ChakraAmber,

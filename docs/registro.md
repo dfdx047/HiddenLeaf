@@ -56,6 +56,33 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-11 17:30, tarde: pack de mods no Mi A3: Alpha 1.1X luta; A35 a 60 fps, mas preso sem slot gravado no save
+
+- **Importação pelo launcher** (tela de Mods → ISO em `Download`, como o jogador; as ISOs apagadas depois):
+  A35 16 arquivos, 1020 MB; Alpha 1.1X 6 arquivos, 934 MB. Ligar um desliga o outro (um mod de código por vez).
+- **Alpha 1.1X (`mia3/a11x`, `env_a3_a11x_r.txt`, 2x, tempo real):** `mod program …/un6-a11x/disc/SLES_556.05 (the
+  base's code, its own data)`; título (o do UN5, com idiomas em português, como antes), seleção, Linked Mode, luta,
+  Ougi inteiro, KO e WINNER com o personagem. Trecho A 41,9 fps, B 45,0.
+- **A35, pacote refeito** (`recomp/build.sh --mod "UN6 A35.iso"`, depois `HL_V80=1 recomp/android/build.sh --mod
+  un6-a35` e a ARMv8.2): a cópia do runtime do mod era de 11-09 e não ligava (`hlProfStart` faltando); agora tem todos
+  os patches até o `0094`. `libun5_un6_a35_v80.so` e `libun5_un6_a35.so`, 167 MB cada.
+- **Defeito do A35 com o lote do IOP de 4096 (`0091`/`0094`):** do primeiro logo em diante o IOP gastava 83 ms por
+  quadro e o jogo ia a 11,8 fps, com tela preta depois do CyberConnect2 (`mia3/a35`). `HL_IOP_BLOCKS=0` não muda nada
+  (`mia3/a35_blk0`); `HL_IOP_BATCH=1024` volta a 60,0 fps com o IOP em 5 ms (`mia3/a35_b1024`). A causa dentro do IOP
+  não foi procurada. **Correção (`un5_main.cpp`):** o pacote de código de um mod põe `HL_IOP_BATCH=1024` (se não vier
+  de fora); a base e a Alpha seguem com 4096. Com isso o A35 roda a 60 fps cravados (`mia3/a35_fix`, `a35_full`).
+- **Save do A35:** o Mi A3 não tinha save nenhum. Criei o do UN5 jogando a base pelos botões da tela (título → New
+  Game → Mode Select → START → Yes → criar dados); o launcher então criou o `BASLUS-55606NARUTO6` na partida. O A35
+  reconhece o cartão, mas "Novo jogo" e "Carregar jogo" mostram os slots 1–3 "Vazio" e "Não há dados que possam ser
+  carregados": o save do Mode Select só grava o sistema. Em 11-03 o save copiado do Cube tinha um slot gravado e o A35
+  dizia "Carregado com sucesso". **Falta:** um slot gravado no jogo base (progresso salvo) para levar o A35 à luta.
+- **Lançador:**
+  - cartão da Alpha: "O programa deste mod só muda dados: o motor base roda ele inteiro, sem pacote de código"
+    (`KnownMod.baseCode`), no lugar de "O que o mod muda no código não vale", que estava errado para ela;
+  - cartão do A35, quando não há save do UN5 de onde criar o do mod: pede um save do UN5 com um jogo gravado num slot
+    (`FileMod.needsBaseSave`). Com um save do UN5 sem slot gravado o aviso não aparece (o launcher não lê os slots).
+- **Não feito:** Versão Brasileira (mod de dados) e as rotas inteiras (resultado, segunda luta) com os mods.
+
 ### 2026-11-10 23:00, noite: widescreen revisto do zero no Mi A3 e no PC (4:3, 16:9, tela); nomes Widescreen/Ultrawide
 
 - **Mi A3 (1560x720, 19,5:9; `a71f5cc`, v3r, 2x, `build/lab/env_ws_{1333,1778,0}.txt`, `mia3/ws_*`):** a mesma rota

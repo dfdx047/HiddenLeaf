@@ -33,6 +33,9 @@ data class FileMod(
     val known: Boolean = false,
     val pack: Boolean = true,
     val boot: String = "",
+    val baseCode: Boolean = false,
+    // the mod only loads a save in its own card folder and there is neither that folder nor a base save to make it from
+    val needsBaseSave: Boolean = false,
 )
 
 /**
@@ -67,6 +70,11 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
                 pack = com.dfdx047.hiddenleaf.engine.EngineBridge.run { has(context, forCpu(packOf(id))) } ||
                     (KnownVersions.MODS.firstOrNull { it.id == id }?.pack ?: (p.getProperty("code") != "1")),
                 boot = p.getProperty("boot", ""),
+                baseCode = KnownVersions.MODS.firstOrNull { it.id == id }?.baseCode ?: false,
+                needsBaseSave = KnownVersions.MODS.firstOrNull { it.id == id }?.cardFolder.orEmpty().let { folder ->
+                    folder.isNotEmpty() && !File(paths.saves, folder).exists() &&
+                        !File(File(paths.saves, ModSaves.BASE_FOLDER), ModSaves.BASE_FOLDER).isFile
+                },
             )
         }
     }
