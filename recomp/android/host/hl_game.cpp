@@ -731,26 +731,49 @@ namespace
     // 0x7B9630...). Found with HL_FNCOUNT_WIN over every ADV function: dialog v6800-7600 against standing (v8300-8900) and
     // walking (v8200-8800) on the campaign route (docs/registro.md 2026-11-09).
     constexpr uint32_t kAdvFree = 0x723970u;
+    // It does not run in every area: in the Hokage's room (after "Sakura has joined your team") the player walks and it never
+    // runs, so the room's controls stayed the menu's and the player could not move (docs/registro.md 2026-11-11). The area is
+    // counted by the native renderer's scene going on (each loading of an area goes through the GS and turns it off), and the
+    // conversation's controls only come in an area where the function has run since.
     PS2Runtime::RecompiledFunction g_advFreeOriginal = nullptr;
     uint64_t g_advFreeTick = 0;
+    std::atomic<uint32_t> g_area{0u}, g_advFreeArea{~0u};
     void advFree(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         g_advFreeTick = g_tick;
+        g_advFreeArea.store(g_area.load(std::memory_order_relaxed), std::memory_order_relaxed);
         g_advFreeOriginal(rdram, ctx, runtime);
+    }
+    // The other side: 0x7F3F60 runs once a frame of the game's logic while a conversation's box is up and never while the
+    // player can move ("only A", 400 calls in 800 vsyncs of dialog, in both 11-09 runs). It catches the conversations at the
+    // start of an area, before 0x723970 has run there (Tsunade's, as one enters her room). The same code in the A35 and the
+    // Alpha 1.1X (whose ADV.BIN is the base's).
+    constexpr uint32_t kAdvTalk = 0x7F3F60u;
+    PS2Runtime::RecompiledFunction g_advTalkOriginal = nullptr;
+    uint64_t g_advTalkTick = 0;
+    void advTalk(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        g_advTalkTick = g_tick;
+        g_advTalkOriginal(rdram, ctx, runtime);
+    }
+
+    void hookAdv(uint32_t address, PS2Runtime::RecompiledFunction &original, PS2Runtime::RecompiledFunction hook)
+    {
+        if (&un5_adv_table == nullptr || original != nullptr || address < un5_adv_base)
+            return;
+        const uint32_t slot = (address - un5_adv_base) >> 2;
+        if (slot < un5_adv_slots && un5_adv_table[slot] != nullptr)
+        {
+            original = un5_adv_table[slot];
+            un5_adv_table[slot] = hook;
+        }
     }
 
     // BTL.BIN's functions are in its own table (recomp/overlays.py), which answers only while it is the one in memory.
     void hookOverlay()
     {
-        if (&un5_adv_table != nullptr && g_advFreeOriginal == nullptr && kAdvFree >= un5_adv_base)
-        {
-            const uint32_t slot = (kAdvFree - un5_adv_base) >> 2;
-            if (slot < un5_adv_slots && un5_adv_table[slot] != nullptr)
-            {
-                g_advFreeOriginal = un5_adv_table[slot];
-                un5_adv_table[slot] = advFree;
-            }
-        }
+        hookAdv(kAdvFree, g_advFreeOriginal, advFree);
+        hookAdv(kAdvTalk, g_advTalkOriginal, advTalk);
         if (&un5_btl_table == nullptr || g_promptOriginal != nullptr)
             return;
         const uint32_t slot = (kPromptPressed - un5_btl_base) >> 2;
@@ -1243,6 +1266,13 @@ namespace
         }
         g_tick = tick;
         hl_game::g_vsync.store(static_cast<uint32_t>(tick), std::memory_order_relaxed);
+        {
+            static bool s_nativeWas = false;
+            const bool on = hl_game::g_nativeOn != nullptr && hl_game::g_nativeOn();
+            if (on && !s_nativeWas)
+                g_area.fetch_add(1u, std::memory_order_relaxed);
+            s_nativeWas = on;
+        }
         logCounts(tick);
         dumpTick(tick);
         // HL_PRIV_LOG=1: the GS's display registers, a line each time one changes (for screens the display reads wrong)
@@ -1405,9 +1435,17 @@ int hl_game::scene()
     // menu's: the fight's buttons leave the text alone and a tap is ✕, which moves the conversation on. From the first
     // conversation: the hook is only in when this library's ADV (the one the overlay resolver found in memory) has that
     // function at 0x723970 (the base's, the Alpha 1.1X's, the A35's); a library without it keeps the campaign's controls.
-    // HL_TALK_OFF=1 keeps them too.
+    // HL_TALK_OFF=1 keeps them too. A conversation's box seen in the last 15 vsyncs (0x7F3F60) is one at once, in any area;
+    // without the box, 0x723970 not running counts only in an area where it has run (it never runs in some rooms, where the
+    // player would be left without the stick).
     static const bool s_talkOff = std::getenv("HL_TALK_OFF") != nullptr;
-    if (s_scene == 3 && mode == 2 && !s_talkOff && g_advFreeOriginal != nullptr && tick - g_advFreeTick > 15u)
-        return 4; // (the launcher takes it as the menu's controls, at once: no wait for a loading screen's flicker)
+    if (s_scene == 3 && mode == 2 && !s_talkOff)
+    {
+        if (g_advTalkOriginal != nullptr && g_advTalkTick != 0u && tick - g_advTalkTick <= 15u)
+            return 4; // (the launcher takes it as the menu's controls, at once: no wait for a loading screen's flicker)
+        if (g_advFreeOriginal != nullptr && tick - g_advFreeTick > 15u &&
+            g_advFreeArea.load(std::memory_order_relaxed) == g_area.load(std::memory_order_relaxed))
+            return 4;
+    }
     return s_scene;
 }

@@ -56,6 +56,53 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-11 20:55, noite: Master Mode jogado por toque no Mi A3; jogador preso na sala da Hokage (corrigido)
+
+- **Como:** jogo base (mod desligado), 2x, Nominum, toque injetado (`input swipe`/`motionevent`) olhando a tela a cada
+  passo (`build/lab/mia3/live/`: `sh.sh`, `t.sh`, `stick.sh`). Objetivo: gravar um slot no save do UN5 para o A35
+  (ver a entrada de 17:30). O UN5 não grava pelo "Quit" do menu START ("You will resume from the last point saved"),
+  só em pontos da história; ainda não cheguei a um.
+- **Bloqueio (corrigido):** na sala da Hokage, depois de "Sakura has joined your team", a tela ficava com os controles
+  de menu (direcional, sem analógico) e o Naruto não andava (nem direcional nem arrasto). O launcher recebia a cena
+  **4** (`touch: scene 4` no logcat): a `0x723970` do ADV, o sinal de "jogador livre" de 11-09, não roda nessa sala.
+  Duas rodadas, as duas presas no mesmo ponto.
+- **Correção (`hl_game.cpp`):**
+  - sinal positivo da conversa: a `0x7F3F60` do ADV roda uma vez por quadro de lógica com a caixa de fala aberta e
+    nunca com o jogador livre ("only A", 400 chamadas em 800 vsyncs nas duas rodadas de 11-09). Rodou há até
+    15 vsyncs → 4;
+  - o sinal antigo (a `0x723970` parada) só vale numa área em que ela já rodou. A área conta cada vez que a cena do
+    renderizador nativo liga (todo carregamento de área passa pelo GS). Onde ela nunca roda, ficam os controles da
+    campanha, que não prendem ninguém;
+  - a `0x7F3F60` e a `0x723970` são iguais no ADV do A35 (código gerado idêntico), e o `ADV.BIN` da Alpha 1.1X é o da
+    base.
+- **Teste no Mi A3 (por toque, `HL_FNCOUNT=7f3f60,723970`):**
+  - na rua, `7f3f60` 25 por 50 vsyncs só na fala, `723970` só livre;
+  - falar com o Jiraiya → 4 (menu), fim da fala → 3;
+  - a conversa da Tsunade começa com os controles de menu;
+  - depois da Sakura, o aviso e o tutorial "Team edit" saem com os de menu; livre, o analógico aparece e o Naruto anda
+    pela sala ("Exit", até o Jiraiya); a fala da Temari troca para o de menu e volta.
+- **Ainda imperfeito:** algumas falas da conversa da Tsunade são do tipo "evento" (nem a `0x7F3F60` nem as funções
+  comuns do quadro rodam) e aparecem com os controles da campanha. O ✕ da campanha ("Pular") passa o texto, então
+  ninguém fica preso, mas é menos cômodo.
+- **Achado de toque (aberto):** o ✕ do controle de menu fica quase no mesmo lugar do Ataque/○ ("Talk") da campanha.
+  Quem aperta ✕ seguido para passar o texto, ao fim da conversa, abre a mesma conversa de novo. Foi isso que pareceu um
+  "diálogo travado" na primeira rodada; o jogo estava certo.
+- **Travamento da GPU (aberto):** na primeira rodada o jogo congelou ao entrar na primeira cena do Master Mode
+  (v14241, tela e `screencap` parados). Kernel: `page allocation failure: order:6` no `kgsl_worker_thr` e
+  `Unable to submit command to the ringbuffer -12`, como em 11-10, agora com o limite de 24 passes por envio (2x). O
+  `/proc/buddyinfo` mostrou a zona Normal sem nenhum bloco acima de 64 KB, mesmo com o jogo fechado. Não repetiu nas
+  três rodadas seguintes. `build/lab/mia3/mm_hang/` (log, pilhas, kernel).
+- **Desempenho na aldeia (2x, aberto):** rua com fala e andando ~31 fps (VU1 28 ms, EE 20 ms); a cena de câmera da
+  primeira chegada à aldeia cai para 23 fps de vsync (11 quadros do jogo), VU1 38,8 ms, GS 41 ms, 6,6 MB por quadro.
+  O ajuste do jogador neste Mi A3 é 1x (`scale=1` em `un5_settings.txt`); as rodadas forçaram 2x pelo `hl_env`.
+- **Não é defeito:** a faixa preta embaixo na cena de chegada é o letterbox de cinema do próprio jogo (some na rua).
+- **Ferramentas:**
+  - `HL_FNCOUNT=all` pega só as primeiras 8192 entradas da tabela do ADV (até `0x6d4bb0`), que guarda também o meio
+    das funções. Para o ADV inteiro, usar a lista de `build/lab/hl_env_camp_fnstand.txt`. `build/lab/fnwin.py`
+    compara janelas de vsync nas linhas `[fn]`;
+  - o arquivo `hl_pad` em `files/runtime/data` não foi lido no aparelho nem com o jogo respondendo. Nas rotas vale
+    o `HL_PADROUTE`.
+
 ### 2026-11-11 17:30, tarde: pack de mods no Mi A3: Alpha 1.1X luta; A35 a 60 fps, mas preso sem slot gravado no save
 
 - **Importação pelo launcher** (tela de Mods → ISO em `Download`, como o jogador; as ISOs apagadas depois):
