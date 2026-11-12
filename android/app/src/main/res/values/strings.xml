@@ -433,6 +433,7 @@
     <string name="mod_kind_data">Data only</string>
     <string name="mod_needs_base_save">This mod only opens with an Ultimate Ninja 5 save that has a game saved in a slot: play the base game (mod off) and save your progress in a slot. The launcher then makes the mod\'s save from it.</string>
     <string name="mod_base_code">This mod\'s program only changes data: the base engine runs all of it, no code pack needed.</string>
+    <string name="mod_pick_language">In the game\'s language menu, pick %1$s: the mod\'s text takes the place of Spanish.</string>
     <string name="mod_no_pack">No code pack of its own: it runs with the base game\'s code and this mod\'s data. What the mod changes in the code does not apply.</string>
     <string name="pad_attack">Attack</string>
     <string name="pad_jump">Jump</string>

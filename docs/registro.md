@@ -59,6 +59,28 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 20:05, noite: os três mods no RG Cube (2x, VU1 do Nominum); a thread do IOP também nos pacotes de código
+
+- **Importação como jogador:** as três ISOs em `Download` do Cube, importadas pela tela de Mods (A35 16 arquivos,
+  1020 MB; Alpha 1.1X 6, 934 MB; Versão Brasileira 4, 789 MB). Ligar um desliga o outro sozinho (`un5_mods.txt`).
+- **Versão Brasileira** (`cube_br2`, rota da luta, 2x): 49,4 / 50,0 fps. O programa dela é o europeu comprimido
+  (SjCRUNCH), roda o motor base. O texto dela fica no lugar do espanhol, e o menu de idioma do jogo mostra "Português"
+  (`cube_br_pt`, a rota escolhe o 4º item): 49,3 / 50,0, abertura "Versão Legendada", "Novo jogo / Carregar",
+  "Selecionar modo", "Combate Livre", "Lutem!", luta certa. **Launcher:** o cartão dizia "Muda o código" (vinha do
+  `code=1` do `mod.properties`, porque o ELF difere no disco); agora um mod conhecido usa o `changesCode` do
+  `KnownVersions` ("Só dados"), e o `KnownMod` ganhou `language`: o cartão diz "No menu de idioma do jogo, escolha
+  Português: o texto do mod fica no lugar do espanhol" (`mod_pick_language`, en/pt/es).
+- **Alpha 1.1X** (`cube_a11x`, `env_a3_a11x_r.txt`, 2x): 49,5 / 50,0 fps, "the base's code, its own data", tela de
+  seleção e VS dela, luta com golpes e "Unleash Ultimate Jutsu" certos.
+- **A35** (pacote `libun5_un6_a35.so`, save `BASLUS-55606NARUTO6` copiado do Mi A3 por `run-as`; rota
+  `stage_env/cube_a35_s2.txt` = `a35_ser` em 2x): serial 56,0 / 55,0 (`cube_a35`), com a thread do IOP 59,0 / 58,7
+  (`cube_a35_iop`): o mod é NTSC e no Cube o IOP (3,3 ms) saía da thread do jogo. Som gravado (`HL_SPU2_REC`) nos dois
+  modos: 203 s e 200 s, nenhum buraco curto. No Mi A3 dava o mesmo com ou sem (41,3 / 40,4, entrada das 20:00), então
+  **`HL_IOP_THREAD=1` vale agora também nos pacotes** (`un5_main.cpp`, sem o `#ifndef HL_PACK_ID`). Pacote refeito
+  (v8.2 e v8.0) e conferido sem `hl_env` de IOP: `[iop] the IOP on its own thread`, 59,0 / 58,4 (`cube_a35_def`, vídeo:
+  carregar, seleção, VS, "Lutem!", luta com golpes e números). Os quadros brancos antes da seleção e do VS são a
+  transição do próprio mod: aparecem iguais no modo serial.
+
 ### 2026-11-12 noite: RG Cube na base, núcleos pela frequência permitida, UNPACK com máscara, drivers
 
 - **Cube liberado pelo desenvolvedor** (base primeiro; mods depois). Base importada pelo launcher como jogador (ISO europeia

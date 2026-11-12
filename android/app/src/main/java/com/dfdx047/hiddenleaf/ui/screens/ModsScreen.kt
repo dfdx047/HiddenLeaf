@@ -149,6 +149,13 @@ private fun ModCard(
                     modifier = Modifier.padding(end = 12.dp),
                 )
             }
+            if (m.language.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.mod_pick_language, m.language),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            }
             if (m.changesCode && !m.pack && m.baseCode) {
                 Text(
                     stringResource(R.string.mod_base_code),

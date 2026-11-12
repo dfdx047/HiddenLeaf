@@ -561,11 +561,10 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     }
     static std::string saves = root + "/saves";
     setenv("HL_MC_ROOT", saves.c_str(), 0);
-#ifndef HL_PACK_ID
     // the IOP and the SPU2 on a thread of their own (patch 0100; HL_IOP_THREAD=0 in hl_env.txt for the old way). On the Mi A3
-    // the fights went from 39-41 to 43-44 fps after the lives drop (2026-11-12). The mods keep it off until a mod route runs.
+    // the fights went from 39-41 to 43-44 fps after the lives drop (2026-11-12). The A35's code pack too since 2026-11-12: on
+    // the RG Cube 55.0 -> 58.7 fps (NTSC), the same sound; on the Mi A3 the same as without (41.3 / 40.4).
     setenv("HL_IOP_THREAD", "1", 0);
-#endif
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     {

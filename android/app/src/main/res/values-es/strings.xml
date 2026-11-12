@@ -432,6 +432,7 @@
     <string name="mod_kind_data">Solo datos</string>
     <string name="mod_needs_base_save">Este mod solo abre con un guardado de Ultimate Ninja 5 que tenga una partida guardada en un espacio: juega el juego base (con el mod apagado) y guarda el progreso en un espacio. El launcher crea el guardado del mod a partir de él.</string>
     <string name="mod_base_code">El programa de este mod solo cambia datos: el motor base lo ejecuta entero, sin paquete de código.</string>
+    <string name="mod_pick_language">En el menú de idioma del juego, elige %1$s: el texto del mod ocupa el lugar del español.</string>
     <string name="mod_no_pack">Sin paquete de código propio: funciona con el código del juego base y los datos de este mod. Lo que el mod cambia en el código no se aplica.</string>
     <string name="pad_attack">Ataque</string>
     <string name="pad_jump">Saltar</string>

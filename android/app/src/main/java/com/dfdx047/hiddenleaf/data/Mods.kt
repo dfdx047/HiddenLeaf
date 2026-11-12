@@ -36,6 +36,7 @@ data class FileMod(
     val baseCode: Boolean = false,
     // the mod only loads a game saved in its own card folder, and neither that folder nor the base save has one
     val needsBaseSave: Boolean = false,
+    val language: String = "",
 )
 
 /**
@@ -65,12 +66,15 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
                 files = p.getProperty("files")?.toIntOrNull() ?: File(d, "disc").countFiles(),
                 bytes = p.getProperty("bytes")?.toLongOrNull() ?: File(d, "disc").sizeDeep(),
                 dir = d,
-                changesCode = p.getProperty("code") == "1",
+                // a known mod says it itself (the Brazilian version's program is packed, so it differs on disc, but it is
+                // the European code: a data mod)
+                changesCode = KnownVersions.MODS.firstOrNull { it.id == id }?.changesCode ?: (p.getProperty("code") == "1"),
                 known = p.getProperty("known") == "1",
                 pack = com.dfdx047.hiddenleaf.engine.EngineBridge.run { has(context, forCpu(packOf(id))) } ||
                     (KnownVersions.MODS.firstOrNull { it.id == id }?.pack ?: (p.getProperty("code") != "1")),
                 boot = p.getProperty("boot", ""),
                 baseCode = KnownVersions.MODS.firstOrNull { it.id == id }?.baseCode ?: false,
+                language = KnownVersions.MODS.firstOrNull { it.id == id }?.language.orEmpty(),
                 needsBaseSave = KnownVersions.MODS.firstOrNull { it.id == id }?.cardFolder.orEmpty().let { folder ->
                     folder.isNotEmpty() && !ModSaves.hasGame(File(paths.saves, folder)) &&
                         !ModSaves.hasGame(File(paths.saves, ModSaves.BASE_FOLDER))

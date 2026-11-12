@@ -432,6 +432,7 @@
     <string name="mod_kind_data">Só dados</string>
     <string name="mod_needs_base_save">Este mod só abre com um save do Ultimate Ninja 5 que tenha um jogo gravado num slot: jogue o jogo base (com o mod desligado) e grave o progresso num slot. O launcher cria o save do mod a partir dele.</string>
     <string name="mod_base_code">O programa deste mod só muda dados: o motor base roda ele inteiro, sem pacote de código.</string>
+    <string name="mod_pick_language">No menu de idioma do jogo, escolha %1$s: o texto do mod fica no lugar do espanhol.</string>
     <string name="mod_no_pack">Sem pacote de código próprio: roda com o código do jogo base e os dados deste mod. O que o mod muda no código não vale.</string>
     <string name="pad_attack">Ataque</string>
     <string name="pad_jump">Pular</string>

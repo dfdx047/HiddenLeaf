@@ -37,7 +37,9 @@ object KnownVersions {
      * it whole without a pack (un5_main.cpp, sameCodeAsBase).
      */
     data class KnownMod(val id: String, val name: String, val elf: String, val elfSha256: String, val changesCode: Boolean, val pack: Boolean,
-                        val cardFolder: String = "", val isoSha256: List<String> = emptyList(), val baseCode: Boolean = false)
+                        val cardFolder: String = "", val isoSha256: List<String> = emptyList(), val baseCode: Boolean = false,
+                        // the in-game language that shows the mod's text (it takes another language's place), named as the game names it
+                        val language: String = "")
 
     val MODS = listOf(
         KnownMod("un6-a35", "Ultimate Ninja 6 (Alpha 3.5)", "SLUS_556.06",
@@ -49,7 +51,7 @@ object KnownVersions {
             isoSha256 = listOf("bd95521e21f01c6fd88bfc1fb4a77ede0042e916d9e4e9459c79ef9ab5fdd6d9")),
         // the Brazilian version: its ELF is packed (SjCRUNCH) but unpacked it is the European code; a data mod
         KnownMod("un5-br", "Versão Brasileira", "SLES_556.05",
-            "7c3517aa09c0c3e34742b89ee19a2de5f71753380ee198e8861a8030cfcf8e51", changesCode = false, pack = true,
+            "7c3517aa09c0c3e34742b89ee19a2de5f71753380ee198e8861a8030cfcf8e51", changesCode = false, pack = true, language = "Português",
             isoSha256 = listOf("2c60b59142b74e5a2da5a0b93a721fcf1090f51c2dfb596b902279cfd842ed5e")),
     )
 
