@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Online play (ui/screens/OnlineScreen.kt, data/Online.kt, engine/OnlineGame.kt) -->
+<resources>
+    <string name="nav_online">Online</string>
+    <string name="online_subtitle">A fight against a friend, each on their own phone.</string>
+    <string name="online_play_title">Play</string>
+    <string name="online_need_game">Install the game first (Home).</string>
+    <string name="online_need_server">Put the rooms server\'s address under Server, below.</string>
+    <string name="online_name">Your name</string>
+    <string name="online_create">Create a room</string>
+    <string name="online_or_join">or join a friend\'s room</string>
+    <string name="online_code">Room code</string>
+    <string name="online_join">Join</string>
+    <string name="online_dismiss">OK</string>
+    <string name="online_cancel">Cancel</string>
+    <string name="online_room_code">Tell your friend this code</string>
+    <string name="online_waiting">Waiting for the other player…</string>
+    <string name="online_starting">%1$s is here: the game is starting…</string>
+    <string name="online_step_address">Finding this phone\'s address…</string>
+    <string name="online_step_room">Opening the room…</string>
+    <string name="online_step_join">Joining the room…</string>
+    <string name="online_guide_title">How it works</string>
+    <string name="online_guide">One player creates a room and tells the other the code; the other joins with it. The game then starts on both phones: whoever created the room is player 1 and moves the menus, the other is player 2. Pick the two-player fight (Free Battle, 1P vs 2P) and fight.\n\nBoth phones need the same version of Hidden Leaf and the same mods switched on. The match uses a memory card of its own (your saves are not touched) and every character is open. The touch helpers (one-tap special, tap value) are off: both phones play by the game\'s own rules. Opening the game menu does not pause the match.</string>
+    <string name="online_options_title">Match options</string>
+    <string name="online_delay">Input delay (game frames)</string>
+    <string name="online_delay_auto">Auto</string>
+    <string name="online_delay_hint">Each frame is 40 ms. Automatic picks it from the measured distance between the phones. The room creator\'s choice holds for both.</string>
+    <string name="online_relay">Allow the relay</string>
+    <string name="online_relay_hint">When the phones cannot reach each other directly (some mobile networks and routers), the match goes through the server. A little slower, but it plays.</string>
+    <string name="online_server_card">Server</string>
+    <string name="online_server">Rooms server address</string>
+    <string name="online_server_hint">The address of the Hidden Leaf Online Worker (https://…workers.dev). Both players need the same one.</string>
+    <string name="online_test">Test connection</string>
+    <string name="online_test_ok">OK: %1$d ms (%2$s)</string>
+    <string name="online_err_version">Your Hidden Leaf is a different version from the server\'s. Update the app.</string>
+    <string name="online_err_different">The room\'s game is not the same as yours: both need the same app version and the same mods switched on.</string>
+    <string name="online_err_no_room">There is no room with this code (or it closed).</string>
+    <string name="online_err_full">The room already has two players.</string>
+    <string name="online_err_busy">Server busy: try again in a moment.</string>
+    <string name="online_err_server">Check the server\'s address (it starts with https://).</string>
+    <string name="online_err_network">The server did not answer. Check the internet and the server\'s address.</string>
+    <string name="online_err_other">The server refused it.</string>
+    <string name="online_err_code">The code has 6 digits.</string>
+    <string name="online_game_linking">Connecting to %1$s…</string>
+    <string name="online_game_playing">Online %1$s vs %2$s · %3$s · delay %4$s</string>
+    <string name="online_game_via_relay"> · relay</string>
+    <string name="online_game_desync"> · the games differ</string>
+    <string name="online_game_peer_left">%1$s left the match.</string>
+    <string name="online_game_over">You left the match.</string>
+    <string name="online_game_no_meet">%1$s\'s game did not start. Quit and create a new room.</string>
+    <string name="online_game_desync_end">The two games went apart: the match ended.</string>
+    <string name="online_game_lost">The connection to %1$s was lost.</string>
+    <string name="online_game_failed">The match could not start (network).</string>
+</resources>

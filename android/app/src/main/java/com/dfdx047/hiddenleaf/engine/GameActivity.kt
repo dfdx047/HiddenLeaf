@@ -45,6 +45,8 @@ class GameActivity : SDLActivity() {
     private lateinit var paths: GamePaths
     private lateinit var store: TouchStore
     private var pad: TouchSurface? = null
+    /** An online match (the launcher's Online screen started this one): its line on screen and the room's relay. */
+    private var online: OnlineGame? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchMenu = object : Runnable {
@@ -72,9 +74,11 @@ class GameActivity : SDLActivity() {
         installDataList()
         runCatching { copyGsxResources() }
         runCatching { com.dfdx047.hiddenleaf.data.ModSaves.prepare(paths) } // (a mod's card folder, before the engine reads the card)
+        online = runCatching { OnlineGame.from(this, paths) }.getOrNull() // (before the engine reads and puts away the session file)
         super.onCreate(savedInstanceState)
         preferRefresh()
         addTouchPad()
+        (SDLActivity.getContentView() as? ViewGroup)?.let { layout -> online?.attach(layout) }
     }
 
     /** 90 or 120 pictures a second: the screen's fastest mode at its current size (a 120 Hz panel left at 60 shows half). */
@@ -148,7 +152,8 @@ class GameActivity : SDLActivity() {
         if (panel != null) return
         val layout = SDLActivity.getContentView() as? ViewGroup ?: return
         TouchBridge.setPad(0, 128, 128, 128, 128)
-        TouchBridge.setPaused(true)
+        // (an online match does not stop: the other phone's game would wait for this one; the panel is over a game going on)
+        if (online == null) TouchBridge.setPaused(true)
         val es = EngineSettings(paths.settings)
         val p = GamePanel(
             this, es,
@@ -174,7 +179,7 @@ class GameActivity : SDLActivity() {
         val p = panel ?: return
         (p.parent as? ViewGroup)?.removeView(p)
         panel = null
-        TouchBridge.setPaused(false)
+        if (online == null) TouchBridge.setPaused(false)
     }
 
     private fun applyVideo(es: EngineSettings) {
@@ -287,6 +292,7 @@ class GameActivity : SDLActivity() {
      */
     @Suppress("unused")
     fun quitToApp() {
+        online?.leave() // (the other phone is told before this process goes)
         runOnUiThread {
             TouchBridge.setPad(0, 128, 128, 128, 128)
             startActivity(
