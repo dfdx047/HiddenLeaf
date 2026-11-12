@@ -59,6 +59,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 20:00, noite: a VU1 do Nominum ligada por padrão; campanha e A35 com a thread do IOP
+
+- **Achado:** o app não definia `NOMINUM_VU1`: quem joga rodava a VU1 do runtime, e todas as rotas de teste desde 11-09
+  usavam `NOMINUM_VU1=1` (os `hl_env` de teste). `un5_main.cpp` agora põe `NOMINUM_VU1=1` (se não vier de fora; `=0` para a
+  do runtime). A VU1 do Nominum é a de microprogramas recompilados (o "nativo"); a do runtime é a interpretada.
+- **Luta (Mi A3, 1x, Naruto x Naruto, fases A / B):** VU1 do runtime 35,4 / 41,7 (`rtvu1`, vídeo: Ougi ligado
+  Naruto+Sakura e WINNER certos); Nominum 48,9 / 44,1 (`iop_default`). Sem `hl_env` de nada: 47,1 / 43,6, com
+  `[nvu1]` e `[iop] the IOP on its own thread` no log (`nodef`).
+- **Campanha (`env_campfrac_1`, v8300–10300, vídeo):** Nominum 35,2 fps (`camp_n`; igual a antes da thread do IOP:
+  aqui o limite é a VU1, 30 ms por quadro, o jogo esperando 12 ms por ela); runtime 25,5 (`camp_rt`, VU1 46 ms). As duas
+  iguais na imagem: cena do portão, NOW LOADING, vila com Jiraiya e Sakura, tutorial de pulo, Ichiraku, portão da vila.
+- **A35 no Mi A3, até a luta pela primeira vez:** o save do UN5 do aparelho não tem jogo gravado (a rota de campanha
+  começa por New Game), então o `ModSaves` não refaz o do mod. Pus como `BASLUS-55606NARUTO6` o save com jogo no slot 1 de
+  `build/lab/d2/sv/1` (o vazio de antes em `files/a35_save_empty`). Rota `stage_env/a35_*.txt` (de `env_a3_a35f`, 1x):
+  "Carregado com sucesso", seleção, VS, luta com Ougi, volta à seleção; logos e menus a 60,0. **A thread do IOP não ajuda
+  o A35:** fase B 41,3 serial (`a35_ser`) e 40,4 com ela (`a35_iop2`); o mod é NTSC (16,7 ms por quadro) e a VU1 sozinha
+  leva ~21 ms. Os mods seguem no modo serial (`#ifndef HL_PACK_ID`). O A35 foi desligado de novo (`un5_mods.txt` vazio).
+- **Pacote do A35 refeito** com os patches até o `0100` (`HL_V80=1 recomp/android/build.sh --mod un6-a35`).
+
 ### 2026-11-12 18:00, noite: o IOP e o SPU2 numa thread própria (patch `0100`), ligado por padrão no jogo base
 
 - **Como:** `advanceIopEeCycles` põe o lote de ciclos numa fila (anel de 1024 itens) e volta na hora; a thread

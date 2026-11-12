@@ -477,6 +477,10 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         mkdir(hl_game::g_vifDumpDir.c_str(), 0775);
     loadSettings(root + "/un5_settings.txt");
     hl_online::setup(root); // (the app's Online screen wrote a session file: this start is an online match)
+    // Nominum's VIF1 and VU1 (its recompiled microprograms) by default: every route of the week ran with them; the
+    // runtime's VU1 gave on the Mi A3 35 fps in the fight's start (48.9 with Nominum) and 25.5 in the campaign (35.2),
+    // with the same picture (2026-11-12). NOMINUM_VU1=0 in hl_env.txt for the runtime's.
+    setenv("NOMINUM_VU1", "1", 0);
     hl_nominum_vu1::setup();
     setenv("HL_METER", "1", 0);
     if (iso.empty())
