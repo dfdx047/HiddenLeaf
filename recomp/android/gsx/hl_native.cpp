@@ -1884,9 +1884,16 @@ void main()
 	SubmitCount s_submit;
 
 	// At each vsync, on the GS thread: the device's kick armed for the next frame, and the count of what it held.
+	// The GS's device when it is Vulkan's: the native renderer and the kicks below are Vulkan only (with OpenGL ES,
+	// GSDeviceVK::GetInstance() would cast the GL device and read past it: the crash of rec cmp_gsgl, 2026-11-12)
+	GSDeviceVK* vkDevice()
+	{
+		return g_gs_device && g_gs_device->GetRenderAPI() == RenderAPI::Vulkan ? static_cast<GSDeviceVK*>(g_gs_device.get()) : nullptr;
+	}
+
 	void armKick()
 	{
-		GSDeviceVK* dev = GSDeviceVK::GetInstance();
+		GSDeviceVK* dev = vkDevice();
 		const u32 kick = kickPasses();
 		if (!dev)
 			return;
@@ -1939,7 +1946,7 @@ void main()
 	// One go through a frame's draws, with its own vertices or others in their place (fresh: the first time, its textures come in).
 	void drawFrame(Frame* f, const Vertex* vertices, bool fresh)
 	{
-		GSDeviceVK* dev = GSDeviceVK::GetInstance();
+		GSDeviceVK* dev = vkDevice();
 		if (dev && g_gs_renderer && g_texture_cache && !s_gpuFailed)
 		{
 			g_gs_renderer->Flush(GSState::VSYNC);
@@ -2883,7 +2890,8 @@ bool transfer(uint8_t path, uint8_t* data, uint32_t size)
 {
 	static const bool once = [] {
 		const char* on = std::getenv("HL_NATIVE");
-		s_on = !(on && on[0] == '0');
+		const char* api = std::getenv("HL_GS_API");
+		s_on = !(on && on[0] == '0') && !(api && std::strcmp(api, "gl") == 0); // (the native draws with Vulkan only)
 		const char* from = std::getenv("HL_NATIVE_FROM");
 		s_from = from ? std::strtoull(from, nullptr, 10) : 0u;
 		if (s_on)
