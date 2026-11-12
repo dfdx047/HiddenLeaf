@@ -102,15 +102,18 @@ set_source_files_properties("${HL_NOMINUM_DIR}/core/vu1/vu_fast.cpp" PROPERTIES 
 # The generated game code: one translation unit per 32 functions, or the build takes hours.
 file(GLOB RUNNER_SRC CONFIGURE_DEPENDS "${RT}/src/runner/*.cpp")
 list(REMOVE_ITEM RUNNER_SRC "${RT}/src/runner/main.cpp")
+# The online match (host/online: the line, the lockstep and the glue, hl_online.cpp; tested on the PC by host/online/tests/run.sh)
+set(HL_ONLINE_SRC "${HOST}/online/hl_online.cpp" "${HOST}/online/match_session.cpp" "${HOST}/online/link.cpp" "${HOST}/online/stun.cpp"
+    "${HOST}/online/session.cpp" "${HOST}/online/lockstep.cpp")
 add_library(un5 SHARED ${RUNNER_SRC} "${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp"
-    "${HOST}/hl_nominum_vu1.cpp" "${HOST}/hl_watch.cpp")
+    "${HOST}/hl_nominum_vu1.cpp" "${HOST}/hl_watch.cpp" ${HL_ONLINE_SRC})
 set_target_properties(un5 PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
 # HL_PACK_ID=<mod>: a mod's code pack (recomp/android/build.sh --mod <mod>), libun5_<mod>.so, which runs the mod's program
 if(HL_PACK_ID)
     set_source_files_properties("${HOST}/un5_main.cpp" PROPERTIES COMPILE_DEFINITIONS "HL_PACK_ID=\"${HL_PACK_ID}\"")
 endif()
 set_source_files_properties("${RT}/src/main.cpp" "${HOST}/un5_main.cpp" "${HOST}/raylib_host.cpp" "${HOST}/hl_game.cpp" "${HOST}/hl_nominum_vu1.cpp" "${HOST}/hl_watch.cpp"
-    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    ${HL_ONLINE_SRC} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 set_source_files_properties("${RT}/src/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=ps2x_runtime_main")
 # the function tables are long and plain: optimizing them only costs time
 file(GLOB UN5_TABLES CONFIGURE_DEPENDS "${RT}/src/runner/register_functions.cpp" "${RT}/src/runner/*overlays*.cpp" "${RT}/src/runner/*_register.cpp")

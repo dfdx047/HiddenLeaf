@@ -5,6 +5,7 @@
 // (libbt4gsx.so, reading the ring) and this one, which keeps the window, its events and the pad.
 #include "hl_game.h"
 #include "hl_host_pad.h"
+#include "online/hl_online.h"
 #include "ps2_live_ring.h"
 #include "runtime/gs/hl_gs_live.h"
 #include "runtime/hl_perf.h"
@@ -245,7 +246,8 @@ namespace
         if (shape > screen) // (the screen's width is all there is)
             shape = screen;
         const float game = 4.0f / 3.0f;
-        const float x = shape > game + 0.01f ? game / shape : 1.0f;
+        // (an online match keeps the game's own camera: what it sees must be the same on both phones, whatever their screens)
+        const float x = shape > game + 0.01f && !hl_online::active() ? game / shape : 1.0f;
         hl_game::g_cameraXScale.store(x, std::memory_order_relaxed);
         if (g_gsxSetVideo)
         {
@@ -432,6 +434,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 // The game menu's Controls tab: the one-tap special and what a tap is worth where the game asks to press repeatedly, at once
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetAssist(JNIEnv *, jclass, jint specialOne, jint mashPercent)
 {
+    if (hl_online::active()) // (an online match plays by the game's own rules on both phones: hl_online.cpp)
+        return;
     hl_game::g_specialOn.store(specialOne != 0, std::memory_order_relaxed);
     hl_game::g_mashPercent.store(mashPercent, std::memory_order_relaxed);
 }
@@ -460,6 +464,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     if (std::getenv("HL_VIF_DUMP"))
         mkdir(hl_game::g_vifDumpDir.c_str(), 0775);
     loadSettings(root + "/un5_settings.txt");
+    hl_online::setup(root); // (the app's Online screen wrote a session file: this start is an online match)
     hl_nominum_vu1::setup();
     setenv("HL_METER", "1", 0);
     if (iso.empty())

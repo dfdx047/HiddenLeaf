@@ -1,0 +1,58 @@
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/CD.cpp
+@@ -555,11 +555,26 @@
+ 
+         std::time_t now = std::time(nullptr);
+         std::tm localTm{};
++        // Hidden Leaf: HL_FIXED_CLOCK=<seconds since 1970> (the online match, hl_online.cpp): that moment in UTC, always, so the
++        // two phones' games read the same clock
++        static const char *s_fixed = std::getenv("HL_FIXED_CLOCK");
++        if (s_fixed != nullptr && s_fixed[0] != '\0')
++        {
++            now = static_cast<std::time_t>(std::strtoll(s_fixed, nullptr, 10));
+ #ifdef _WIN32
+-        localtime_s(&localTm, &now);
++            gmtime_s(&localTm, &now);
+ #else
+-        localtime_r(&now, &localTm);
++            gmtime_r(&now, &localTm);
+ #endif
++        }
++        else
++        {
++#ifdef _WIN32
++            localtime_s(&localTm, &now);
++#else
++            localtime_r(&now, &localTm);
++#endif
++        }
+ 
+         // sceCdCLOCK format (BCD fields).
+         clockData[0] = 0;
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -17,6 +17,9 @@
+ extern std::atomic<uint32_t> g_hlMoviesBegun;
+ extern std::atomic<bool> g_hlMoviePlaying;
+ extern std::atomic<uint64_t> g_hlMoviePictureTick;
++// Hidden Leaf: the online match's pads (recomp/android/host/online/hl_online.cpp). While it returns true, the port's buttons (libpad's
++// bits, 1 = pressed) and sticks are the ones it gives, whatever the phone's controllers, the overrides and the test presses said.
++bool (*g_hlPadPortHook)(int port, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint8_t *rx, uint8_t *ry) = nullptr;
+ 
+ namespace ps2_stubs
+ {
+@@ -636,6 +639,14 @@
+                 }
+                 applyAutoPress(state, port, runtime);
+             }
++            if (g_hlPadPortHook != nullptr)
++            {
++                uint16_t held = static_cast<uint16_t>(~state.buttons);
++                if (g_hlPadPortHook(port, &held, &state.lx, &state.ly, &state.rx, &state.ry))
++                {
++                    state.buttons = static_cast<uint16_t>(~held);
++                }
++            }
+ 
+             fillPadStatus(outData, state, portState);
+ 
