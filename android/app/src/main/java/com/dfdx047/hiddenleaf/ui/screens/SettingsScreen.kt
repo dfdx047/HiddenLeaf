@@ -4,6 +4,8 @@ import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -57,6 +59,7 @@ import com.dfdx047.hiddenleaf.ui.theme.Konoha
 import com.dfdx047.hiddenleaf.ui.theme.ThemeMode
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
     val s by vm.engineSettings.collectAsStateWithLifecycle()
@@ -194,7 +197,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val uri = LocalUriHandler.current
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { runCatching { uri.openUri(REPO_URL) } }) {
                     Icon(Icons.Rounded.Code, null, Modifier.size(18.dp))
                     Spacer(Modifier.size(6.dp))
@@ -246,11 +249,13 @@ internal fun StepSlider(label: String, format: (Int) -> String, value: Int, rang
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ChipRow(options: List<Pair<String, Int>>, selected: Int, onSelect: (Int) -> Unit) {
     // the nearest option counts as selected (an aspect written by the engine may be in between)
     val best = options.minByOrNull { kotlin.math.abs(it.second - selected) }?.second
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+    // (wrapped, not scrolled sideways: on a phone held upright a scrolled row hid the last options under the card's edge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         options.forEach { (label, v) ->
             FilterChip(selected = v == best, onClick = { onSelect(v) }, label = { Text(label) })
         }

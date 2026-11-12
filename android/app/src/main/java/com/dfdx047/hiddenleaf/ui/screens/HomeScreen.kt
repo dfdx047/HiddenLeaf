@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dfdx047.hiddenleaf.AppViewModel
 import com.dfdx047.hiddenleaf.R
@@ -195,7 +196,12 @@ fun HomeScreen(vm: AppViewModel) {
 private fun Hero() {
     Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
         val fire = Brush.verticalGradient(listOf(Konoha.ScrollCream, Konoha.ChakraAmber, Konoha.NarutoOrange))
-        Text("HIDDEN LEAF", style = TitleStyle.copy(brush = fire))
+        // one line on a phone held upright too (at 44 sp the name needs about 380 dp)
+        val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 420
+        Text(
+            "HIDDEN LEAF", maxLines = 1, softWrap = false,
+            style = TitleStyle.copy(brush = fire).let { if (narrow) it.copy(fontSize = 34.sp, lineHeight = 38.sp) else it },
+        )
         // Naruto, Sasuke, Lee
         Row(Modifier.padding(top = 4.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             listOf(Konoha.NarutoOrange to 64.dp, Konoha.SasukeBlue to 40.dp, Konoha.LeeGreen to 24.dp).forEach { (c, w) ->

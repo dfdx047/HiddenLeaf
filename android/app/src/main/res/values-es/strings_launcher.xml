@@ -12,6 +12,8 @@
     <string name="ln_more_cheats">Saltar la introducción, desbloquear todo</string>
     <string name="ln_more_debug">Dispositivo, rendimiento, contador de FPS, registros y opciones experimentales</string>
 
+    <string name="ln_cheat_opening">Introducción</string>
+    <string name="ln_cheat_roster">Personajes</string>
     <string name="ln_cheats_sub">Se aplican la próxima vez que se inicie el juego</string>
     <string name="ln_skip_intro_text">Los logos y los tres vídeos de apertura se saltan: se pulsa START por ti hasta el título. La elección de idioma sigue esperándote.</string>
     <string name="ln_unlock_text">Con esta opción activada, todos los personajes y enlaces están abiertos en combate libre.</string>

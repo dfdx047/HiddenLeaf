@@ -42,14 +42,14 @@ fun CheatsScreen(vm: AppViewModel) {
     ) {
         ScreenTitle(stringResource(R.string.ln_nav_cheats), stringResource(R.string.ln_cheats_sub))
 
-        SectionCard(stringResource(R.string.skip_intro), Icons.Rounded.FastForward, accent = Konoha.ChakraBlue) {
+        SectionCard(stringResource(R.string.ln_cheat_opening), Icons.Rounded.FastForward, accent = Konoha.ChakraBlue) {
             // (on by default, as the engine reads it: un5_main.cpp loadSettings)
             ToggleRow(stringResource(R.string.skip_intro), stringResource(R.string.ln_skip_intro_text), (s[EngineSettings.SKIP_INTRO] ?: 1) != 0) {
                 vm.setting(EngineSettings.SKIP_INTRO, if (it) 1 else 0)
             }
         }
 
-        SectionCard(stringResource(R.string.unlock_all), Icons.Rounded.LockOpen, accent = Konoha.ChakraAmber) {
+        SectionCard(stringResource(R.string.ln_cheat_roster), Icons.Rounded.LockOpen, accent = Konoha.ChakraAmber) {
             ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.ln_unlock_text), (s[EngineSettings.UNLOCK_ALL] ?: 0) != 0) { on ->
                 if (on) confirm = true else vm.setting(EngineSettings.UNLOCK_ALL, 0)
             }

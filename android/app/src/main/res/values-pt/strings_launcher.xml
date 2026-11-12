@@ -12,6 +12,8 @@
     <string name="ln_more_cheats">Pular a abertura, desbloquear tudo</string>
     <string name="ln_more_debug">Aparelho, desempenho, contador de FPS, logs e opções experimentais</string>
 
+    <string name="ln_cheat_opening">Abertura</string>
+    <string name="ln_cheat_roster">Personagens</string>
     <string name="ln_cheats_sub">Valem na próxima vez que o jogo abrir</string>
     <string name="ln_skip_intro_text">Os logos e os três filmes da abertura são pulados: o START é apertado por você até o título. A escolha de idioma continua esperando você.</string>
     <string name="ln_unlock_text">Com esta opção ligada, todos os personagens e ligações ficam abertos na luta livre.</string>

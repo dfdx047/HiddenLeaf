@@ -54,7 +54,7 @@ fun DebugScreen(vm: AppViewModel) {
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenTitle(stringResource(R.string.nav_debug), stringResource(R.string.debug_sub))
+        ScreenTitle(stringResource(R.string.nav_debug), stringResource(R.string.ln_more_debug))
 
         SectionCard(stringResource(R.string.debug_device), Icons.Rounded.PhoneAndroid, accent = Konoha.ChakraBlue) {
             val ram = remember {

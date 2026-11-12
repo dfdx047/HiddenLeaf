@@ -43,6 +43,7 @@ import com.dfdx047.hiddenleaf.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -241,22 +242,25 @@ private fun SideScroll(tab: Dest?, go: (Dest) -> Unit) {
             }
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))
             .verticalScroll(rememberScrollState())
-            .padding(vertical = 10.dp),
+            .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(NinjaIcons.Leaf, null, tint = Konoha.LeeGreen, modifier = Modifier.padding(bottom = 8.dp).size(30.dp))
-        Dest.bar.forEach { d -> NavItem(d, tab == d, Modifier.width(80.dp)) { go(d) } }
+        // (the leaf only where the five pages still fit under it: a 1560x720 phone is 360 dp high in landscape)
+        if (LocalConfiguration.current.screenHeightDp >= 420) {
+            Icon(NinjaIcons.Leaf, null, tint = Konoha.LeeGreen, modifier = Modifier.padding(bottom = 8.dp).size(30.dp))
+        }
+        Dest.bar.forEach { d -> NavItem(d, tab == d, Modifier.width(80.dp), pad = 3.dp) { go(d) } }
     }
 }
 
 /** One page of the navigation: its icon on a plate that lights orange when it is the page shown, and its name. */
 @Composable
-private fun NavItem(d: Dest, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun NavItem(d: Dest, selected: Boolean, modifier: Modifier, pad: Dp = 5.dp, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val plate = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
     Column(
-        modifier.clip(plate).clickable(onClick = onClick).padding(vertical = 5.dp),
+        modifier.clip(plate).clickable(onClick = onClick).padding(vertical = pad),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(

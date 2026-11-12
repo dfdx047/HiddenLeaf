@@ -13,6 +13,8 @@
     <string name="ln_more_cheats">Skip the opening, unlock everything</string>
     <string name="ln_more_debug">Device, performance, FPS counter, logs and experimental options</string>
 
+    <string name="ln_cheat_opening">Opening</string>
+    <string name="ln_cheat_roster">Characters</string>
     <string name="ln_cheats_sub">They apply the next time the game starts</string>
     <string name="ln_skip_intro_text">The logos and the three opening movies are skipped: START is pressed for you until the title. The language choice still waits for you.</string>
     <string name="ln_unlock_text">While this is on, every character and link is open in Free Battle.</string>

@@ -56,6 +56,38 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12, tarde: launcher reorganizado (barra de 5, Mais, Trapaças, Depuração), orientação e `gpu_api` no motor
+
+Sem aparelho (só build e capturas do Robolectric). Pedido do dono: menos itens na barra e as opções de teste fora dos Ajustes.
+
+- **Navegação** (`MainActivity.kt`): barra (ou painel lateral em paisagem) com 5 páginas: Início, Online, Controles,
+  Ajustes, Mais. **Mais** (`MoreScreen.kt`) lista Texturas, Mods, Drivers, Trapaças e Depuração; essas páginas têm
+  "← Mais" no topo e o Mais fica aceso nelas; tocar Mais de novo volta à lista. Na barra de baixo cada item ocupa 1/5
+  da largura (antes 74 dp fixos com rolagem lateral); no painel lateral a folha some abaixo de 420 dp de altura (o Mi A3
+  em paisagem tem 360 dp) para os 5 caberem. `MainActivity.EXTRA_PAGE` abre uma página na partida (testes, atalhos).
+- **Online:** `OnlineScreen.kt` aqui é só um marcador para compilar; a versão da sessão do online substitui no merge.
+- **Trapaças** (`CheatsScreen.kt`, nos moldes do Dragon Rage): "Pular a abertura" (`skip_intro`) e "Desbloquear tudo"
+  (`dr_unlock_all`, com confirmação: salvar no jogo grava no cartão e o app não desfaz). Saíram dos Ajustes.
+- **Depuração:** cartão "Opções de teste" com o contador (`meter` 0 a 3: desligado, FPS, FPS e tempo, completo; antes
+  só liga/desliga) e o "Renderizador nativo (experimental)" (`native_render`). Saíram dos Ajustes.
+- **Ajustes:** vídeo (resolução, filtro, proporção), cartão **Tela** com a orientação (Paisagem, Retrato, Automático),
+  desempenho (fps e o **Renderizador** Vulkan/OpenGL ES, de volta), aparência, memory card, sobre. Áudio não entrou: o
+  motor não lê `music`/`effects` (escondidos em `cc6696d` por isso).
+- **Orientação** (`GameActivity.orientationFlag`): `dr_orient` volta a valer: 0 `SENSOR_LANDSCAPE`, 1 `SENSOR_PORTRAIT`,
+  2 `FULL_USER` (segue o sensor e respeita a trava de rotação). A atividade já trata `orientation|screenSize` sozinha
+  (sem reiniciar o motor); o SDL manda `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` e o `un5_main.cpp` refaz a superfície do GS
+  e o `applyVideo` (em retrato a forma da tela fica menor que 4:3, então a imagem fica 4:3). **Não testado:** o giro com
+  o jogo aberto, o controle na tela em retrato, o renderizador nativo em retrato; a ROM do RP5 prende a tela deitada.
+- **`gpu_api` no motor** (`un5_main.cpp` `loadSettings`): `setenv("HL_GS_API", gpu_api == 1 ? "gl" : "vulkan", 0)` (um
+  `HL_GS_API` do `hl_env.txt` ganha). Antes o motor só lia a variável e o jogo era sempre Vulkan. **Não compilado
+  aqui.** Risco conhecido: o GS em OpenGL ES não abre no Mi A3 (`eglChooseConfig() failed: 0x3004`, 11-12 12:00); o texto
+  da opção manda voltar ao Vulkan se o jogo não abrir.
+- **Textos:** novos em `res/values*/strings_launcher.xml` (prefixo `ln_`); o título "HIDDEN LEAF" do Início cabe numa
+  linha em retrato (34 sp abaixo de 420 dp); "pacote" → "pack" na ajuda de texturas (pt) e "Agregar pack" (es), iguais
+  ao botão.
+- **Capturas** (`ScreenshotTest.pages`, `android/build/shots/page_<página>_<pt|es>_<land|port|landfull|portfull>.png`):
+  as 10 páginas em pt e es, 780x360 dp e 360x780 dp (o Mi A3) e janelas altas para ver cada página inteira.
+
 ### 2026-11-12 12:00, dia: nativo × GS do ARMSX2 no Mi A3 a 1x; **o GS passa a ser o padrão**, o nativo vira opção
 
 Pedido do dono: com um bug novo a cada partida no nativo, comparar os caminhos e, se o GS desenhar tudo com desempenho
