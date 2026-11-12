@@ -1,0 +1,55 @@
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -247,11 +247,9 @@
+     // with a larger Z stays as it came). HL_GSCOMPACT=0 turns it off.
+     std::vector<uint8_t> s_compact;
+ 
+-    uint32_t compactVertices(const uint8_t *data, uint32_t size)
++    uint32_t compactVertices(const uint8_t *data, uint32_t size, uint8_t *const outBase)
+     {
+-        if (s_compact.size() < size)
+-            s_compact.resize(size);
+-        uint8_t *out = s_compact.data();
++        uint8_t *out = outBase;
+         uint32_t offset = 0u;
+         while (offset + 16u <= size)
+         {
+@@ -343,7 +341,7 @@
+             }
+             offset += 16u + qwords * 16u;
+         }
+-        return static_cast<uint32_t>(out - s_compact.data());
++        return static_cast<uint32_t>(out - outBase);
+     }
+ 
+     // The runtime's GS parses the stream for its state; this one draws nothing and keeps no memory.
+@@ -391,7 +389,28 @@
+         }();
+         if (path == 1 && s_compactOn)
+         {
+-            sizeBytes = compactVertices(data, sizeBytes);
++            // Straight into the ring when it has the room in one piece: the record's header, then the packet compacted in
++            // place (never longer than it came), the size written once known. The same bytes as writeTransfer, one copy
++            // fewer: ~2.8 MB a frame in a fight went through s_compact and then the ring (2026-11-12).
++            ps2live::RingHeader *h = s_ring.load(std::memory_order_relaxed);
++            const int64_t w = h->writePos;
++            const int64_t r = __atomic_load_n(&h->readPos, __ATOMIC_ACQUIRE);
++            const uint64_t need = 6u + static_cast<uint64_t>(sizeBytes);
++            const uint64_t offset = static_cast<uint64_t>(w) % kCapacity;
++            if (sizeBytes <= (4u << 20) && kCapacity - static_cast<uint64_t>(w - r) >= need && kCapacity - offset >= need && !capFile())
++            {
++                uint8_t *const dst = s_data + offset;
++                const uint32_t n = compactVertices(data, sizeBytes, dst + 6u);
++                dst[0] = kTypeTransfer;
++                dst[1] = type;
++                std::memcpy(dst + 2u, &n, 4u);
++                __atomic_store_n(&h->writePos, w + 6 + static_cast<int64_t>(n), __ATOMIC_RELEASE);
++                endPacket();
++                return;
++            }
++            if (s_compact.size() < sizeBytes)
++                s_compact.resize(sizeBytes);
++            sizeBytes = compactVertices(data, sizeBytes, s_compact.data());
+             data = s_compact.data();
+         }
+         // PCSX2's path buffers hold 9 MB with 1 MB of margin. (Nothing this large was seen: only images could be, and an image

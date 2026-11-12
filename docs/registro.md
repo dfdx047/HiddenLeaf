@@ -59,6 +59,41 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 noite: RG Cube na base, núcleos pela frequência permitida, UNPACK com máscara, drivers
+
+- **Cube liberado pelo desenvolvedor** (base primeiro; mods depois). Base importada pelo launcher como jogador (ISO europeia
+  em `Download`, "Versão europeia verificada"). O Cube fica no perfil de CPU dele (CubeHub "Bateria": A55 ≤1,40 GHz, A76
+  cpu4–6 ≤1,54 GHz, prime cpu7 em `powersave` a 614 MHz); o desenvolvedor pediu para não mudar ("nao muda, deixe como esta").
+- **Núcleos (`0101-pin-by-allowed-speed-and-gs.patch`, `hl_perf.cpp`):** os núcleos rápidos passam a ser escolhidos pela
+  capacidade vezes a frequência que a política deixa (a mínima no `powersave`), os de 60% do melhor para cima; antes a
+  thread do jogo caía no prime a 614 MHz. Com 3 ou mais rápidos o GS do ARMSX2 também vai para eles; com exatamente 3, o
+  `IopWorker` vai para os outros. `HL_PIN_GS=0/1`, `HL_PIN_IOP=fast/rest`.
+  - Cube, luta 2x (`cube_s2` → `cube_pin2` → `cube_pin3`): B 37,1 → 44,7 → **50,0 fps** (mín. 48,0), A 41,8 → 49,5.
+  - Mi A3 (4 A73 rápidos, GS fixado neles): sem diferença (`mia3_pin3` 43,6, `mia3_pin3b` 43,8, `mia3_nogs` 44,0 na B).
+- **VIF1 (Nominum `85726f6`, `NOMINUM_COMMIT` atualizado):** `simpleperf` com pilha DWARF na `VuWorker` do Cube: o laço
+  geral do UNPACK era o ponto mais quente do `Vif1::transfer` (V2-16 com máscara e MODE 1, V1-8 com máscara, V3-32 e V4-16
+  com máscara: 15 de 36 M vetores do dump da luta). Caminho rápido novo para máscara/MODE 1. Testes do Nominum: 106/106 no
+  PC, 130/130 arm64 (qemu). Replay no Cube: VIF1+VU1 12,70 → 11,87 ms/vsync.
+  - Cube luta 2x (`cube_unpk`): VU1 12,6 → 11,7 ms, 50,0 fps. Campanha 2x (`cube_camp_s2` → `cube_camp_unpk`): 49,0 →
+    **49,7 fps**, imagens certas (vídeo).
+  - Mi A3 luta 1x (`mia3_unpk`): A 47,2 → 49,2, B 43,6 → 44,7 (VU1 20,0 → 19,3 ms; EE 19,2 segue).
+- **Anel do GS (`0102-gif-path1-compact-into-ring.patch`, `hl_gs_live.cpp`):** o pacote do PATH1 é compactado direto no anel
+  quando há espaço contíguo (cabeçalho com o tamanho final); mesmos bytes, uma cópia a menos (~2,8 MB por quadro na luta).
+- **Cube 1x/1,75x/2x/3x (GS emulado, VU1 do Nominum):** antes dos núcleos todas ~37 fps na B (EE no prime lento); depois,
+  2x a 50 e 3x a 48,6 (mín. 36,8, GS 17–20 ms). Imagens certas em 3x (seleção, loading, luta, golpe).
+- **Drivers no Cube:** `malisx2` 0.4.0 (de `~/cube-kernel/untrusted`) instalado pelo importador do app: luta 2x igual ao
+  driver da Mali (50,0; GS 14,7 contra 16,1 ms), 3x pior numa rodada com Ougi (42,2); imagens certas. Voltou para o driver
+  do sistema. PanVK: nenhum pacote no disco; não testado.
+- **Turnip no Mi A3** (pedido do desenvolvedor; luta 2x com vídeo, `drv_*`): sistema 39,3/37,2; Qualcomm 891.14 38,3/37,5;
+  Turnip 25.1.0 (Mr. Purple) 29,2/29,4; 27.0.0-R2 (StevenMXZ) 27,6/27,3; T30 (Mr. Purple) 27,9/35,9; 26.0.0-R8 (K11MCH1)
+  não abre ("only claims support for Vulkan 1.0" na Adreno 610). Imagens certas com todos os que abrem. Turnip é mais lento
+  na 610. A seleção voltou para o 891.14 (a que estava). Os pacotes vieram pelo `gh` (a API do GitHub estava sem consultas
+  neste IP; o app mostrou a mensagem certa).
+- **Driver que não abre o GS:** antes o jogo fechava calado. Agora o motor grava `gs_failed.txt` e o launcher volta para o
+  driver do sistema e mostra "O driver não funcionou" (com o log salvo). Testado no Mi A3 com o R8, pelo JOGAR.
+- **Tela de drivers:** a linha inteira escolhe (antes só o círculo). Testado no Mi A3.
+- APK: `build/HiddenLeaf-20261112-cube.apk`.
+
 ### 2026-11-12 20:00, noite: a VU1 do Nominum ligada por padrão; campanha e A35 com a thread do IOP
 
 - **Achado:** o app não definia `NOMINUM_VU1`: quem joga rodava a VU1 do runtime, e todas as rotas de teste desde 11-09

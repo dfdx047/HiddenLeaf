@@ -392,6 +392,8 @@
     <string name="online_dragon_version">O serviço Dragon Net ainda não aceita o netcode desta versão: ele é atualizado pelo responsável logo depois de um lançamento. Enquanto isso dá para jogar contra PC (Ajustes → Online) ou por conexão direta.</string>
     <string name="fail_iso_title">Não foi possível instalar o jogo desta ISO</string>
     <string name="fail_driver_title">Não foi possível instalar o driver</string>
+    <string name="fail_driver_run_title">O driver não funcionou</string>
+    <string name="driver_gs_failed">O jogo não conseguiu abrir os gráficos com %1$s nesta GPU (ele pode ser feito para outra Adreno). O driver do sistema voltou; dá para escolher outro em Drivers.</string>
     <string name="fail_mod_title">Não foi possível instalar o mod</string>
     <string name="fail_update_title">Não foi possível baixar a atualização</string>
     <string name="online_modes_title">Dois tipos de online</string>

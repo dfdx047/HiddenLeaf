@@ -660,6 +660,14 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
         pthread_setname_np(pthread_self(), "CPU Thread");
         const int code = gsxRun(&a);
         std::fprintf(stderr, "un5: the GS ended (%d)\n", code);
+        // A custom GPU driver the GS could not open a device with (one made for another Adreno, a Vulkan too old): the
+        // launcher reads this, goes back to the system's driver and says so (otherwise the game just closed, 2026-11-12)
+        if (code != 0 && !driverLib.empty())
+            if (FILE *f = std::fopen((root + "/gs_failed.txt").c_str(), "w"))
+            {
+                std::fprintf(f, "%s\n", driverDir.c_str());
+                std::fclose(f);
+            }
         ended = true;
     });
 

@@ -40,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,13 +89,14 @@ fun DriversScreen(vm: AppViewModel) {
         }
 
         SectionCard(stringResource(R.string.drivers_installed), NinjaIcons.Bolt, accent = Konoha.ChakraBlue) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = chosen == null, onClick = { vm.selectDriver(null) })
+            // (the whole row chooses, not only the circle)
+            Row(Modifier.selectable(selected = chosen == null, role = Role.RadioButton) { vm.selectDriver(null) }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = chosen == null, onClick = null, modifier = Modifier.padding(14.dp))
                 Text(stringResource(R.string.gpu_driver_system), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             }
             list.forEach { d ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = chosen == d.id, onClick = { vm.selectDriver(d.id) })
+                Row(Modifier.selectable(selected = chosen == d.id, role = Role.RadioButton) { vm.selectDriver(d.id) }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = chosen == d.id, onClick = null, modifier = Modifier.padding(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (d.version.isNotEmpty()) {

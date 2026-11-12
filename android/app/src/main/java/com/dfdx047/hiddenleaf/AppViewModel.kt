@@ -222,6 +222,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val lastRunLog: StateFlow<SavedLog?> = _lastRunLog.asStateFlow()
 
     fun checkLastRun() = viewModelScope.launch(Dispatchers.IO) {
+        // the GS could not open a device with the chosen driver (the engine leaves gs_failed.txt): back to the system's
+        val gsFailed = java.io.File(paths.root, "gs_failed.txt")
+        if (gsFailed.exists()) {
+            val name = drivers.selected()?.name
+            runCatching { gsFailed.delete() }
+            if (name != null) {
+                ActivityLog.fail("driver", "the GS could not start with $name: back to the system's driver")
+                drivers.select(null)
+                _driver.value = null
+                failed(R.string.fail_driver_run_title, str(R.string.driver_gs_failed, name))
+                return@launch
+            }
+        }
         runCatching { LastRun.check(paths) }.getOrNull()?.let {
             ActivityLog.fail("game", "the last run ended badly: ${it.problem}: ${it.detail}")
             _lastRunLog.value = autoLog()

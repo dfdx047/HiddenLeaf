@@ -1,0 +1,85 @@
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -132,7 +132,7 @@
+                             continue;
+                         }
+                     }
+-                    if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0 || std::strcmp(comm, "IopWorker\n") == 0))
++                    if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0 || std::strcmp(comm, "IopWorker\n") == 0 || std::strcmp(comm, "GS\n") == 0))
+                     {
+                         cpu_set_t set;
+                         CPU_ZERO(&set);
+@@ -153,13 +153,71 @@
+                             lowest = std::min(lowest, capacity[count]);
+                             highest = std::max(highest, capacity[count]);
+                         }
++                        // the fast cores by what they may run at now, not by their capacity alone: capacity x the frequency the
++                        // policy allows (its lowest under powersave), the ones at 60% of the best or more. On the RG Cube with a
++                        // battery profile the prime A76 is on powersave at 614 MHz: the game thread landed on it (2026-11-12).
++                        double speed[32] = {}, best = 0.0;
+                         for (int i = 0; i < count; ++i)
+-                            if (capacity[i] > lowest)
++                        {
++                            const auto readLong = [](const char *fmt, int cpu) -> double
++                            {
++                                char path[128];
++                                std::snprintf(path, sizeof(path), fmt, cpu);
++                                FILE *f = std::fopen(path, "r");
++                                long v = 0;
++                                if (f)
++                                {
++                                    if (std::fscanf(f, "%ld", &v) != 1)
++                                        v = 0;
++                                    std::fclose(f);
++                                }
++                                return static_cast<double>(v);
++                            };
++                            double top = readLong("/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
++                            double allowed = readLong("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
++                            char gpath[128], gov[32] = {};
++                            std::snprintf(gpath, sizeof(gpath), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", i);
++                            if (FILE *g = std::fopen(gpath, "r"))
++                            {
++                                if (!std::fgets(gov, sizeof(gov), g))
++                                    gov[0] = 0;
++                                std::fclose(g);
++                            }
++                            if (std::strncmp(gov, "powersave", 9) == 0)
++                                allowed = readLong("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_min_freq", i);
++                            speed[i] = top > 0.0 && allowed > 0.0 ? capacity[i] * std::min(allowed / top, 1.0) : capacity[i];
++                            best = std::max(best, speed[i]);
++                        }
++                        for (int i = 0; i < count; ++i)
++                            if (capacity[i] > lowest && speed[i] >= 0.6 * best)
+                                 CPU_SET(i, &set);
++                        // PCSX2's GS on the fast cores too when there are three or more (the EE, the VU1 and the GS each fill
++                        // one in a fight); with three, the IOP (a quarter of a core, and it runs ahead) goes to the others.
++                        // RG Cube, battery profile, 2x: the GS left free landed on the A55s at 24-30 ms a frame (2026-11-12).
++                        // HL_PIN_GS=0/1 and HL_PIN_IOP=fast/rest override.
++                        const int nfast = CPU_COUNT(&set);
++                        const char *pinGs = std::getenv("HL_PIN_GS");
++                        const char *pinIop = std::getenv("HL_PIN_IOP");
++                        if (std::strcmp(comm, "GS\n") == 0 && !(pinGs ? pinGs[0] == '1' : nfast >= 3))
++                            CPU_ZERO(&set);
++                        if (std::strcmp(comm, "IopWorker\n") == 0 && (pinIop ? pinIop[0] == 'r' : nfast == 3))
++                        {
++                            cpu_set_t rest;
++                            CPU_ZERO(&rest);
++                            for (int i = 0; i < count; ++i)
++                                if (!CPU_ISSET(i, &set))
++                                    CPU_SET(i, &rest);
++                            if (CPU_COUNT(&rest) > 0)
++                                set = rest;
++                        }
+                         if (CPU_COUNT(&set) > 0)
+                         {
+                             const int a = sched_setaffinity(static_cast<pid_t>(std::atoi(entry->d_name)), sizeof(set), &set);
+-                            std::fprintf(stderr, "[perf] pin %s to the cores above capacity %d: %d\n", comm, lowest, a);
++                            char list[96] = {};
++                            for (int i = 0, n = 0; i < count && n < 90; ++i)
++                                if (CPU_ISSET(i, &set))
++                                    n += std::snprintf(list + n, sizeof(list) - n, "%s%d", n ? "," : "", i);
++                            std::fprintf(stderr, "[perf] pin %.*s to cpu %s: %d\n", static_cast<int>(std::strlen(comm)) - 1, comm, list, a);
+                         }
+                     }
+                     ++done;
