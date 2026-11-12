@@ -59,6 +59,36 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 18:00, noite: o IOP e o SPU2 numa thread própria (patch `0100`), ligado por padrão no jogo base
+
+- **Como:** `advanceIopEeCycles` põe o lote de ciclos numa fila (anel de 1024 itens) e volta na hora; a thread
+  `IopWorker` roda os lotes na mesma ordem e com o mesmo tamanho. O DMA do SIF do EE para o IOP (`writeIopMemory`,
+  `notifyIopSifTransfer`) entra na mesma fila, então chega ao IOP quando o relógio dele está onde o do EE estava (como no
+  modo serial). O que o IOP faz no lado do EE (escritas na RAM do EE: `sceSifSetDma`, respostas de RPC; comandos SIF, que
+  rodam os tratadores do EE) fica guardado e é feito na thread do jogo na próxima entrega, em ordem. O resto (RPC, leitura
+  da RAM do IOP, módulos, reset) espera a fila esvaziar antes (`iopSync`), e só uma thread roda o IOP de cada vez.
+  `HL_IOP_THREAD=0` volta ao modo antigo; `HL_IOP_LAG` (padrão 16000000 ciclos do EE), `HL_IOP_NAP_US` (300),
+  `HL_IOP_SPIN_US` (0), `HL_IOP_STATS=1` (de onde vem o tempo, a cada 100000 entregas). `[perf]` ganhou `iopw` (CPU da
+  thread). `hl_perf`: nice -10 e núcleos grandes também para a `IopWorker` (`HL_PIN=x`: o quarto núcleo grande).
+- **O caminho até aí** (Naruto x Naruto, `fstats.py`, fase B; base `perf_chain` 39,1 fps):
+  - um lote de folga, o EE esperando o anterior: 39,8 (`iopw1`); o IOP vem em rajadas: 1 lote em 11 levava ~140 µs a mais;
+  - fila com até 65536 ciclos: 42,9 (`iopq_st`); 83% dos ciclos do EE chegam em lotes de ~3,3 milhões: o EE ocioso pula
+    até o vsync (`waitForEvent` conta tudo de uma vez) e o IOP emula esse tempo inteiro;
+  - folga de 16 milhões: a espera passou toda para o DMA do SIF (~10 por quadro, 860 ms a cada 100 mil entregas): 42,1;
+  - o DMA do SIF na fila em vez de sincronizar: espera do jogo pelo IOP 0,0 ms; 43,6 (`iop_q16m`);
+  - a thread dormindo 300 µs com a fila vazia em vez de girar: igual (43,1–43,8, ruído); fica o cochilo (menos núcleo
+    gasto). Girar por 20 µs e acordar a cada lote: 36,3 (`iopq_spin20`). `HL_PIN=x`: sem ganho.
+- **Resultados (Mi A3, GS, 1x, fases A / B):** Naruto 45,9 / 39,1 → 48,9 / 44,1 (`iop_default`, já pelo padrão); Neji
+  39,8 / 41,5 → 46,7 / 44,1 (`iop_full_neji`); Kakashi 40,4 / 40,2 → 44,6 / 43,7 (`iop_full_kakashi`).
+- **Conferido:** rotas completas de Neji e Kakashi com vídeo (abertura e filme com som, menus, seleção, lutas, o Ougi do Neji
+  inteiro, volta à seleção, a segunda luta do Kakashi); a 1ª luta começa no mesmo vsync do serial (6229, 6209; no
+  Naruto 6103 ou 6107 conforme a rodada: a IA joga diferente depois, o computador às vezes cai antes). Som gravado com
+  `HL_SPU2_REC` nas duas versões (`mia3/snd_serial`, `snd_iop`, `snd.wav`): nenhum buraco com som em volta, o mesmo perfil
+  de volume até a luta.
+- **Não testado:** mods (ficam no modo serial: `#ifndef HL_PACK_ID` no `un5_main.cpp`), campanha, outros aparelhos.
+- **O que segura agora:** a thread do jogo é o EE (~19 ms na fase B) mais ~2 ms esperando a VU1; a `VuWorker` está em
+  ~20 ms (Nominum `Vif1::transfer` + `recBlock`). Para 50 na luta falta baixar as duas.
+
 ### 2026-11-12 16:00, tarde: menu lateral no Mi A3 e o EE 3 ms mais leve na luta (patch `0099`)
 
 - **Menu lateral** (`lab/side-panel`, `07aee1e`, juntado): no aparelho a primeira abertura derrubava o app

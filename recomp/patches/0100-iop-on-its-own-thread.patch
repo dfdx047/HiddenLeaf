@@ -1,0 +1,684 @@
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -33,6 +33,9 @@
+ #include <atomic>
+ #include <unistd.h>
+ #include <thread>
++#include <vector>
++#include <mutex>
++#include <condition_variable>
+ #include <unordered_map>
+ #include <sstream>
+ 
+@@ -589,6 +592,392 @@
+     s_hasUploadedFrame = true;
+ }
+ 
++
++// Hidden Leaf: HL_IOP_THREAD=1, the IOP (and the SPU2 it drives) on a thread of its own. The EE hands the IOP each batch
++// of cycles (advanceIopEeCycles) through a queue and goes on at once; the IOP runs the batches meanwhile, the same batches
++// in the same order, on its own core. The EE waits only when the IOP is more than HL_IOP_LAG EE cycles behind (default
++// 65536, ~220 us of the PS2), and anything the EE asks of the IOP (RPC, SIF DMA into its RAM, its RAM, modules) first
++// waits for the queue to be empty (iopSync), so the IOP is where the EE is, and only one thread ever runs it. What the
++// IOP does to the EE's side (writes to EE RAM: sceSifSetDma, RPC replies; SIF commands, whose EE handlers are guest
++// code) is kept and done on the game thread at the next handover, in order.
++// Why: on the Mi A3 in a fight the IOP and the SPU2 took ~5 ms of each vsync of the game thread, the one that sets the
++// pace; the IOP's batches come in bursts (one in 11 took ~140 us more than the EE's), so one batch of slack was not
++// enough (2026-11-12).
++namespace hl_iopw
++{
++    namespace
++    {
++        thread_local bool t_worker = false;
++        bool s_started = false;
++        std::thread s_thread;
++        ps2x::iop::IopSubsystem *s_iop = nullptr;
++        std::atomic<bool> s_quit{false};
++        std::atomic<bool> s_sleeping{false};
++        std::mutex s_sleepMutex;
++        std::condition_variable s_sleepCv;
++
++        // the batches, and what the EE sends the IOP between them (SIF DMA into its RAM): written by the EE at s_head,
++        // done by the worker from s_tail, in order, so each arrives when the IOP's clock is where the EE's was
++        struct Item
++        {
++            uint8_t kind = 0; // 0 cycles, 1 write to IOP RAM, 2 SIF transfer notice
++            uint64_t cycles = 0;
++            uint32_t address = 0;
++            std::vector<uint8_t> data;
++            ps2x::iop::SifTransfer transfer{};
++        };
++        constexpr uint32_t kRing = 1024u;
++        Item s_ring[kRing];
++        std::atomic<uint32_t> s_head{0}, s_tail{0};
++        std::atomic<uint64_t> s_queued{0}; // EE cycles posted and not yet run
++        uint64_t s_lag = 16000000u; // (HL_IOP_LAG; 65536 and 262144 left the EE waiting after each idle skip, 2026-11-12)
++
++        struct Op
++        {
++            uint8_t kind; // 0 write, 1 zero, 2 SIF command
++            uint32_t address;
++            uint32_t size;
++            uint32_t at;
++        };
++        // (the worker adds while the EE takes: a small lock, taken a few hundred times a frame)
++        std::mutex s_opMutex;
++        std::vector<Op> s_ops;
++        std::vector<uint8_t> s_bytes;
++        std::atomic<uint32_t> s_opCount{0};
++
++        // HL_IOP_STATS=1: every 100000 handovers, where the game thread's IOP time goes
++        struct Stats
++        {
++            uint64_t bigPosts = 0, bigCycles = 0, cycles = 0;
++            uint64_t posts = 0, waits = 0, waitTicks = 0, syncs = 0, syncTicks = 0, rpcs = 0, rpcTicks = 0, xfers = 0, xferTicks = 0, ops = 0, opTicks = 0;
++        } s_stats;
++        std::atomic<uint64_t> s_runTicks{0};
++        std::atomic<uint64_t> s_runMax{0}, s_runMaxCycles{0}, s_slowRuns{0};
++        bool statsOn()
++        {
++            static const bool on = std::getenv("HL_IOP_STATS") != nullptr;
++            return on;
++        }
++
++        inline uint64_t ticks()
++        {
++#if defined(__aarch64__)
++            uint64_t v;
++            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(v));
++            return v;
++#else
++            return static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
++#endif
++        }
++        inline uint64_t ticksPerUs()
++        {
++#if defined(__aarch64__)
++            uint64_t f;
++            __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
++            return std::max<uint64_t>(f / 1000000u, 1u);
++#else
++            return std::max<uint64_t>(static_cast<uint64_t>(std::chrono::steady_clock::period::den) / std::chrono::steady_clock::period::num / 1000000u, 1u);
++#endif
++        }
++        inline void relax()
++        {
++#if defined(__aarch64__)
++            __asm__ volatile("yield");
++#elif defined(__x86_64__) || defined(__i386__)
++            __builtin_ia32_pause();
++#endif
++        }
++
++        void loop()
++        {
++            t_worker = true;
++            ThreadNaming::SetCurrentThreadName("IopWorker");
++            // With the queue empty: HL_IOP_SPIN_US of spinning (default 0), then a nap of HL_IOP_NAP_US (default 300) that the
++            // EE does not cut short unless it waits for the IOP. The IOP needs ~6 ms of the 20 of a vsync: spinning for the
++            // rest took the fourth big core of the Mi A3 from the others (the EE 1-3 ms slower a vsync, 2026-11-12).
++            static const uint64_t spinTicks = []
++            {
++                const char *v = std::getenv("HL_IOP_SPIN_US");
++                return (v ? std::strtoull(v, nullptr, 10) : 0ull) * ticksPerUs();
++            }();
++            static const auto nap = []
++            {
++                const char *v = std::getenv("HL_IOP_NAP_US");
++                return std::chrono::microseconds(v ? std::strtoull(v, nullptr, 10) : 300ull);
++            }();
++            for (;;)
++            {
++                uint64_t since = 0;
++                uint32_t tail = s_tail.load(std::memory_order_relaxed);
++                while (s_head.load(std::memory_order_acquire) == tail)
++                {
++                    if (s_quit.load(std::memory_order_relaxed))
++                        return;
++                    if (!since)
++                        since = ticks();
++                    if (ticks() - since < spinTicks)
++                    {
++                        relax();
++                        continue;
++                    }
++                    std::unique_lock<std::mutex> lock(s_sleepMutex);
++                    s_sleeping.store(true, std::memory_order_seq_cst);
++                    if (s_head.load(std::memory_order_seq_cst) == tail && !s_quit.load(std::memory_order_relaxed))
++                        s_sleepCv.wait_for(lock, nap);
++                    s_sleeping.store(false, std::memory_order_relaxed);
++                    since = 0;
++                }
++                Item &item = s_ring[tail % kRing];
++                if (item.kind != 0u)
++                {
++                    if (item.kind == 1u)
++                        (void)s_iop->writeMemory(item.address, item.data.data(), item.data.size());
++                    else
++                        s_iop->onSifTransfer(item.transfer);
++                    s_tail.store(tail + 1u, std::memory_order_release);
++                    continue;
++                }
++                const uint64_t cycles = item.cycles;
++                const uint64_t t0 = statsOn() ? ticks() : 0u;
++                s_iop->runEeCycles(cycles);
++                if (t0)
++                {
++                    const uint64_t d = ticks() - t0;
++                    s_runTicks.fetch_add(d, std::memory_order_relaxed);
++                    if (d > s_runMax.load(std::memory_order_relaxed))
++                    {
++                        s_runMax.store(d, std::memory_order_relaxed);
++                        s_runMaxCycles.store(cycles, std::memory_order_relaxed);
++                    }
++                    if (d > 500u * ticksPerUs())
++                        s_slowRuns.fetch_add(1u, std::memory_order_relaxed);
++                }
++                s_queued.fetch_sub(cycles, std::memory_order_relaxed);
++                s_tail.store(tail + 1u, std::memory_order_release);
++            }
++        }
++
++        void push(uint8_t kind, uint32_t address, const void *source, size_t size)
++        {
++            std::lock_guard<std::mutex> lock(s_opMutex);
++            const uint32_t at = static_cast<uint32_t>(s_bytes.size());
++            if (source)
++                s_bytes.insert(s_bytes.end(), static_cast<const uint8_t *>(source), static_cast<const uint8_t *>(source) + size);
++            s_ops.push_back({kind, address, static_cast<uint32_t>(size), at});
++            s_opCount.store(static_cast<uint32_t>(s_ops.size()), std::memory_order_release);
++        }
++
++        // The game thread: what the IOP left for the EE's side, done here in order
++        void apply(PS2IopHostAdapter &host)
++        {
++            if (s_opCount.load(std::memory_order_acquire) == 0u)
++                return;
++            static std::vector<Op> ops;
++            static std::vector<uint8_t> bytes;
++            static int depth = 0;
++            // (a SIF handler that calls the IOP back syncs again: the newer ops wait for the outer call to finish)
++            if (depth)
++                return;
++            ++depth;
++            const uint64_t t0 = statsOn() ? ticks() : 0u;
++            {
++                std::lock_guard<std::mutex> lock(s_opMutex);
++                ops.swap(s_ops);
++                bytes.swap(s_bytes);
++                s_opCount.store(0u, std::memory_order_relaxed);
++            }
++            s_stats.ops += ops.size();
++            for (const Op &op : ops)
++            {
++                if (op.kind == 0u)
++                    host.writeGuest(op.address, bytes.data() + op.at, op.size);
++                else if (op.kind == 1u)
++                    host.zeroGuest(op.address, op.size);
++                else
++                    host.sendSifCommand(op.address, bytes.data() + op.at, op.size);
++            }
++            ops.clear();
++            bytes.clear();
++            if (t0)
++                s_stats.opTicks += ticks() - t0;
++            --depth;
++        }
++
++        void wake()
++        {
++            if (s_sleeping.load(std::memory_order_seq_cst))
++            {
++                std::lock_guard<std::mutex> lock(s_sleepMutex);
++                s_sleepCv.notify_one();
++            }
++        }
++
++        void waitUntil(uint64_t maxQueued, uint64_t &count, uint64_t &sum)
++        {
++            if (s_queued.load(std::memory_order_acquire) <= maxQueued && (maxQueued || s_head.load(std::memory_order_relaxed) == s_tail.load(std::memory_order_acquire)))
++                return;
++            hl_perf::Scope waiting(hl_perf::kIop);
++            const uint64_t t0 = statsOn() ? ticks() : 0u;
++            wake();
++            if (maxQueued)
++                while (s_queued.load(std::memory_order_acquire) > maxQueued)
++                    relax();
++            else
++                while (s_head.load(std::memory_order_relaxed) != s_tail.load(std::memory_order_acquire))
++                    relax();
++            if (t0)
++            {
++                ++count;
++                sum += ticks() - t0;
++            }
++        }
++    }
++
++    bool onWorker() { return t_worker; }
++    void deferWrite(uint32_t address, const void *source, size_t size) { push(0, address, source, size); }
++    void deferZero(uint32_t address, size_t size) { push(1, address, nullptr, size); }
++    void deferSifCommand(uint32_t commandId, const void *packet, size_t packetSize) { push(2, commandId, packet, packetSize); }
++
++    bool enabled()
++    {
++        static const bool on = []
++        {
++            const char *v = std::getenv("HL_IOP_THREAD");
++            return v && v[0] == '1';
++        }();
++        return on;
++    }
++
++    // The game thread, before anything that reads or changes the IOP: the queue run, the IOP's EE-side work done
++    void wait(PS2IopHostAdapter &host)
++    {
++        if (!s_started || t_worker)
++            return;
++        waitUntil(0u, s_stats.syncs, s_stats.syncTicks);
++        apply(host);
++    }
++
++    void start(ps2x::iop::IopSubsystem *iop)
++    {
++        s_iop = iop;
++        if (const char *v = std::getenv("HL_IOP_LAG"))
++            s_lag = std::max<uint64_t>(std::strtoull(v, nullptr, 10), 1u);
++        s_quit.store(false);
++        s_thread = std::thread(loop);
++        s_started = true;
++        std::fprintf(stderr, "[iop] the IOP on its own thread (HL_IOP_THREAD=1), up to %llu EE cycles behind\n", static_cast<unsigned long long>(s_lag));
++    }
++
++    void report()
++    {
++        if (!statsOn() || ++s_stats.posts % 100000u)
++            return;
++        const double tpm = static_cast<double>(ticksPerUs()) * 1000.0;
++        std::fprintf(stderr, "[iop] %llu handovers: lag waits %llu (%.1f ms), syncs %llu (%.1f ms), RPC %llu (%.1f ms), SIF in %llu (%.1f ms), EE-side ops %llu (%.1f ms), worker ran %.1f ms\n",
++                     (unsigned long long)s_stats.posts, (unsigned long long)s_stats.waits, s_stats.waitTicks / tpm,
++                     (unsigned long long)s_stats.syncs, s_stats.syncTicks / tpm,
++                     (unsigned long long)s_stats.rpcs, s_stats.rpcTicks / tpm, (unsigned long long)s_stats.xfers, s_stats.xferTicks / tpm,
++                     (unsigned long long)s_stats.ops, s_stats.opTicks / tpm, s_runTicks.exchange(0) / tpm);
++        std::fprintf(stderr, "[iop]   batches over 64k cycles %llu (%llu of %llu cycles), worker runs over 0.5 ms %llu, longest %.2f ms (%llu cycles)\n",
++                     (unsigned long long)s_stats.bigPosts, (unsigned long long)s_stats.bigCycles, (unsigned long long)s_stats.cycles,
++                     (unsigned long long)s_slowRuns.exchange(0), s_runMax.exchange(0) / tpm, (unsigned long long)s_runMaxCycles.load());
++        s_stats = {};
++    }
++    struct Timed
++    {
++        uint64_t *count, *sum, t0;
++        Timed(uint64_t &c, uint64_t &t) : count(&c), sum(&t), t0(statsOn() ? ticks() : 0u) {}
++        ~Timed()
++        {
++            if (t0)
++            {
++                ++*count;
++                *sum += ticks() - t0;
++            }
++        }
++    };
++
++    // The game thread: room for one more item at the head
++    Item &slot()
++    {
++        if (s_head.load(std::memory_order_relaxed) - s_tail.load(std::memory_order_acquire) >= kRing)
++        {
++            hl_perf::Scope waiting(hl_perf::kIop);
++            wake();
++            while (s_head.load(std::memory_order_relaxed) - s_tail.load(std::memory_order_acquire) >= kRing)
++                relax();
++        }
++        return s_ring[s_head.load(std::memory_order_relaxed) % kRing];
++    }
++    void publish()
++    {
++        // (no wake: the worker comes back from its nap by itself; the EE wakes it only when it waits, in waitUntil)
++        s_head.store(s_head.load(std::memory_order_relaxed) + 1u, std::memory_order_seq_cst);
++    }
++    bool queuing() { return s_started && !t_worker; }
++    // EE -> IOP SIF DMA: the bytes, for the IOP to take at its time
++    void queueWrite(uint32_t address, const void *source, size_t size)
++    {
++        Item &item = slot();
++        item.kind = 1u;
++        item.cycles = 0u;
++        item.address = address;
++        item.data.assign(static_cast<const uint8_t *>(source), static_cast<const uint8_t *>(source) + size);
++        publish();
++    }
++    void queueTransfer(const ps2x::iop::SifTransfer &transfer)
++    {
++        Item &item = slot();
++        item.kind = 2u;
++        item.cycles = 0u;
++        item.transfer = transfer;
++        publish();
++    }
++
++    // The game thread: a batch for the IOP
++    void post(PS2IopHostAdapter &host, uint64_t cycles)
++    {
++        report();
++        if (statsOn())
++        {
++            s_stats.cycles += cycles;
++            if (cycles > 65536u)
++            {
++                ++s_stats.bigPosts;
++                s_stats.bigCycles += cycles;
++            }
++        }
++        apply(host);
++        // (the queue has room for 1024 batches; the lag in cycles is the real limit)
++        const uint64_t room = s_lag > cycles ? s_lag - cycles : 0u;
++        if (room == 0u)
++            waitUntil(0u, s_stats.waits, s_stats.waitTicks);
++        else
++            waitUntil(room, s_stats.waits, s_stats.waitTicks);
++        Item &item = slot();
++        item.kind = 0u;
++        item.cycles = cycles;
++        s_queued.fetch_add(cycles, std::memory_order_release);
++        publish();
++    }
++
++    void stop()
++    {
++        if (!s_started)
++            return;
++        s_quit.store(true);
++        {
++            std::lock_guard<std::mutex> lock(s_sleepMutex);
++            s_sleepCv.notify_one();
++        }
++        if (s_thread.joinable())
++            s_thread.join();
++        s_started = false;
++    }
++}
++
++#define HL_IOP_SYNC() hl_iopw::wait(*m_iopHost)
++
+ PS2Runtime::PS2Runtime()
+ {
+     m_iopHost = std::make_unique<PS2IopHostAdapter>(*this);
+@@ -641,6 +1030,7 @@
+     try
+     {
+         requestStop();
++        hl_iopw::stop();
+         m_iopSubsystem.reset();
+         m_iopHost.reset();
+ #if defined(PLATFORM_VITA)
+@@ -678,34 +1068,41 @@
+ 
+ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModule(std::string_view path, const void *arguments, uint32_t argumentSize)
+ {
++    HL_IOP_SYNC();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->loadModule(path, arguments, argumentSize);
+ }
+ 
+ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+ {
++    HL_IOP_SYNC();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->loadModuleBuffer(guestAddress, arguments, argumentSize);
+ }
+ 
+ bool PS2Runtime::stopIopModule(int32_t moduleId, int32_t *result)
+ {
++    HL_IOP_SYNC();
+     auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
+     return m_iopSubsystem->stopModule(moduleId, result);
+ }
+ 
+ ps2x::iop::RpcAbi PS2Runtime::selectIopRpcAbi(const ps2x::iop::RpcAbiRequest &request) const
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem->selectRpcAbi(request);
+ }
+ 
+ bool PS2Runtime::canBindIopRpc(uint32_t sid) const noexcept
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem->canBindRpc(sid);
+ }
+ 
+ ps2x::iop::RpcResult PS2Runtime::handleIopRpc(uint8_t *rdram, R5900Context *ctx, ps2x::iop::RpcRequest request)
+ {
++    hl_iopw::Timed timed(hl_iopw::s_stats.rpcs, hl_iopw::s_stats.rpcTicks);
++    HL_IOP_SYNC();
+     hl_perf::Scope iopScope(hl_perf::kIop);
+     auto scope = m_iopHost->enterCall(ctx, rdram);
+     request.callToken = scope.token();
+@@ -714,6 +1111,13 @@
+ 
+ void PS2Runtime::notifyIopSifTransfer(uint8_t *rdram, const ps2x::iop::SifTransfer &transfer)
+ {
++    hl_iopw::Timed timed(hl_iopw::s_stats.xfers, hl_iopw::s_stats.xferTicks);
++    if (hl_iopw::queuing())
++    {
++        hl_iopw::queueTransfer(transfer);
++        return;
++    }
++    HL_IOP_SYNC();
+     hl_perf::Scope iopScope(hl_perf::kIop);
+     auto scope = m_iopHost->enterCall(nullptr, rdram);
+     m_iopSubsystem->onSifTransfer(transfer);
+@@ -721,42 +1125,64 @@
+ 
+ void PS2Runtime::advanceIopEeCycles(uint64_t eeCycles) noexcept
+ {
++    if (hl_iopw::enabled())
++    {
++        if (!hl_iopw::s_started)
++            hl_iopw::start(m_iopSubsystem.get());
++        hl_iopw::post(*m_iopHost, eeCycles);
++        return;
++    }
+     hl_perf::Scope iopScope(hl_perf::kIop);
+     m_iopSubsystem->runEeCycles(eeCycles);
+ }
+ 
+ void PS2Runtime::resetIop()
+ {
++    HL_IOP_SYNC();
+     m_iopSubsystem->reset();
+ }
+ 
+ ps2x::iop::DebugSnapshot PS2Runtime::iopDebugSnapshot() const
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem->debugSnapshot();
+ }
+ 
+ uint32_t PS2Runtime::allocateIopMemory(uint32_t size, uint32_t alignment)
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem ? m_iopSubsystem->allocateMemory(size, alignment) : 0u;
+ }
+ 
+ bool PS2Runtime::freeIopMemory(uint32_t address)
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem && m_iopSubsystem->freeMemory(address);
+ }
+ 
+ bool PS2Runtime::readIopMemory(uint32_t address, void *destination, size_t size) const
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem && m_iopSubsystem->readMemory(address, destination, size);
+ }
+ 
+ bool PS2Runtime::writeIopMemory(uint32_t address, const void *source, size_t size)
+ {
++    if (hl_iopw::queuing())
++    {
++        if (!m_iopSubsystem->isMemoryRange(address, size))
++            return false;
++        if (size)
++            hl_iopw::queueWrite(address, source, size);
++        return true;
++    }
++    HL_IOP_SYNC();
+     return m_iopSubsystem && m_iopSubsystem->writeMemory(address, source, size);
+ }
+ 
+ bool PS2Runtime::zeroIopMemory(uint32_t address, size_t size)
+ {
++    HL_IOP_SYNC();
+     return m_iopSubsystem && m_iopSubsystem->zeroMemory(address, size);
+ }
+ 
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -159,6 +159,11 @@
+     {
+         return false;
+     }
++    if (size != 0 && hl_iopw::onWorker())
++    {
++        hl_iopw::deferWrite(address, source, size);
++        return true;
++    }
+     if (size != 0)
+     {
+         uint8_t *const rdram = m_activeRdram ? m_activeRdram : m_runtime.memory().getRDRAM();
+@@ -175,6 +180,11 @@
+     {
+         return false;
+     }
++    if (size != 0 && hl_iopw::onWorker())
++    {
++        hl_iopw::deferZero(address, size);
++        return true;
++    }
+     if (size != 0)
+     {
+         uint8_t *const rdram = m_activeRdram ? m_activeRdram : m_runtime.memory().getRDRAM();
+@@ -539,6 +549,12 @@
+                                        const void *packet,
+                                        size_t packetSize)
+ {
++    if (hl_iopw::onWorker())
++    {
++        // (the EE's handler runs on the game thread, at the next handover; the IOP side only needs the packet sent)
++        hl_iopw::deferSifCommand(commandId, packet, packetSize);
++        return true;
++    }
+     uint8_t *const rdram = m_activeRdram
+                                ? m_activeRdram
+                                : m_runtime.memory().getRDRAM();
+--- a/ps2xRuntime/src/lib/ps2_iop_host.h
++++ b/ps2xRuntime/src/lib/ps2_iop_host.h
+@@ -10,6 +10,17 @@
+ class PS2Runtime;
+ struct R5900Context;
+ 
++// Hidden Leaf: HL_IOP_THREAD=1, the IOP (and the SPU2 it drives) on a thread of its own, one batch behind the EE
++// (ps2_runtime.cpp). What the IOP does to the EE's side (writes to its RAM, SIF commands, which run the EE's handlers)
++// is kept and done on the game thread when the next batch is handed over, in the same order.
++namespace hl_iopw
++{
++    bool onWorker();
++    void deferWrite(uint32_t address, const void *source, size_t size);
++    void deferZero(uint32_t address, size_t size);
++    void deferSifCommand(uint32_t commandId, const void *packet, size_t packetSize);
++}
++
+ class PS2IopHostAdapter final : public ps2x::iop::IopHost
+ {
+ public:
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -59,6 +59,7 @@
+             uint64_t ticks[kCount] = {};
+             uint64_t gsNs = 0, replayNs = 0;
+             uint64_t vuNs = 0;
++            uint64_t iopNs = 0;
+             uint64_t bytes = 0;
+             uint32_t frames = 0;
+             std::vector<float> frameMs;
+@@ -72,7 +73,8 @@
+             static const char *const env = std::getenv("HL_NICE");
+             static const char *const value = env ? env : "-10";
+             static uint32_t s_done = 0;
+-            if (s_done >= 3u)
++            static const uint32_t wanted = std::getenv("HL_IOP_THREAD") && std::getenv("HL_IOP_THREAD")[0] == '1' ? 4u : 3u;
++            if (s_done >= wanted)
+                 return;
+             DIR *dir = opendir("/proc/self/task");
+             if (!dir)
+@@ -89,7 +91,7 @@
+                     continue;
+                 const bool ok = std::fgets(comm, sizeof(comm), f) != nullptr;
+                 std::fclose(f);
+-                if (ok && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0 || std::strcmp(comm, "GS\n") == 0))
++                if (ok && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0 || std::strcmp(comm, "GS\n") == 0 || std::strcmp(comm, "IopWorker\n") == 0))
+                 {
+                     const int r = setpriority(PRIO_PROCESS, static_cast<id_t>(std::atoi(entry->d_name)), std::atoi(value));
+                     std::fprintf(stderr, "[perf] nice %s tid %s: %d (errno %d)\n", comm, entry->d_name, r, r ? errno : 0);
+@@ -118,8 +120,8 @@
+                         for (int i = count - 1; i >= 0; --i)
+                             if (capacity[i] > lowest)
+                                 big[nbig++] = i;
+-                        const int slot = std::strcmp(comm, "GameThread\n") == 0 ? 0 : std::strcmp(comm, "VuWorker\n") == 0 ? 1 : 2;
+-                        if (nbig >= 3)
++                        const int slot = std::strcmp(comm, "GameThread\n") == 0 ? 0 : std::strcmp(comm, "VuWorker\n") == 0 ? 1 : std::strcmp(comm, "GS\n") == 0 ? 2 : 3;
++                        if (nbig > slot)
+                         {
+                             cpu_set_t one;
+                             CPU_ZERO(&one);
+@@ -130,7 +132,7 @@
+                             continue;
+                         }
+                     }
+-                    if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0))
++                    if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0 || std::strcmp(comm, "IopWorker\n") == 0))
+                     {
+                         cpu_set_t set;
+                         CPU_ZERO(&set);
+@@ -218,6 +220,12 @@
+             static const char *const names[] = {"CPU Thread\n"};
+             return threadsNs(names);
+         }
++        // HL_IOP_THREAD=1: the IOP's own thread
++        uint64_t iopThreadNs()
++        {
++            static const char *const names[] = {"IopWorker\n"};
++            return threadsNs(names);
++        }
+         // hl_vu_worker: VIF1, VU1, the GIF and the ring, when they are not on the game thread
+         uint64_t vuThreadNs()
+         {
+@@ -250,10 +258,10 @@
+         {
+             const double frames = std::max<uint32_t>(w.frames, 1u);
+             const auto ms = [&](Cat c) { return static_cast<double>(w.ticks[c]) / tpm / frames; };
+-            char text[280];
+-            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f waitVU %.1f idle %.1f ms | replay %.1f | %.2f MB/f",
++            char text[320];
++            std::snprintf(text, sizeof(text), "%.1f fps | EE %.1f VU0 %.1f VU1 %.1f GS %.1f IOP %.1f parse %.1f ring %.1f waitGS %.1f waitVU %.1f idle %.1f ms | replay %.1f | %.2f MB/f | iopw %.1f",
+                           fps, ms(kEe), ms(kVu0), ms(kVu1) + static_cast<double>(w.vuNs) / 1e6 / frames, static_cast<double>(w.gsNs) / 1e6 / frames, ms(kIop), ms(kGifParse), ms(kRing), ms(kWaitGs), ms(kWaitVu), ms(kIdle),
+-                          static_cast<double>(w.replayNs) / 1e6 / frames, static_cast<double>(w.bytes) / 1048576.0 / frames);
++                          static_cast<double>(w.replayNs) / 1e6 / frames, static_cast<double>(w.bytes) / 1048576.0 / frames, static_cast<double>(w.iopNs) / 1e6 / frames);
+             return text;
+         }
+     }
+@@ -381,6 +389,14 @@
+         accumulate(s_second, delta, gsDelta, vuDelta, replayDelta, bytes);
+         if (s_phase == Phase::Measuring)
+             accumulate(s_measure, delta, gsDelta, vuDelta, replayDelta, bytes);
++        {
++            static uint64_t s_iopLast = 0;
++            const uint64_t iopNow = iopThreadNs();
++            s_second.iopNs += iopNow - s_iopLast;
++            if (s_phase == Phase::Measuring)
++                s_measure.iopNs += iopNow - s_iopLast;
++            s_iopLast = iopNow;
++        }
+ 
+         const double fps = s_second.frames * 1000.0 / (static_cast<double>(t - s_secondStart) / tpm);
+         const std::string text = describe(s_second, fps, tpm);
