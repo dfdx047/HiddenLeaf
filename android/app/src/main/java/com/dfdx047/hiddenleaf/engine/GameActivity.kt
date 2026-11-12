@@ -98,9 +98,15 @@ class GameActivity : SDLActivity() {
     /** The player's choice (launcher, Settings): 0 landscape, 1 portrait, 2 as the device is held. */
     private var orientation = 0
 
-    // Landscape only: portrait was asked for (SENSOR_PORTRAIT) and the Retroid stayed in landscape, so the choice is
-    // no longer offered and an old saved value is ignored.
-    private fun orientationFlag(): Int = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    // The activity handles orientation and size changes itself (configChanges in the manifest): a turn is not a restart.
+    // SDL reports the new surface size, and the engine redoes the GS's surface and the picture's shape for it
+    // (un5_main.cpp, SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED). Some handhelds' ROMs (the Retroid's) keep the screen in
+    // landscape whatever is asked; the launcher's hint says so.
+    private fun orientationFlag(): Int = when (orientation) {
+        1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER // (respects the rotation lock)
+        else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
 
     /** SDL picks an orientation from the window's size when it is made; the player's choice wins over it. */
     override fun setOrientationBis(w: Int, h: Int, resizable: Boolean, hint: String?) {

@@ -185,6 +185,7 @@ namespace
             return;
         char line[128];
         bool skipIntro = true, nativeRender = false;
+        int gpuApi = -1; // the launcher's renderer (Renderer.kt): 0 Vulkan, 1 OpenGL ES
         while (std::fgets(line, sizeof(line), fp))
         {
             char *eq = std::strchr(line, '=');
@@ -212,6 +213,8 @@ namespace
                 skipIntro = v != 0;
             else if (!std::strcmp(line, "native_render"))
                 nativeRender = v != 0;
+            else if (!std::strcmp(line, "gpu_api"))
+                gpuApi = v;
         }
         std::fclose(fp);
         // the logos and the opening movies skipped by START (Pad.cpp, HL_SKIP_INTRO): on unless the launcher says off, and not
@@ -222,6 +225,9 @@ namespace
         // 2026-11-12 on the Mi A3 at 1x the GS gave 42/36 fps against the native's 44/38 and draws every effect.
         if (!nativeRender)
             setenv("HL_NATIVE", "0", 0);
+        // PCSX2's GS on Vulkan or OpenGL ES, as chosen in the launcher (a value of hl_env.txt wins; without a line, Vulkan)
+        if (gpuApi >= 0)
+            setenv("HL_GS_API", gpuApi == 1 ? "gl" : "vulkan", 0);
     }
 
     // What libbt4gsx changes while the game runs (Bt4Gsx_SetVideo).

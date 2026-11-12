@@ -165,6 +165,33 @@ class ScreenshotTest {
         save(root, name)
     }
 
+    /** The page [page] (a route of MainActivity's Dest) as the launcher shows it at start. */
+    private fun shootPage(page: String, name: String) {
+        val intent = android.content.Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_PAGE, page)
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
+        repeat(20) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50)) }
+        save(controller.get().window.decorView, name)
+        controller.pause().stop().destroy()
+    }
+
+    /**
+     * Every page in Portuguese and Spanish, on a 1560x720 phone (xhdpi: 780x360 dp) in landscape and in portrait, and
+     * on tall windows of the same widths that show each page whole (for text cut at the bottom of long pages).
+     */
+    @Test
+    fun pages() {
+        val pages = listOf("home", "online", "controls", "settings", "more", "textures", "mods", "drivers", "cheats", "debug")
+        val shapes = listOf(
+            "land" to "w780dp-h360dp-land", "port" to "w360dp-h780dp-port",
+            "landfull" to "w780dp-h2000dp", "portfull" to "w360dp-h2600dp-port",
+        )
+        for (lang in listOf("pt", "es")) for ((shape, q) in shapes) {
+            org.robolectric.RuntimeEnvironment.setQualifiers("$lang-$q-xhdpi")
+            for (p in pages) shootPage(p, "page_${p}_${lang}_$shape")
+        }
+    }
+
     @Test
     @Config(qualifiers = "pt-w400dp-h880dp-port-xhdpi")
     fun homePortrait() = shootActivity("home_portrait")

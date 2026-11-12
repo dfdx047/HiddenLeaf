@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,7 +54,7 @@ fun DebugScreen(vm: AppViewModel) {
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenTitle(stringResource(R.string.nav_debug), stringResource(R.string.debug_sub))
+        ScreenTitle(stringResource(R.string.nav_debug), stringResource(R.string.ln_more_debug))
 
         SectionCard(stringResource(R.string.debug_device), Icons.Rounded.PhoneAndroid, accent = Konoha.ChakraBlue) {
             val ram = remember {
@@ -69,6 +70,23 @@ fun DebugScreen(vm: AppViewModel) {
             InfoLine("GPU", gpu.ifEmpty { "?" })
             InfoLine(stringResource(R.string.debug_tier), tierName(tier))
             InfoLine(stringResource(R.string.renderer), if (s[EngineSettings.GPU_API] == 1) "OpenGL ES" else "Vulkan")
+        }
+
+        SectionCard(stringResource(R.string.ln_debug_options), Icons.Rounded.Science, accent = Konoha.SasukeBlueLight) {
+            // the counter's levels as GameActivity.meterText draws them (0 off .. 3 with the EE, VU1, GS and IOP)
+            Text(stringResource(R.string.ln_meter), style = MaterialTheme.typography.titleSmall)
+            ChipRow(
+                options = listOf(
+                    stringResource(R.string.ln_meter_off) to 0, "FPS" to 1, stringResource(R.string.ln_meter_time) to 2,
+                    stringResource(R.string.ln_meter_full) to 3,
+                ),
+                selected = (s[EngineSettings.METER] ?: 0).coerceIn(0, 3),
+                onSelect = { vm.setting(EngineSettings.METER, it) },
+            )
+            Text(stringResource(R.string.ln_meter_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ToggleRow(stringResource(R.string.native_render), stringResource(R.string.native_render_text), (s[EngineSettings.NATIVE_RENDER] ?: 0) != 0) {
+                vm.setting(EngineSettings.NATIVE_RENDER, if (it) 1 else 0)
+            }
         }
 
         SectionCard(stringResource(R.string.debug_gpu_opt), Icons.Rounded.AutoFixHigh, accent = Konoha.ChakraAmber) {

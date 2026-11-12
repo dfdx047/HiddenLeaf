@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ln_nav_online">Online</string>
+    <string name="ln_nav_more">Mais</string>
+    <string name="ln_nav_cheats">Trapaças</string>
+    <string name="ln_back">Voltar</string>
+
+    <string name="ln_more_sub">Texturas, mods, drivers, trapaças e depuração</string>
+    <string name="ln_more_textures">Packs de texturas no formato do PCSX2</string>
+    <string name="ln_more_mods">Mods a partir da ISO, sobre o jogo base</string>
+    <string name="ln_more_drivers">Drivers Vulkan para GPUs Adreno (Turnip)</string>
+    <string name="ln_more_cheats">Pular a abertura, desbloquear tudo</string>
+    <string name="ln_more_debug">Aparelho, desempenho, contador de FPS, logs e opções experimentais</string>
+
+    <string name="ln_cheat_opening">Abertura</string>
+    <string name="ln_cheat_roster">Personagens</string>
+    <string name="ln_cheats_sub">Valem na próxima vez que o jogo abrir</string>
+    <string name="ln_skip_intro_text">Os logos e os três filmes da abertura são pulados: o START é apertado sozinho até o título. A escolha de idioma continua esperando você.</string>
+    <string name="ln_unlock_text">Com esta opção ligada, todos os personagens e ligações ficam abertos na luta livre.</string>
+    <string name="ln_unlock_q_text">Se você salvar no jogo com ela ligada, o desbloqueio é gravado no memory card e fica mesmo depois de desligar; o app não desfaz isso. Exporte o seu save antes (Ajustes, Memory card) se quiser guardar o progresso atual.</string>
+    <string name="ln_cheats_how">As duas opções são lidas quando o jogo abre: mude antes de tocar em Jogar.\n\nCheats do PCSX2 (.pnach) não valem aqui: o Hidden Leaf roda o código do jogo recompilado, não num emulador.</string>
+
+    <string name="ln_debug_options">Opções de teste</string>
+    <string name="ln_meter">Contador de FPS</string>
+    <string name="ln_meter_off">Desligado</string>
+    <string name="ln_meter_time">FPS e tempo</string>
+    <string name="ln_meter_full">Completo</string>
+    <string name="ln_meter_text">No canto superior direito do jogo. Tempo: o tempo de cada quadro e o pior. Completo: também o tempo do EE, da VU1, do GS e do IOP.</string>
+
+    <string name="ln_screen">Tela</string>
+    <string name="ln_orientation_text">Como o jogo aparece. Em retrato a imagem 4:3 ocupa a largura da tela; Automático segue a posição do aparelho e respeita a trava de rotação do Android. Alguns portáteis mantêm a tela deitada, seja qual for a escolha.</string>
+    <string name="ln_renderer_text">Vulkan é o padrão e o testado em todos os aparelhos. O OpenGL ES é para GPUs cujo driver Vulkan falha; se o jogo não abrir com ele, volte para o Vulkan.</string>
+
+    <string name="ln_online_soon">O jogo online chega nesta página.</string>
+</resources>

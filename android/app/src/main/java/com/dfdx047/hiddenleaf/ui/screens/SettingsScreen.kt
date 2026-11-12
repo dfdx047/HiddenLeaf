@@ -4,6 +4,8 @@ import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Speed
@@ -56,6 +59,7 @@ import com.dfdx047.hiddenleaf.ui.theme.Konoha
 import com.dfdx047.hiddenleaf.ui.theme.ThemeMode
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
     val s by vm.engineSettings.collectAsStateWithLifecycle()
@@ -112,18 +116,23 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.aspect_hint),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            ToggleRow(stringResource(R.string.skip_intro), stringResource(R.string.skip_intro_text), get(EngineSettings.SKIP_INTRO, 1) != 0) {
-                vm.setting(EngineSettings.SKIP_INTRO, if (it) 1 else 0)
-            }
-            ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.unlock_all_text), get(EngineSettings.UNLOCK_ALL, 0) != 0) {
-                vm.setting(EngineSettings.UNLOCK_ALL, if (it) 1 else 0)
-            }
-            ToggleRow(stringResource(R.string.show_fps), stringResource(R.string.show_fps_text), get(EngineSettings.METER, 0) != 0) {
-                vm.setting(EngineSettings.METER, if (it) 1 else 0)
-            }
-            ToggleRow(stringResource(R.string.native_render), stringResource(R.string.native_render_text), get(EngineSettings.NATIVE_RENDER, 0) != 0) {
-                vm.setting(EngineSettings.NATIVE_RENDER, if (it) 1 else 0)
-            }
+        }
+
+        SectionCard(stringResource(R.string.ln_screen), Icons.Rounded.ScreenRotation, accent = Konoha.ChakraBlue) {
+            // GameActivity.orientationFlag: 0 landscape, 1 portrait, 2 as the device is held
+            Text(stringResource(R.string.orientation), style = MaterialTheme.typography.titleSmall)
+            ChipRow(
+                options = listOf(
+                    stringResource(R.string.orientation_landscape) to 0, stringResource(R.string.orientation_portrait) to 1,
+                    stringResource(R.string.orientation_sensor) to 2,
+                ),
+                selected = get(EngineSettings.ORIENTATION, 0).coerceIn(0, 2),
+                onSelect = { vm.setting(EngineSettings.ORIENTATION, it) },
+            )
+            Text(
+                stringResource(R.string.ln_orientation_text),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         SectionCard(stringResource(R.string.performance), Icons.Rounded.Speed, accent = MaterialTheme.colorScheme.secondary) {
@@ -138,6 +147,17 @@ fun SettingsScreen(vm: AppViewModel) {
             )
             Text(
                 stringResource(R.string.panel_fps_hint),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // the engine reads "gpu_api", which Renderer.apply writes from this choice (automatic is Vulkan)
+            Text(stringResource(R.string.renderer), style = MaterialTheme.typography.titleSmall)
+            ChipRow(
+                options = listOf("Vulkan" to Renderer.VULKAN, "OpenGL ES" to Renderer.OPENGL),
+                selected = if (get(EngineSettings.RENDERER, Renderer.AUTO) == Renderer.OPENGL) Renderer.OPENGL else Renderer.VULKAN,
+                onSelect = { vm.setRenderer(it) },
+            )
+            Text(
+                stringResource(R.string.ln_renderer_text),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -177,7 +197,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val uri = LocalUriHandler.current
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { runCatching { uri.openUri(REPO_URL) } }) {
                     Icon(Icons.Rounded.Code, null, Modifier.size(18.dp))
                     Spacer(Modifier.size(6.dp))
@@ -229,11 +249,13 @@ internal fun StepSlider(label: String, format: (Int) -> String, value: Int, rang
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ChipRow(options: List<Pair<String, Int>>, selected: Int, onSelect: (Int) -> Unit) {
     // the nearest option counts as selected (an aspect written by the engine may be in between)
     val best = options.minByOrNull { kotlin.math.abs(it.second - selected) }?.second
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+    // (wrapped, not scrolled sideways: on a phone held upright a scrolled row hid the last options under the card's edge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         options.forEach { (label, v) ->
             FilterChip(selected = v == best, onClick = { onSelect(v) }, label = { Text(label) })
         }
