@@ -56,6 +56,40 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 09:00, manhã: água do lago (3/24) limpa por ora, "Pular a abertura", buffers reaproveitados (`0095`)
+
+Tudo no Mi A3 (1560x720, `libun5_v80.so`, 2x nas rotas, Nominum).
+
+- **Ruído colorido na água do cenário 3/24** (floresta com o portão vermelho, relato do dono jogando; o mesmo da Vila da
+  Folha no Cube, 11-05). Rota `stage_env/s2.txt` (`w2_*` em `build/lab/mia3/`), PCSX2 de referência `runs/lake2_*.png`:
+  - só com o GS (`HL_NATIVE=0`, `w2_gs`) a água sai limpa; com o nativo, sujo em 4:3 (`w2_43`) e no largo: **é do
+    nativo, não do widescreen**;
+  - a água é desenhada pelo GS ("texture not known") com a textura `0x3000` (CT32, TBW 8), que é o FBP `0x180`: o GS
+    copia ali a cena inteira a cada quadro (sprite `prim 356`, `tex0 264020000`, colunas de 32 px, 512x448; log
+    `HL_NATIVE_LOGFBP=180`), e o ruído fica onde estaria o reflexo dos lutadores (o das árvores sai certo);
+  - tirando os desenhos que leem `0x3000` (`HL_NATIVE_SKIPTEX=3000`) o ruído some; tirando `0x3c00` ou `0xe00`, não;
+  - **não resolveram:** mandar todos os envios pendentes antes de cada desenho do GS (`HL_NATIVE_ALLUP`), a cópia do Z
+    para `0x1E0` ao GS (`HL_NATIVE_OFF=k`), os desenhos só de alfa ao GS (`HL_NATIVE_ALPHA`), a cena válida até a
+    linha 512, todos os envios antes de uma textura lida da memória, e passar ao GS essas texturas (`HL_NATIVE_NOMEM`:
+    nenhuma neste trecho). `HL_NATIVE_OFF=p` e `SKIPTEX=0` travam a rota no "Start Battle";
+  - **correção provisória** (`hl_native.cpp`): com o nativo ligado, o desenho da cena que lê o buffer em que o GS copiou a
+    cena (`s_sceneCopyFbp`) sai fora. A água fica limpa, mas sem o reflexo dos lutadores (`w2_fix`, 50 fps).
+    `HL_NATIVE_REFLECT=1` volta ao de antes. **A causa continua aberta.**
+- **"Pular a abertura"** (Ajustes, ligado por padrão; `skip_intro` → `HL_SKIP_INTRO`, patch `0096`): do boot ao fim do
+  terceiro filme (`LOGO_C`, `NARUTO10`, `OPENING`), START por 4 vsyncs a cada 12, o pulo do próprio jogo. No último
+  filme, só enquanto ele entrega quadros: o jogo fecha o filme depois, e um START a mais chegou ao título e escolheu
+  "Load Game" (`boot_skip2`). A escolha de idioma espera o ✕ (START não a aceita). Mi A3 (`boot_skip3`, ✕ tocado no
+  idioma): logo, filmes e portas passam sozinhos, título com New Game/Load Game no v2000 sem nada escolhido. No PC
+  (`runs/skip3`), cartão vazio: para na mensagem do cartão perto do v1500. Desligado sob `HL_PADROUTE`.
+- **`0095`:** os buffers das transferências ao GS e à VU1 vêm da lista da `VuWorker` (até 256, até 4 MB cada; antes
+  16) e o `sceSifSetDma` usa um buffer por thread: no perfil da luta (`prof8`) uns 5% da thread do jogo eram
+  `std::vector` criando, crescendo e apagando. **Ganho não medido ainda.**
+- `hl_prof.cpp` grava também o registrador de retorno (`hl_prof.txt.lr`, arm64) e `hlprof.py --callers TEXTO` diz quem
+  chamou as funções-folha (`memcpy`, `malloc`).
+- **Achados, a fazer:** na seleção em ultrawide (20:9 do Mi A3) a grade de retratos do 1P quase some e a caixa
+  "Linked Character" sai cortada (prints do dono, `live/user/u013.png`); os clones do Naruto falham e somem (relato do
+  dono); o corte do Ougi com uma faixa preta (`w2_fix/shot_v6*`) a comparar com o PCSX2.
+
 ### 2026-11-11 22:50, noite: resoluções 0,5x e 0,75x; aviso do A35 lendo os slots; textos de 30 fps; toque no fim da conversa
 
 - **Resoluções fracionadas (launcher):** `SCALE_STEPS` começa em 2 e 3 (0,5x 256×224 e 0,75x 384×336) em Ajustes, e

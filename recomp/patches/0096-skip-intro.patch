@@ -1,0 +1,102 @@
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -22,6 +22,12 @@
+ #include "Syscalls/Helpers/State.h"
+ #include "hl_yuv2rgba.h"
+ #include <chrono>
++#include <atomic>
++
++// Hidden Leaf: the movies begun since the game started, and whether one is playing now (HL_SKIP_INTRO, Pad.cpp)
++std::atomic<uint32_t> g_hlMoviesBegun{0u};
++std::atomic<bool> g_hlMoviePlaying{false};
++std::atomic<uint64_t> g_hlMoviePictureTick{0u}; // (the vsync of the last picture the game took)
+ 
+ namespace ps2_stubs
+ {
+@@ -2327,6 +2333,8 @@
+             std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
+             getPlaybackState(param_1) = makeFreshPlaybackState();
+         }
++        g_hlMoviesBegun.fetch_add(1u, std::memory_order_relaxed);
++        g_hlMoviePlaying.store(true, std::memory_order_relaxed);
+ 
+         const uint32_t puVar4 = uVar3 + 0x108u;
+         const uint32_t innerSize = static_cast<uint32_t>(iVar2_signed) - 0x118u;
+@@ -2389,6 +2397,7 @@
+ 
+     void sceMpegDelete(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        g_hlMoviePlaying.store(false, std::memory_order_relaxed);
+         hlAudioReset("the delete");
+         (void)rdram;
+ 
+@@ -2704,6 +2713,8 @@
+ 
+                 frame = std::move(playback.decodedFrames.front());
+                 playback.decodedFrames.pop_front();
++                if (runtime != nullptr)
++                    g_hlMoviePictureTick.store(runtime->eeScheduler().currentVSyncTick(), std::memory_order_relaxed);
+                 playback.width = static_cast<uint32_t>(frame.width);
+                 playback.height = static_cast<uint32_t>(frame.height);
+                 width = playback.width;
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -2,7 +2,9 @@
+ #include "Pad.h"
+ #include "runtime/ee_scheduler.h"
+ 
++#include <atomic>
+ #include <chrono>
++#include <cstdlib>
+ #include <cstdio>
+ #include <deque>
+ #include <filesystem>
+@@ -12,6 +14,9 @@
+ // Hidden Leaf: the vsync fight N (from 1) began, or 0 while it has not; set by the game's host code (hl_game.cpp on
+ // Android), for the "@N+vsyncs" steps of HL_PADROUTE.
+ uint64_t (*g_hlFightStart)(uint32_t) = nullptr;
++extern std::atomic<uint32_t> g_hlMoviesBegun;
++extern std::atomic<bool> g_hlMoviePlaying;
++extern std::atomic<uint64_t> g_hlMoviePictureTick;
+ 
+ namespace ps2_stubs
+ {
+@@ -450,11 +455,38 @@
+             }
+         }
+ 
++        // Hidden Leaf: HL_SKIP_INTRO=1 (the launcher's "skip the opening"): from the boot to the end of the third movie (the
++        // logos, the anime clip and the opening), START is pressed for 4 vsyncs out of every 12, as a player would to
++        // skip them. The game's own skip: nothing of its state is changed. HL_SKIP_INTRO=N skips the first N movies instead.
++        void applySkipIntro(PadInputState &state, PS2Runtime *runtime)
++        {
++            static const uint32_t s_movies = []
++            {
++                const char *v = std::getenv("HL_SKIP_INTRO");
++                if (v == nullptr || v[0] == '\0' || v[0] == '0')
++                    return 0u;
++                const unsigned long n = std::strtoul(v, nullptr, 10);
++                return n > 1u ? static_cast<uint32_t>(n) : 3u;
++            }();
++            const uint32_t begun = g_hlMoviesBegun.load(std::memory_order_relaxed);
++            if (s_movies == 0u || runtime == nullptr || begun > s_movies ||
++                (begun == s_movies && !g_hlMoviePlaying.load(std::memory_order_relaxed)))
++                return;
++            const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
++            // (the last movie: only while its pictures come; the game closes it a while after it stops, and a START from
++            // then on reached the title and chose Load Game)
++            if (begun == s_movies && tick > g_hlMoviePictureTick.load(std::memory_order_relaxed) + 8u)
++                return;
++            if (tick % 12u < 4u)
++                setButton(state, kPadBtnStart, true);
++        }
++
+         void applyAutoPress(PadInputState &state, int port, PS2Runtime *runtime)
+         {
+             if (port == 0)
+             {
+                 applyPadFile(state, runtime);
++                applySkipIntro(state, runtime);
+             }
+             const std::vector<AutoPress> &presses = autoPresses();
+             if (presses.empty() || port != 0)

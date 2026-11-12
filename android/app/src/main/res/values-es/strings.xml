@@ -104,6 +104,8 @@
     <string name="mod_info">%1$d archivos · %2$s</string>
     <string name="cheats_title">Trucos</string>
     <string name="cheats_sub">Los deseos de Shenlong</string>
+    <string name="skip_intro">Saltar la introducción</string>
+    <string name="skip_intro_text">Los logos y los vídeos de apertura se saltan y el juego va directo al título. La elección de idioma se mantiene.</string>
     <string name="unlock_all">Desbloquear todo</string>
     <string name="unlock_all_text">Todos los personajes y enlaces abiertos en combate libre. Guardar en el juego lo escribe en la memory card y permanece aunque se apague esta opción.</string>
     <string name="unlock_pending">Se aplicará la próxima vez que se inicie el juego</string>

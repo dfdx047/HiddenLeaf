@@ -12,6 +12,8 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <map>
+#include <string>
+#include <tuple>
 #include <thread>
 #include <chrono>
 #include <sys/syscall.h>
@@ -31,6 +33,7 @@ namespace hl_prof_detail
 {
     constexpr uint32_t kMax = 1u << 22; // samples kept (4M: over an hour at 1 kHz)
     uintptr_t *g_pc = nullptr;
+    uintptr_t *g_lr = nullptr; // (the link register on arm64: the caller of a leaf function, for hlprof.py --callers)
     int32_t *g_tid = nullptr;
     std::atomic<uint32_t> g_count{0};
     std::atomic<bool> g_dumped{false};
@@ -45,6 +48,7 @@ namespace hl_prof_detail
         g_pc[i] = static_cast<uintptr_t>(u->uc_mcontext.gregs[REG_RIP]);
 #elif defined(__aarch64__)
         g_pc[i] = static_cast<uintptr_t>(u->uc_mcontext.pc);
+        g_lr[i] = static_cast<uintptr_t>(u->uc_mcontext.regs[30]);
 #else
         g_pc[i] = 0;
 #endif
@@ -59,8 +63,9 @@ namespace hl_prof_detail
             if (on == nullptr || on[0] == '\0' || on[0] == '0' || s_started.exchange(true))
                 return;
             g_pc = static_cast<uintptr_t *>(std::calloc(kMax, sizeof(uintptr_t)));
+            g_lr = static_cast<uintptr_t *>(std::calloc(kMax, sizeof(uintptr_t)));
             g_tid = static_cast<int32_t *>(std::calloc(kMax, sizeof(int32_t)));
-            if (g_pc == nullptr || g_tid == nullptr)
+            if (g_pc == nullptr || g_lr == nullptr || g_tid == nullptr)
                 return;
             struct sigaction sa;
             std::memset(&sa, 0, sizeof(sa));
@@ -138,6 +143,38 @@ void hl_prof_detail::write(bool final)
         std::fprintf(f, "%s 0x%zx %d %u\n", module, static_cast<size_t>(offset), c.first.second, c.second);
     }
     std::fclose(f);
+#if defined(__aarch64__)
+    // <path>.lr: "pcmodule pcoffset lrmodule lroffset tid count", who called the sampled function
+    {
+        const auto where = [](uintptr_t a, const char *&module, uintptr_t &offset) {
+            Dl_info info{};
+            module = "?";
+            offset = a;
+            if (dladdr(reinterpret_cast<void *>(a), &info) != 0 && info.dli_fname != nullptr)
+            {
+                module = info.dli_fname;
+                offset = a - reinterpret_cast<uintptr_t>(info.dli_fbase);
+            }
+        };
+        std::map<std::tuple<uintptr_t, uintptr_t, int32_t>, uint32_t> pairs;
+        for (uint32_t i = 0; i < n; ++i)
+            ++pairs[{g_pc[i], g_lr[i], g_tid[i]}];
+        const std::string lrPath = std::string(path) + ".lr";
+        if (FILE *g = std::fopen(lrPath.c_str(), "w"))
+        {
+            for (const auto &c : pairs)
+            {
+                const char *pm, *lm;
+                uintptr_t po, lo;
+                where(std::get<0>(c.first), pm, po);
+                where(std::get<1>(c.first), lm, lo);
+                std::fprintf(g, "%s 0x%zx %s 0x%zx %d %u\n", pm, static_cast<size_t>(po), lm, static_cast<size_t>(lo),
+                             std::get<2>(c.first), c.second);
+            }
+            std::fclose(g);
+        }
+    }
+#endif
     std::fprintf(stderr, "[prof] %u samples in %s%s\n", n, path, final ? "" : " (so far)");
 }
 #else

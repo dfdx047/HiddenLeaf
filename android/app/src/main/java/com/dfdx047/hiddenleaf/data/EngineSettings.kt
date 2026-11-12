@@ -67,6 +67,7 @@ class EngineSettings(private val file: File) {
         const val SPECIAL_BUTTON = "special_button" // its button, in the game's bits of the pad: 0x20 circle...
         const val MASH_PERCENT = "mash_percent"   // what a tap is worth where the game asks to press repeatedly: 100..200
         const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60, 90 or 120 (interpolated)
+        const val SKIP_INTRO = "skip_intro"       // 1 (default): the logos and opening movies skipped, START pressed for the player
 
         // the launcher's own, read by the Android glue of the engine at start
         const val UNLOCK_ALL = "dr_unlock_all"    // 1: all characters and links open (written to the card when the player saves)

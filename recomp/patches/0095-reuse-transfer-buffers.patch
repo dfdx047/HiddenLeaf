@@ -1,0 +1,38 @@
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1747,7 +1747,8 @@
+     {
+         if (!p.chainData.empty())
+             return std::move(p.chainData);
+-        std::vector<uint8_t> copy;
++        std::vector<uint8_t> copy = hl_vuworker::takeBuffer(); // (Hidden Leaf: the worker's spare, not a new one each)
++        copy.clear();
+         if (p.qwc == 0u)
+             return copy;
+         uint32_t src = 0u;
+--- a/ps2xRuntime/src/lib/hl_vu_worker.cpp
++++ b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+@@ -114,7 +114,9 @@
+                 s_queuedBytes -= command.data.size();
+                 if (command.frameEnd)
+                     --s_framesQueued;
+-                if (command.data.capacity() != 0u && s_free.size() < 16u)
++                // Hidden Leaf: up to 256 kept (a fight frame posts hundreds of transfers: with 16 the game thread
++                // allocated and freed a vector for most of them), none over 4 MB
++                if (command.data.capacity() != 0u && command.data.capacity() <= (4u << 20) && s_free.size() < 256u)
+                 {
+                     command.data.clear();
+                     s_free.push_back(std::move(command.data));
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
+@@ -715,7 +715,9 @@
+                                                                     });
+                 }
+                 const uint32_t sizeBytes = static_cast<uint32_t>(xfer.size);
+-                std::vector<uint8_t> payload(sizeBytes);
++                // Hidden Leaf: one buffer kept per thread (the sound's DMAs come many per frame)
++                thread_local std::vector<uint8_t> payload;
++                payload.resize(sizeBytes);
+                 if (!readEeRange(rdram, xfer.src, payload.data(), sizeBytes) || !runtime->writeIopMemory(xfer.dest, payload.data(), payload.size()))
+                 {
+                     ok = false;

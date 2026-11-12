@@ -105,6 +105,8 @@
     <string name="mod_info">%1$d files · %2$s</string>
     <string name="cheats_title">Cheats</string>
     <string name="cheats_sub">Shenron\'s wishes</string>
+    <string name="skip_intro">Skip the opening</string>
+    <string name="skip_intro_text">The logos and the opening movies are skipped and the game goes straight to the title. The language choice stays.</string>
     <string name="unlock_all">Unlock everything</string>
     <string name="unlock_all_text">All characters and links open in Free Battle. Saving in the game writes this to the memory card, and it stays even after switching this off.</string>
     <string name="unlock_pending">Will be applied the next time the game starts</string>

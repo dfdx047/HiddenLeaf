@@ -112,6 +112,9 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.aspect_hint),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            ToggleRow(stringResource(R.string.skip_intro), stringResource(R.string.skip_intro_text), get(EngineSettings.SKIP_INTRO, 1) != 0) {
+                vm.setting(EngineSettings.SKIP_INTRO, if (it) 1 else 0)
+            }
             ToggleRow(stringResource(R.string.unlock_all), stringResource(R.string.unlock_all_text), get(EngineSettings.UNLOCK_ALL, 0) != 0) {
                 vm.setting(EngineSettings.UNLOCK_ALL, if (it) 1 else 0)
             }

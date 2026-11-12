@@ -41,6 +41,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -267,6 +268,7 @@ namespace
 		size_t operator()(const TexKey& k) const { return static_cast<size_t>(k.texHash ^ (k.clutHash * 31u) ^ (static_cast<uint64_t>(k.psm) << 40) ^ k.size); }
 	};
 	std::unordered_map<TexKey, int32_t, TexKeyHash> s_textureIds;
+	uint32_t s_sceneCopyFbp = 0; // (the buffer the GS last copied the scene into, 0 none)
 	uint32_t s_memoryGeneration = 0; // (a copy inside the GS's memory may have changed what the textures read from it hold)
 	int32_t s_nextTexture = 0;
 
@@ -482,7 +484,10 @@ namespace
 	void beforeGs(uint8_t path)
 	{
 		flushFrame();
-		if ((s_prim >> 4) & 1u)
+		static const bool s_allUploads = std::getenv("HL_NATIVE_ALLUP") != nullptr; // (a test: every pending upload first)
+		if (s_allUploads)
+			emitPending(path);
+		else if ((s_prim >> 4) & 1u)
 		{
 			const uint64_t tex0 = s_regs[R_TEX0 + ((s_prim >> 9) & 1u)];
 			emitOne(path, tex0 & 0x3FFFu, (tex0 >> 20) & 63u);
@@ -598,6 +603,9 @@ namespace
 			const uint32_t tbw = (tex0 >> 14) & 63u;
 			if (tbw == 0u)
 				return missed("no width");
+			static const bool s_noMemory = std::getenv("HL_NATIVE_NOMEM") != nullptr; // (a test: these to the GS)
+			if (s_noMemory)
+				return missed("in memory (HL_NATIVE_NOMEM)");
 			const TexKey key{(static_cast<uint64_t>(tbp) | (static_cast<uint64_t>(tbw) << 16) | (static_cast<uint64_t>(s_memoryGeneration) << 32)) ^ 0xA5A5000000000000ull, cbp, psm, (tw << 8) | th};
 			const auto found = s_textureIds.find(key);
 			if (found != s_textureIds.end())
@@ -680,7 +688,11 @@ namespace
 		// (the copy of the scene's Z for the shadows: they test against the scene's own. And alpha alone: nothing reads the frame's alpha.)
 		static const char* const s_debugKeep = std::getenv("HL_NATIVE_OFF");
 		if (fbp == halfFbp() && fbw == 4u && fpsm == 0x31u && s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneZbp * 32u && !(s_debugKeep && std::strchr(s_debugKeep, 'p')))
+		{
+			if (s_debugKeep && std::strchr(s_debugKeep, 'k')) // (a test: the Z copy to the GS)
+				TO_GS("Z copy");
 			return kDrop;
+		}
 		static const bool s_alphaToGs = std::getenv("HL_NATIVE_ALPHA") != nullptr; // (a test: alpha alone to the GS, not dropped)
 		if (fbmsk == 0x00FFFFFFu)
 		{
@@ -705,7 +717,28 @@ namespace
 		else if (fbp == kDisplayFbp && fbw == kSceneFbw)
 			target = kTDisplay;
 		else
+		{
+			static const long s_logFbp = std::getenv("HL_NATIVE_LOGFBP") ? std::strtol(std::getenv("HL_NATIVE_LOGFBP"), nullptr, 16) : -1L;
+			if (s_logFbp >= 0 && static_cast<long>(fbp) == s_logFbp)
+			{   // (a test: what the GS draws into this frame buffer, by texture, every 250 vsyncs)
+				static std::map<uint64_t, uint32_t> s_byTex;
+				static uint64_t s_lastShow = 0;
+				const uint64_t t0 = s_tme ? (s_regs[R_TEX0 + c] & 0x3FFFFFFFFFull) : 0ull;
+				++s_byTex[t0 | (static_cast<uint64_t>(prim & 0x7FFu) << 40) | (static_cast<uint64_t>(zbuf & 0x1FFu) << 52)];
+				if (s_vsync >= s_lastShow + 250u)
+				{
+					s_lastShow = s_vsync;
+					for (const auto& e : s_byTex)
+						std::fprintf(stderr, "[native] v%llu into %lx: prim %llx zbp %llx tex0 %llx x%u\n", static_cast<unsigned long long>(s_vsync), s_logFbp,
+							static_cast<unsigned long long>((e.first >> 40) & 0x7FFu), static_cast<unsigned long long>(e.first >> 52), static_cast<unsigned long long>(e.first & 0x3FFFFFFFFFull), e.second);
+					s_byTex.clear();
+				}
+			}
+			// (a copy of the scene into another buffer, by the GS: the lake's reflection, docs/registro.md 2026-11-12)
+			if (s_tme && (s_regs[R_TEX0 + c] & 0x3FFFu) == kSceneFbp * 32u && fbp != kSceneFbp)
+				s_sceneCopyFbp = fbp;
 			TO_GS("frame buffer");
+		}
 		if (fbmsk != 0u && fbmsk != 0xFF000000u)
 			TO_GS("FBMSK");
 		if ((s_regs[R_PABE] & 1u) || (s_regs[R_FBA + c] & 1u) || (s_regs[R_DTHE] & 1u) || (s_seen[R_COLCLAMP] && !(s_regs[R_COLCLAMP] & 1u)))
@@ -805,6 +838,16 @@ namespace
 		if (s_tme)
 		{
 			const uint64_t tex0 = s_regs[R_TEX0 + c];
+			static const long s_skipTex = std::getenv("HL_NATIVE_SKIPTEX") ? std::strtol(std::getenv("HL_NATIVE_SKIPTEX"), nullptr, 16) : -1L;
+			if (s_skipTex >= 0 && static_cast<long>(tex0 & 0x3FFFu) == s_skipTex) // (a test: the draws reading this TBP are left out)
+				return kDrop;
+			// The water of the lakes (Valley stage 3/24, Hidden Leaf) laid over with a copy the GS made of the scene: with this
+			// module on, that copy comes out with colour noise where the fighters' reflection is (not found why yet: the scene
+			// it reads is ours, docs/registro.md 2026-11-12). Until then the water goes without that layer: clean, but without
+			// the reflection. HL_NATIVE_REFLECT=1 keeps it.
+			static const bool s_keepReflection = std::getenv("HL_NATIVE_REFLECT") != nullptr;
+			if (!s_keepReflection && s_sceneCopyFbp != 0u && (tex0 & 0x3FFFu) == s_sceneCopyFbp * 32u && fbp == kSceneFbp)
+				return kDrop;
 			const uint32_t tcc = (tex0 >> 34) & 1u, tfx = (tex0 >> 35) & 3u, cpsm = (tex0 >> 51) & 15u, csm = (tex0 >> 55) & 1u, csa = (tex0 >> 56) & 31u;
 			const uint32_t tbp = tex0 & 0x3FFFu, tbw = (tex0 >> 14) & 63u, tpsm = (tex0 >> 20) & 63u;
 			// one of the targets, read back?
@@ -1211,6 +1254,23 @@ namespace
 										  : (static_cast<uint64_t>(x) | (static_cast<uint64_t>(y) << 16) | (static_cast<uint64_t>(z) << 32));
 		const uint64_t words[12] = {5u | (1ull << 60), 0xEull, rgbaq, R_RGBAQ, st, R_ST, static_cast<uint64_t>(s_u) | (static_cast<uint64_t>(s_v) << 16), R_UV, static_cast<uint64_t>(s_f) << 56, R_FOG,
 			position, static_cast<uint64_t>(withFog ? (adc ? R_XYZF3 : R_XYZF2) : (adc ? R_XYZ3 : R_XYZ2))};
+		{
+			static const long s_logFbp = std::getenv("HL_NATIVE_LOGFBP") ? std::strtol(std::getenv("HL_NATIVE_LOGFBP"), nullptr, 16) : -1L;
+			const uint32_t c = (s_prim >> 9) & 1u;
+			if (s_logFbp >= 0 && static_cast<long>(s_regs[R_FRAME + c] & 0x1FFu) == s_logFbp)
+			{   // (a test: the corners of what goes into that frame buffer, 4 every 250 vsyncs)
+				static uint64_t s_at = 0;
+				static int s_shown = 0;
+				if (s_vsync >= s_at + 250u)
+				{
+					s_at = s_vsync;
+					s_shown = 0;
+				}
+				if (s_shown++ < 4)
+					std::fprintf(stderr, "[native] v%llu into %lx: xy %.2f %.2f uv %.2f %.2f ofs %llx scissor %llx\n", static_cast<unsigned long long>(s_vsync), s_logFbp,
+						x / 16.0, y / 16.0, s_u / 16.0, s_v / 16.0, static_cast<unsigned long long>(s_regs[R_XYOFFSET + c]), static_cast<unsigned long long>(s_regs[R_SCISSOR + c]));
+			}
+		}
 		beforeGs(path);
 		pushBytes(path, words, sizeof(words));
 		noteRoute();
