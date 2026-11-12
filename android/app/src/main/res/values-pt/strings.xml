@@ -106,6 +106,8 @@
     <string name="cheats_sub">Os desejos do Shenlong</string>
     <string name="skip_intro">Pular a abertura</string>
     <string name="skip_intro_text">Os logos e os filmes da abertura são pulados e o jogo vai direto ao título. A escolha de idioma continua.</string>
+    <string name="native_render">Renderizador nativo (experimental)</string>
+    <string name="native_render_text">Desenha as lutas com o renderizador próprio do Hidden Leaf: um pouco mais rápido, mas alguns efeitos e texturas podem faltar ou sair errados. Desligado, o renderizador do PCSX2 desenha tudo.</string>
     <string name="unlock_all">Desbloquear tudo</string>
     <string name="unlock_all_text">Todos os personagens e ligações abertos na luta livre. Salvar no jogo grava isso no memory card, e fica mesmo depois de desligar esta opção.</string>
     <string name="unlock_pending">Será aplicado na próxima vez que o jogo abrir</string>

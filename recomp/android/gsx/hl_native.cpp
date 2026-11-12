@@ -1158,6 +1158,36 @@ namespace
 		return flg == 0u ? nloop * nreg : (flg == 1u ? (nloop * nreg + 1u) / 2u : nloop);
 	}
 
+	// SCANMSK set to 0 in the A+D registers of the stream (the GS draws every line)
+	void dropScanmsk(uint8_t* data, uint32_t size)
+	{
+		uint32_t at = 0u;
+		while (at + 16u <= size)
+		{
+			uint64_t lo, hi;
+			std::memcpy(&lo, data + at, 8);
+			std::memcpy(&hi, data + at + 8, 8);
+			const uint32_t qwords = tagQwords(lo), flg = (lo >> 58) & 3u, nreg = ((lo >> 60) & 15u) ? ((lo >> 60) & 15u) : 16u;
+			uint8_t* body = data + at + 16u;
+			if (flg == 0u && at + 16u + qwords * 16u <= size)
+			{
+				const uint32_t nloop = lo & 0x7FFFu;
+				for (uint32_t i = 0; i < nreg; ++i)
+				{
+					if (((hi >> (4u * i)) & 15u) != P_AD)
+						continue;
+					for (uint32_t l = 0; l < nloop; ++l)
+					{
+						uint8_t* q = body + (l * nreg + i) * 16u;
+						if ((q[8] & 0xFFu) == R_SCANMSK)
+							std::memset(q, 0, 8);
+					}
+				}
+			}
+			at += 16u + qwords * 16u;
+		}
+	}
+
 	// With this module off: the stream goes on as it is, and only what it would need later is noted.
 	void observe(uint8_t* data, uint32_t size)
 	{
@@ -2877,7 +2907,13 @@ bool transfer(uint8_t path, uint8_t* data, uint32_t size)
 	}();
 	(void)once;
 	if (!s_on)
+	{
+		// (the GS alone: only SCANMSK is taken out, as observe() does with this module on. The Ougi's cuts draw every other
+		// line, and ARMSX2's GS showed them dark and striped, rec cmp_gsvk 2026-11-12)
+		if (!s_scanKeep)
+			dropScanmsk(data, size);
 		return false;
+	}
 	if (!s_sceneOn)
 	{
 		observe(data, size);

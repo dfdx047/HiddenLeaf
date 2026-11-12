@@ -183,7 +183,7 @@ namespace
         if (!fp)
             return;
         char line[128];
-        bool skipIntro = true;
+        bool skipIntro = true, nativeRender = false;
         while (std::fgets(line, sizeof(line), fp))
         {
             char *eq = std::strchr(line, '=');
@@ -209,12 +209,18 @@ namespace
                 hl_game::g_mashPercent = v;
             else if (!std::strcmp(line, "skip_intro"))
                 skipIntro = v != 0;
+            else if (!std::strcmp(line, "native_render"))
+                nativeRender = v != 0;
         }
         std::fclose(fp);
         // the logos and the opening movies skipped by START (Pad.cpp, HL_SKIP_INTRO): on unless the launcher says off, and not
         // under a test route (its buttons are by vsync) or a value of hl_env.txt
         if (skipIntro && std::getenv("HL_PADROUTE") == nullptr)
             setenv("HL_SKIP_INTRO", "1", 0);
+        // the renderer: PCSX2's GS draws everything unless the player turns the native one on (a value of hl_env.txt wins).
+        // 2026-11-12 on the Mi A3 at 1x the GS gave 42/36 fps against the native's 44/38 and draws every effect.
+        if (!nativeRender)
+            setenv("HL_NATIVE", "0", 0);
     }
 
     // What libbt4gsx changes while the game runs (Bt4Gsx_SetVideo).

@@ -121,6 +121,9 @@ fun SettingsScreen(vm: AppViewModel) {
             ToggleRow(stringResource(R.string.show_fps), stringResource(R.string.show_fps_text), get(EngineSettings.METER, 0) != 0) {
                 vm.setting(EngineSettings.METER, if (it) 1 else 0)
             }
+            ToggleRow(stringResource(R.string.native_render), stringResource(R.string.native_render_text), get(EngineSettings.NATIVE_RENDER, 0) != 0) {
+                vm.setting(EngineSettings.NATIVE_RENDER, if (it) 1 else 0)
+            }
         }
 
         SectionCard(stringResource(R.string.performance), Icons.Rounded.Speed, accent = MaterialTheme.colorScheme.secondary) {

@@ -56,6 +56,35 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 12:00, dia: nativo × GS do ARMSX2 no Mi A3 a 1x; **o GS passa a ser o padrão**, o nativo vira opção
+
+Pedido do dono: com um bug novo a cada partida no nativo, comparar os caminhos e, se o GS desenhar tudo com desempenho
+parecido, deixá-lo como padrão. Rota `env_frac_1` (Naruto × Naruto, Nominum, 50 fps, 1x, 20:9), `fstats.py`
+(A = começo da luta, B = depois da vida da CPU cair):
+
+| caminho | A fps | A mín | B fps | B mín | EE B | VU1 B | GS ms/quadro (v5600-8400) |
+|---|---|---|---|---|---|---|---|
+| nativo (`cmp_native`) | 44,0 | 39,8 | 38,4 | 29,2 | 19,2 | 19,8 | 13,8 |
+| GS Vulkan (`cmp_gsvk`) | 42,1 | 35,5 | 35,9 | 19,1 | 20,6 | 20,3 | 20,9 |
+| GS Vulkan, SCANMSK zerado (`cmp_gsvk2`) | 42,3 | 35,6 | 36,1 | 28,3 | 20,7 | 20,4 | |
+| padrão novo, sem `HL_NATIVE` (`cmp_default`) | 41,8 | 35,9 | 35,2 | 28,9 | 22,3 | 20,2 | |
+
+- O GS do ARMSX2 gasta ~50% a mais de CPU na thread dele (21 contra 14 ms), mas ela roda em outro núcleo: o limite segue
+  o EE e a VU1 (~20 ms). Diferença final: 2 a 3 fps (5-7%).
+- **GS OpenGL ES** (`HL_GS_API=gl`, `cmp_gsgl`): não abre no Mi A3 (`eglChooseConfig() failed: 0x3004`). E o
+  `gpu_api` que o launcher grava não chega ao motor (só o `HL_GS_API` do ambiente): na prática o jogo é sempre Vulkan.
+- **Ougi pelo GS escuro e listrado** (`cmp_gsvk`, v8451): o SCANMSK 2 do jogo. Com o nativo desligado o
+  `hl_native.cpp` não zerava o SCANMSK; agora zera (`dropScanmsk`), `cmp_gsvk2`: o Ougi sai inteiro e o mínimo da luta B
+  volta de 19 para 28 fps. Não comparei esse Ougi (fundo azul-escuro) com o PCSX2.
+- **Pelo GS não aparecem** o ruído da água do lago (já visto em `w2_gs`) nem a grade de retratos sumindo na seleção em
+  20:9 (`cmp_default/shot_v4261`): os dois eram do nativo.
+- **Mudança:** Ajustes › "Renderizador nativo (experimental)", desligado por padrão (`native_render`; o `un5_main.cpp`
+  põe `HL_NATIVE=0` se não estiver ligado; um `HL_NATIVE` do `hl_env.txt` ganha). Mi A3 `cmp_default`: menus, seleção,
+  VS, carga e luta pelo GS, sem nenhuma linha `hl_native:` no log.
+- **Risco aberto:** em 11-05 a luta em 3D saiu preta no Cube (Mali) com `HL_NATIVE=0`. Não testei no Cube (só o Mi A3
+  está liberado). Antes de lançar com o GS padrão é preciso um teste num aparelho Mali.
+- Em `cmp_default/shot_v5500` a tela está branca (entre o VS e a carga); não conferi se é o clarão do próprio jogo.
+
 ### 2026-11-12 09:00, manhã: água do lago (3/24) limpa por ora, "Pular a abertura", buffers reaproveitados (`0095`)
 
 Tudo no Mi A3 (1560x720, `libun5_v80.so`, 2x nas rotas, Nominum).
