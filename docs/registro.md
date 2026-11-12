@@ -22,6 +22,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Widescreen nos menus | funciona | `d7faa17` | Odin 2 Mini (16:9) | rotas `o2_w2` e de campanha, toque real | 2D no formato da tela (`13256aa`), cópias de quadro intactas (`dd66468`), adereços 3D da seleção (`d7faa17`); filmes em 4:3; 20:9 não testado neste aparelho |
 | Widescreen em 20:9 | parcial | `967fc8e` | Odin 3 (2400x1080); Odin 2 Mini com `wm size 2400x1080` (menus, 11-09) | rotas v3 e de campanha gravadas, `ana.py`; menus por `gest/wide209.sh` | luta: câmera `x 0.600`, 0 barras; menus largos e na proporção (título, Mode Select, seleção, VS, NOW LOADING) no Odin 2 Mini; campanha: a cortina de transição não cobre a largura (~1 s por troca) |
 | Controles por cena | funciona | `3933c12` | Odin 2 Mini | toque real (11-09): luta, campanha, conversas, menus | luta: combo, pulo, chakra, jutsu, disputa, item, defesa, START, Back; conversas da campanha (desde a primeira) com os controles dos menus; toque mínimo de 80 ms |
+| Especiais ↑↑○ e ↓↓○, Toque Pro, guia de botões | não testado | (lab, 11-12) | | capturas Robolectric | botões novos na luta e opções do launcher; nada jogado no aparelho ainda (entrada de 11-12 tarde) |
 | Especial com um botão (Ougi) | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube | jogado por toque, gravado (`p2_cube`, `p3_odin60`, `p4_134`, `p6_cube`, `p8`–`p10`) | ligado e desligado; △△○ à mão e disputa vistos a 50 (Cube), 60 e 120 (Odin); falta o Ougi da CPU a 120 e o Cube a 60 |
 | Painel de pausa (menu do jogo) | funciona | `e3f0d17` | Odin 2 Mini; antes RP5, Cube, Odin 3 | `build/lab/gest/panel.sh` (11-09), rota de campanha (11-05) | menu com abas Gráficos (1x a 8x, 30 a 120 fps), Controles (com dicas) e Layout; "Sair do jogo" volta ao launcher |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
@@ -77,6 +78,34 @@ Feito numa branch de agente, a partir do online do Dragon Rage (BT2), sem build 
 - **Falta**: build do motor com o `0097`, publicar o Worker, teste em dois aparelhos (mesma versão e mods). Riscos: o porto
   UDP reaberto pelo motor (NAT), o determinismo entre aparelhos diferentes (só a mesma build foi vista igual), o relay na
   Cloudflare de verdade.
+
+### 2026-11-12 tarde: controle na tela: Especial 1 e 2, sem nomes, Toque Pro, guia e editor de macros (só launcher, sem aparelho)
+
+- **Especiais (pedido de 11-09 21h30, item 3):** dois botões novos na luta, `Ctl.SPECIAL_UP` (↑ ↑ ○) e `Ctl.SPECIAL_DOWN`
+  (↓ ↓ ○), sequências como o Jutsu: direção 70 ms, solta 50 ms, direção 70 ms, solta 50 ms, ○ 90 ms. Enquanto uma
+  sequência com direção toca, o direcional da tela é ignorado (senão o polegar no direcional vira diagonal ou tapa o
+  intervalo entre os dois ↑). Ícone: duas setas cheias dentro do anel do ○; o canto mostra `↑↑○`. Lugar padrão
+  (0,68; 0,30) e (0,63; 0,47); as macros do jogador começam mais à esquerda (`macroPlace`).
+- **Sem nomes por padrão:** os botões da luta e da campanha mostram só o ícone e o botão do PS2 no canto (o "Item" sob
+  L1/R1 também sai). Opção "Mostrar nomes nos botões" (`showNames`, desligada).
+- **Botão sem função:** o Despertar (R3) nunca foi visto fazendo algo numa luta (a lista de 11-09 08:58 confere direcional,
+  ataque, pulo, chakra, jutsu, Ougi, disputa, item, defesa e START). Agora começa escondido; o editor de layout ainda o
+  mostra. Quem já tinha movido o R3 continua com ele (o lugar gravado vale).
+- **Toque Pro** (`TouchConfig.pro`, gravado como `"pro"`; o arquivo antigo lê com tudo desligado, sem mudar a versão):
+  deslizar entre todos os controles (jutsu, especiais, macros, L1/R1; o normal só entre os botões de ação), direcional da
+  luta e analógico da campanha fixo, flutuante ou dinâmico (zona da esquerda ajustável), tamanho deles (85% por padrão),
+  zona morta e área de toque dos botões. Modelo: `TouchPro.kt` do Dragon Rage.
+- **Página Controles:** guia "O que cada botão faz" por cena, com o desenho dos próprios botões
+  (`NinjaPadView.paintSample`); seção Toque Pro com guia de cartões desenhados ("Como funciona"); editor de macros em tela
+  cheia: modelos (Jutsu, Ougi, ↑↑○, ↓↓○, combo, turbo), botões por passo, tempo com − + e atalhos, mover, duplicar,
+  pausa, repetir, mostrar e tamanho na tela, "Salvar e posicionar" abre o editor de layout. Textos novos em
+  `strings_touch.xml` (en, pt, es).
+- **Conferido:** `assembleDebug`, `TouchConfigTest` (arquivo antigo e ida e volta), capturas Robolectric em
+  `android/build/shots/` (luta em 1560x720 e 1280x720: padrão, com nomes e Pro com o polegar; página, guia e editor
+  de macros em pt).
+- **Falta no aparelho:** se o ↑↑○ e o ↓↓○ saem no jogo com 70/50/90 ms (e com o "Especial com um botão" ligado, que
+  pode tomar o ○ final); o R3 numa luta; o △, □ e L1/R1 no mapa da campanha; o Toque Pro jogado (deslizar, direcional
+  dinâmico).
 
 ### 2026-11-12 12:00, dia: nativo × GS do ARMSX2 no Mi A3 a 1x; **o GS passa a ser o padrão**, o nativo vira opção
 

@@ -13,6 +13,16 @@ import com.dfdx047.hiddenleaf.touch.PadScene
 import com.dfdx047.hiddenleaf.touch.PadStyle
 import com.dfdx047.hiddenleaf.touch.TouchConfig
 import com.dfdx047.hiddenleaf.touch.TouchMode
+import com.dfdx047.hiddenleaf.touch.Macro
+import com.dfdx047.hiddenleaf.touch.MacroStep
+import com.dfdx047.hiddenleaf.touch.ProTouch
+import com.dfdx047.hiddenleaf.touch.Ps2
+import com.dfdx047.hiddenleaf.ui.screens.ControlsContent
+import com.dfdx047.hiddenleaf.ui.screens.MacroEditorContent
+import com.dfdx047.hiddenleaf.ui.screens.ProGuideContent
+import com.dfdx047.hiddenleaf.ui.theme.HiddenLeafTheme
+import com.dfdx047.hiddenleaf.ui.theme.ThemeMode
+import androidx.activity.compose.setContent
 import java.io.File
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,6 +72,91 @@ class ScreenshotTest {
             }
         }
     }
+
+    /** The fight's controller at [w] x [h] px: the defaults, with the names, and Toque Pro with the thumb on the D-pad. */
+    private fun fightPads(w: Int, h: Int, tag: String) {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val cases = listOf(
+            "default" to TouchConfig(mode = TouchMode.ALWAYS),
+            "names" to TouchConfig(mode = TouchMode.ALWAYS, showNames = true),
+            "pro" to TouchConfig(mode = TouchMode.ALWAYS, pro = ProTouch(on = true)),
+        )
+        for ((name, cfg) in cases) {
+            val v = NinjaPadView(ctx, cfg)
+            v.previewScene = PadScene.FIGHT
+            v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+            v.layout(0, 0, w, h)
+            if (cfg.pro.on) {
+                // a thumb landing in the left zone (not on the D-pad) and pushing right: the D-pad floats to it
+                val t = android.os.SystemClock.uptimeMillis()
+                val x = w * 0.30f
+                val y = h * 0.55f
+                v.onTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, x, y, 0))
+                v.onTouchEvent(android.view.MotionEvent.obtain(t, t + 30, android.view.MotionEvent.ACTION_MOVE, x + h * 0.08f, y - h * 0.01f, 0))
+            }
+            save(v, "pad_${tag}_fight_$name") { c ->
+                val p = Paint()
+                p.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), Color.rgb(60, 80, 140), Color.rgb(200, 140, 90), Shader.TileMode.CLAMP)
+                c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+                p.shader = null
+                p.color = Color.rgb(70, 110, 60)
+                c.drawRect(0f, h * 0.78f, w.toFloat(), h.toFloat(), p)
+            }
+        }
+    }
+
+    // (20:9 and 16:9 phones in landscape, 720 px high at 2x: 780 x 360 dp and 640 x 360 dp, the tightest)
+    @Test
+    @Config(qualifiers = "pt-w780dp-h360dp-land-xhdpi")
+    fun pad209() = fightPads(1560, 720, "209")
+
+    @Test
+    @Config(qualifiers = "pt-w640dp-h360dp-land-xhdpi")
+    fun pad169() = fightPads(1280, 720, "169")
+
+    /** A composable on its own in an activity as tall as the page, so the whole page is in one picture. */
+    private fun shootCompose(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        val controller = Robolectric.buildActivity(androidx.activity.ComponentActivity::class.java).setup()
+        controller.get().setContent {
+            HiddenLeafTheme(mode = ThemeMode.DARK) {
+                androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) { content() }
+            }
+        }
+        repeat(20) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50)) }
+        save(controller.get().window.decorView, name)
+    }
+
+    private val sample = TouchConfig(
+        mode = TouchMode.ALWAYS,
+        macros = listOf(
+            Macro("a", "Kage", listOf(MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE or Ps2.TRIANGLE, 100))),
+            Macro("b", "Turbo", listOf(MacroStep(Ps2.CIRCLE, 50), MacroStep(0, 50)), repeat = true),
+        ),
+    )
+
+    @Test
+    @Config(qualifiers = "pt-w400dp-h5200dp-port-xhdpi")
+    fun controlsPage() = shootCompose("controls_pt") {
+        ControlsContent(sample.copy(pro = ProTouch(on = true)), emptyMap(), onTouch = {}, onSetting = { _, _ -> })
+    }
+
+    @Test
+    @Config(qualifiers = "pt-w400dp-h2200dp-port-xhdpi")
+    fun controlsCampaignGuide() = shootCompose("controls_pt_campaign") {
+        ControlsContent(sample, emptyMap(), onTouch = {}, onSetting = { _, _ -> }, startScene = PadScene.CAMPAIGN)
+    }
+
+    @Test
+    @Config(qualifiers = "pt-w400dp-h3000dp-port-xhdpi")
+    fun proGuide() = shootCompose("controls_pt_proguide") { ProGuideContent(sample) {} }
+
+    @Test
+    @Config(qualifiers = "pt-w400dp-h2400dp-port-xhdpi")
+    fun macroEditor() = shootCompose("controls_pt_macro") { MacroEditorContent(sample, sample.macros[0], 0, {}) { _, _ -> } }
+
+    @Test
+    @Config(qualifiers = "pt-w780dp-h1600dp-land-xhdpi")
+    fun macroEditorWide() = shootCompose("controls_pt_macro_wide") { MacroEditorContent(sample, sample.macros[0], 0, {}) { _, _ -> } }
 
     private fun shootActivity(name: String) {
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
