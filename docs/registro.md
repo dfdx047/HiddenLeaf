@@ -58,6 +58,43 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 11:30, dia: GS padrão testado no Mi A3 (resoluções, aspectos, OpenGL ES, menus, lutas inteiras, toques), três frentes juntas
+
+Tudo no Mi A3 pelo caminho padrão (GS do ARMSX2, sem `HL_NATIVE`), Nominum, 50 fps.
+
+- **Resolução** (rota `env_frac_1`, A / B fps): 0,5x 43,3 / 36,5; 0,75x 42,9 / 36,3; 1x 41,8 / 35,2; 1,5x 42,1 / 35,5;
+  2x 39,8 / 34,9; 3x 21,7 / 20,7. Até 2x o limite é a CPU (EE e VU1 ~20 ms); em 3x a GPU (`res_*`).
+- **Aspectos** (`asp_1333`, `asp_1778`): 4:3 e 16:9 com faixas laterais, menus, seleção, VS, carga e luta inteiros, os
+  botões nas faixas. 20:9 em `cmp_default`. Mesmo fps.
+- **OpenGL ES** (`cmp_gl`): os `eglChooseConfig 0x3004` eram só as tentativas de GL de PC; o ES 3.2 abria e o jogo
+  caía em `armKick` (`GSDeviceVK::GetInstance()` lendo o dispositivo GL). Corrigido (`34e42ea`): fora do Vulkan nada
+  do nativo roda. Desenha igual ao Vulkan, mas no Adreno 610 é mais lento (GS 46 ms/quadro, 31,7 / 27,7 fps, paradas
+  de 0,5 s compilando shader no início da luta). Fica como opção; o `gpu_api` do launcher agora chega ao motor.
+- **Ajustes do GS** (`gsx_*`, via `HL_GS_EXTRA`): `accurate_blending_unit=0`, `texture_preloading=1`,
+  `HWDownloadMode=2` não mudam o fps (dentro do ruído). O padrão fica.
+- **Lutas inteiras gravadas em vídeo** (`mia3run.sh` ganhou `REC=1`: `screenrecord` em trechos de 170 s,
+  `rec_N.mp4`): Kakashi × Naruto (`full_kakashi`, 5 min): boot, logos, filmes, título, seleção, arena, VS, carga, luta
+  com Ougi dos cães, vitória da CPU (volta direto à seleção, como no PCSX2) e a luta 2. **COM × COM não existe no
+  jogo** (o 2P entra só com START); as lutas foram 1P pela rota contra a CPU, sem `HL_CPU_HP`.
+  **Aberto:** o minijogo do Ougi do Kakashi sai com listras horizontais e o corte do Ougi com uma faixa preta; a rodada
+  de referência no PCSX2 (`runs/kak_ougi`) seguiu outro caminho e não teve o Ougi: não comparado.
+- **Menus** (`menus2`, vídeo): título, cartão, seleção de modo, Master Mode e a abertura em 3D da campanha (créditos e
+  falas) desenhados certos. (`menus`: a rota escolheu Load Game e ficou no cartão vazio; refeita.)
+- **Especiais por toque real** (`touch_sp3`, `touch_sp4`, `adb input tap`, `HL_PAD_LOG=1` novo em `un5_main.cpp`):
+  as sequências chegam ao jogo como devem (↑ 70 ms, solta 50, ↑ 70, solta 50, ○ 90; △○ e △△○ iguais), cada parte por
+  2 a 4 vsyncs a ~40 fps. O lutador ataca em cada uma e o Jutsu acende a aura de chakra; **não provei** pelo vídeo que
+  ↑↑○ dá um golpe diferente do ○. Risco: abaixo de ~25 fps a soltura de 50 ms pode cair entre dois quadros do jogo.
+- **Orientação** (`orient_port`, `orient_auto`): retrato com o jogo 4:3 em cima e os controles embaixo; automático
+  gira de paisagem para retrato com o jogo aberto, sem reiniciar. A volta para paisagem não foi fotografada.
+- **Launcher no aparelho** (`mia3/launcher/port_*.png`, retrato): barra com Início, Online, Controles, Ajustes, Mais;
+  Mais com Texturas, Mods, Drivers, Trapaças, Depuração. Sem texto cortado nas páginas vistas.
+- **Painel do jogo** (`GamePanel.kt`): sai a dica do R3, entram ↑↑○ e ↓↓○; os gestos dos menus só aparecem se a
+  opção antiga estiver ligada.
+- **Juntado nesta branch:** online (`af052ef`, `a3555f7`, `f22b6bb`, patch `0097` aplicado e compilado), controles
+  (`4a78a72`), launcher (`a83c68f`..`e5ddf86`). O online **não foi testado** (falta o Worker publicado e dois
+  aparelhos).
+- APK: `build/HiddenLeaf-20261112-gs.apk` (instalado no Mi A3).
+
 ### 2026-11-12 tarde: online de dois jogadores (salas, lockstep no motor, tela Online); não testado em aparelho
 
 Feito numa branch de agente, a partir do online do Dragon Rage (BT2), sem build do motor nem aparelho.

@@ -184,9 +184,10 @@ class GamePanel(
         tip("□", PS_PINK, R.string.gp_tip_item)
         tip("R2", INK, R.string.gp_tip_guard)
         tip("L1 R1", INK, R.string.gp_tip_items)
-        tip("R3", INK, R.string.gp_tip_awaken)
         tip("△○", ORANGE, R.string.gp_tip_jutsu)
         tip("△△○", RED, R.string.gp_tip_ougi)
+        tip("↑↑○", ORANGE, R.string.gp_tip_sp_up)
+        tip("↓↓○", ORANGE, R.string.gp_tip_sp_down)
         section(context.getString(R.string.gp_assists))
         choices(
             listOf(context.getString(R.string.off) to 0, context.getString(R.string.on) to 1),
@@ -209,13 +210,18 @@ class GamePanel(
         tip("◎", INK, R.string.gp_tip_stick)
         tip("SELECT", INK, R.string.gp_tip_select)
         section(context.getString(R.string.gp_menus))
-        tip("☝", INK, R.string.gp_tip_tap)
-        tip("⇆", INK, R.string.gp_tip_slide)
-        tip("☝…", INK, R.string.gp_tip_hold)
-        tip("✌", INK, R.string.gp_tip_two)
-        tip("✌⇆", INK, R.string.gp_tip_two_slide)
-        tip("✌…", INK, R.string.gp_tip_two_hold)
-        tip("3☝", INK, R.string.gp_tip_three)
+        if (touch().menuTouch) {
+            // (the menus by gestures, an option kept for those who turned it on)
+            tip("☝", INK, R.string.gp_tip_tap)
+            tip("⇆", INK, R.string.gp_tip_slide)
+            tip("☝…", INK, R.string.gp_tip_hold)
+            tip("✌", INK, R.string.gp_tip_two)
+            tip("✌⇆", INK, R.string.gp_tip_two_slide)
+            tip("✌…", INK, R.string.gp_tip_two_hold)
+            tip("3☝", INK, R.string.gp_tip_three)
+        } else {
+            tip("✚", INK, R.string.gp_tip_menu_pad)
+        }
         hint(context.getString(R.string.gp_controls_hint))
     }
 

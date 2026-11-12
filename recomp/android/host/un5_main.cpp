@@ -416,6 +416,12 @@ namespace
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPad(JNIEnv *, jclass, jint buttons, jint lx, jint ly,
                                                                                               jint rx, jint ry)
 {
+    // HL_PAD_LOG=1: each change of the touch buttons with the vsync and the time, to check the one-touch sequences (Jutsu,
+    // Ougi, ↑↑○, ↓↓○) as the game gets them
+    static const bool s_padLog = std::getenv("HL_PAD_LOG") != nullptr;
+    if (s_padLog && static_cast<unsigned>(buttons) != g_touchButtons.load(std::memory_order_relaxed))
+        std::fprintf(stderr, "[pad] v%u %llu ms touch %04x\n", hl_game::g_vsync.load(std::memory_order_relaxed),
+                     static_cast<unsigned long long>(SDL_GetTicks()), static_cast<unsigned>(buttons));
     g_touchButtons.store(static_cast<unsigned>(buttons), std::memory_order_relaxed);
     g_touchAxes.store(static_cast<unsigned>(lx & 0xFF) | static_cast<unsigned>(ly & 0xFF) << 8 | static_cast<unsigned>(rx & 0xFF) << 16 |
                           static_cast<unsigned>(ry & 0xFF) << 24,

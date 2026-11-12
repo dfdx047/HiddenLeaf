@@ -27,7 +27,7 @@
     <string name="gp_campaign">Campaña</string>
     <string name="gp_tip_stick">Stick: apoya el dedo en cualquier punto de la mitad izquierda.</string>
     <string name="gp_tip_select">El SELECT del juego, arriba en la pantalla.</string>
-    <string name="gp_menus">Menús (sin botones en pantalla)</string>
+    <string name="gp_menus">Menús</string>
     <string name="gp_tip_tap">Toque: ✕ (OK).</string>
     <string name="gp_tip_slide">Desliza: mueve el cursor. Mantén fuera del sitio para repetir.</string>
     <string name="gp_tip_hold">Mantén quieto: ○.</string>
@@ -39,7 +39,7 @@
     <string name="gp_touch_mode">Botones en pantalla</string>
     <string name="gp_touch_auto">Automático</string>
     <string name="gp_touch_always">Siempre</string>
-    <string name="gp_touch_mode_hint">Automático: botones en la pelea y en la campaña, gestos en los menús, y se ocultan cuando se usa un mando físico.</string>
+    <string name="gp_touch_mode_hint">Automático: botones en las peleas, la campaña y los menús; se ocultan mientras se usa un mando físico.</string>
     <string name="gp_style">Estilo</string>
     <string name="gp_style_ink">Tinta</string>
     <string name="gp_style_glass">Cristal</string>
@@ -50,4 +50,7 @@
     <string name="gp_haptics">Vibración</string>
     <string name="gp_edit_layout">Mover y redimensionar botones</string>
     <string name="on">Activado</string>
+    <string name="gp_tip_sp_up">↑ ↑ y luego ○ en un toque (el botón Especial 1).</string>
+    <string name="gp_tip_sp_down">↓ ↓ y luego ○ en un toque (el botón Especial 2).</string>
+    <string name="gp_tip_menu_pad">Cruceta para mover, ✕ confirma, ○ vuelve, △ y □ según indique la pantalla; START arriba.</string>
 </resources>

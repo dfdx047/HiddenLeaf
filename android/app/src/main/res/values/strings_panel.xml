@@ -27,7 +27,7 @@
     <string name="gp_campaign">Campaign</string>
     <string name="gp_tip_stick">Stick: put your finger anywhere on the left half.</string>
     <string name="gp_tip_select">The game\'s SELECT, at the top of the screen.</string>
-    <string name="gp_menus">Menus (no buttons on screen)</string>
+    <string name="gp_menus">Menus</string>
     <string name="gp_tip_tap">Tap: ✕ (OK).</string>
     <string name="gp_tip_slide">Slide: moves the cursor. Hold away to repeat.</string>
     <string name="gp_tip_hold">Hold still: ○.</string>
@@ -39,7 +39,7 @@
     <string name="gp_touch_mode">On-screen buttons</string>
     <string name="gp_touch_auto">Automatic</string>
     <string name="gp_touch_always">Always</string>
-    <string name="gp_touch_mode_hint">Automatic: buttons in fights and in the campaign, gestures in menus, hidden while a physical controller is used.</string>
+    <string name="gp_touch_mode_hint">Automatic: buttons in fights, the campaign and the menus; they hide while a physical controller is used.</string>
     <string name="gp_style">Style</string>
     <string name="gp_style_ink">Ink</string>
     <string name="gp_style_glass">Glass</string>
@@ -50,4 +50,7 @@
     <string name="gp_haptics">Vibration</string>
     <string name="gp_edit_layout">Move and resize buttons</string>
     <string name="on">On</string>
+    <string name="gp_tip_sp_up">↑ ↑ then ○ in one touch (the Special 1 button).</string>
+    <string name="gp_tip_sp_down">↓ ↓ then ○ in one touch (the Special 2 button).</string>
+    <string name="gp_tip_menu_pad">D-pad to move, ✕ to confirm, ○ to go back, △ and □ as the screen says; START at the top.</string>
 </resources>

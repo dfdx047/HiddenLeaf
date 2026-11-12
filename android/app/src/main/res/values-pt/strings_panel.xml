@@ -27,7 +27,7 @@
     <string name="gp_campaign">Campanha</string>
     <string name="gp_tip_stick">Analógico: encoste o dedo em qualquer ponto da metade esquerda.</string>
     <string name="gp_tip_select">O SELECT do jogo, no topo da tela.</string>
-    <string name="gp_menus">Menus (sem botões na tela)</string>
+    <string name="gp_menus">Menus</string>
     <string name="gp_tip_tap">Toque: ✕ (OK).</string>
     <string name="gp_tip_slide">Deslize: move o cursor. Segure fora do lugar para repetir.</string>
     <string name="gp_tip_hold">Segure parado: ○.</string>
@@ -39,7 +39,7 @@
     <string name="gp_touch_mode">Botões na tela</string>
     <string name="gp_touch_auto">Automático</string>
     <string name="gp_touch_always">Sempre</string>
-    <string name="gp_touch_mode_hint">Automático: botões na luta e na campanha, gestos nos menus, e somem quando um controle físico é usado.</string>
+    <string name="gp_touch_mode_hint">Automático: botões na luta, na campanha e nos menus; somem enquanto um controle físico é usado.</string>
     <string name="gp_style">Estilo</string>
     <string name="gp_style_ink">Tinta</string>
     <string name="gp_style_glass">Vidro</string>
@@ -50,4 +50,7 @@
     <string name="gp_haptics">Vibração</string>
     <string name="gp_edit_layout">Mover e redimensionar botões</string>
     <string name="on">Ligado</string>
+    <string name="gp_tip_sp_up">↑ ↑ e depois ○ num toque só (o botão Especial 1).</string>
+    <string name="gp_tip_sp_down">↓ ↓ e depois ○ num toque só (o botão Especial 2).</string>
+    <string name="gp_tip_menu_pad">Direcional para mover, ✕ confirma, ○ volta, △ e □ como a tela indicar; START no topo.</string>
 </resources>
