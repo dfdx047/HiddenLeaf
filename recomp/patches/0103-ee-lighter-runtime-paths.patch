@@ -1,0 +1,392 @@
+--- a/ps2xRuntime/include/runtime/hl_vu_worker.h
++++ b/ps2xRuntime/include/runtime/hl_vu_worker.h
+@@ -2,12 +2,31 @@
+ // Hidden Leaf (Android): the VIF1 and GIF channels on their own thread (src/lib/hl_vu_worker.cpp).
+ #include <cstdint>
+ #include <functional>
++#include <new>
++#include <utility>
+ #include <vector>
+ 
+ class PS2Memory;
+ 
+ namespace hl_vuworker
+ {
++    // A byte vector whose resize leaves the new bytes as they are: the transfers' buffers are filled with memcpy right
++    // after, and zeroing them first (to the capacity, each chain) was 4% of the game thread on the RG Cube (2026-11-12)
++    template <class T>
++    struct NoInitAlloc : std::allocator<T>
++    {
++        template <class U>
++        struct rebind { using other = NoInitAlloc<U>; };
++        NoInitAlloc() noexcept = default;
++        template <class U>
++        NoInitAlloc(const NoInitAlloc<U> &) noexcept {}
++        template <class U>
++        void construct(U *p) noexcept { ::new (static_cast<void *>(p)) U; }
++        template <class U, class... A>
++        void construct(U *p, A &&...a) { ::new (static_cast<void *>(p)) U(std::forward<A>(a)...); }
++    };
++    using Bytes = std::vector<uint8_t, NoInitAlloc<uint8_t>>;
++
+     enum class Kind : uint8_t
+     {
+         Vif1, // a VIF1 transfer, already copied out of the guest's memory
+@@ -17,9 +36,9 @@
+ 
+     bool enabled();                                 // HL_VUWORKER=0: everything on the game thread
+     bool onWorker();                                // this thread is the worker
+-    void post(PS2Memory *memory, Kind kind, std::vector<uint8_t> &&data);
++    void post(PS2Memory *memory, Kind kind, Bytes &&data);
+     void postCall(std::function<void()> call, bool frameEnd);
+     void sync();                                    // back when the worker has done everything posted (no-op on the worker)
+     bool busy();                                    // something posted is not done yet (false on the worker)
+-    std::vector<uint8_t> takeBuffer();              // an emptied buffer to fill, with its capacity
++    Bytes takeBuffer();              // an emptied buffer to fill, with its capacity
+ }
+--- a/ps2xRuntime/src/lib/hl_vu_worker.cpp
++++ b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+@@ -30,7 +30,7 @@
+             Kind kind = Kind::Call;
+             bool frameEnd = false;
+             PS2Memory *memory = nullptr;
+-            std::vector<uint8_t> data;
++            Bytes data;
+             std::function<void()> call;
+         };
+ 
+@@ -42,7 +42,7 @@
+         std::mutex s_mutex;
+         std::condition_variable s_wakeWorker, s_wakeGame;
+         std::deque<Command> s_queue;
+-        std::vector<std::vector<uint8_t>> s_free;
++        std::vector<Bytes> s_free;
+         uint64_t s_queuedBytes = 0;
+         uint32_t s_framesQueued = 0;
+         bool s_running = false; // running a command
+@@ -176,7 +176,7 @@
+ 
+     bool onWorker() { return t_worker; }
+ 
+-    void post(PS2Memory *memory, Kind kind, std::vector<uint8_t> &&data)
++    void post(PS2Memory *memory, Kind kind, Bytes &&data)
+     {
+         Command command;
+         command.kind = kind;
+@@ -215,7 +215,7 @@
+         return !s_queue.empty() || s_running;
+     }
+ 
+-    std::vector<uint8_t> takeBuffer()
++    Bytes takeBuffer()
+     {
+         std::lock_guard lock(s_mutex);
+         if (s_free.empty())
+@@ -225,7 +225,7 @@
+         for (size_t i = 1; i < s_free.size(); ++i)
+             if (s_free[i].capacity() > s_free[best].capacity())
+                 best = i;
+-        std::vector<uint8_t> buffer = std::move(s_free[best]);
++        Bytes buffer = std::move(s_free[best]);
+         s_free[best] = std::move(s_free.back());
+         s_free.pop_back();
+         return buffer;
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -12,6 +12,7 @@
+ #include <mutex>
+ 
+ #include "gs/ps2_gif_arbiter.h"
++#include "hl_vu_worker.h"
+ #if defined(_MSC_VER)
+ #include <intrin.h>
+ #elif defined(USE_SSE2NEON)
+@@ -417,14 +418,15 @@
+         bool fromScratchpad = false;
+         uint32_t srcAddr = 0;
+         uint32_t qwc = 0;
+-        std::vector<uint8_t> chainData;
++        hl_vuworker::Bytes chainData;
+     };
+     std::vector<PendingTransfer> m_pendingGifTransfers;
+     std::vector<PendingTransfer> m_pendingVif0Transfers;
+     std::vector<PendingTransfer> m_pendingVif1Transfers;
+-    std::vector<uint8_t> m_chainSpare;
++    hl_vuworker::Bytes m_chainSpare;
+     std::mutex m_completedDmacMutex;
+     std::vector<uint32_t> m_completedDmacCauses;
++    std::atomic<bool> m_completedDmacAny{false}; // (Hidden Leaf: m_completedDmacCauses not empty, read without the lock)
+ 
+     struct CodeRegion
+     {
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -351,6 +351,7 @@
+     {
+         std::lock_guard<std::mutex> lock(m_completedDmacMutex);
+         m_completedDmacCauses.clear();
++        m_completedDmacAny.store(false, std::memory_order_relaxed);
+     }
+     m_codeRegions.clear();
+     m_path3Masked = false;
+@@ -363,8 +364,10 @@
+     try
+     {
+         // Allocate main RAM
+-        m_rdram = new uint8_t[ramSize];
+-        std::memset(m_rdram, 0, ramSize);
++        // Hidden Leaf: 64 bytes past the end, so the generated code's aligned accesses need no test for the wrap at 32 MB
++        // (ps2_runtime_macros.h, Ps2FastRead/Write); an unaligned one across the end lands there instead of wrapping
++        m_rdram = new uint8_t[ramSize + 64u];
++        std::memset(m_rdram, 0, ramSize + 64u);
+ 
+         // Allocate scratchpad
+         m_scratchpad = new uint8_t[PS2_SCRATCHPAD_SIZE];
+@@ -1384,9 +1387,9 @@
+                     // 12000 tags, and at 4096 the walk stopped after the scenery: no characters, HUD or banner.
+                     const int kMaxChainTags = 1 << 20;
+                     #if defined(PS2X_HEADLESS_HOST)
+-                    std::vector<uint8_t> chainBuf = hl_vuworker::enabled() ? hl_vuworker::takeBuffer() : std::move(m_chainSpare);
++                    hl_vuworker::Bytes chainBuf = hl_vuworker::enabled() ? hl_vuworker::takeBuffer() : std::move(m_chainSpare);
+ #else
+-                    std::vector<uint8_t> chainBuf = std::move(m_chainSpare); // (kept: a new one per chain was mmap and page faults)
++                    hl_vuworker::Bytes chainBuf = std::move(m_chainSpare); // (kept: a new one per chain was mmap and page faults)
+ #endif
+                     // Hidden Leaf: filled with memcpy past a count of its own, its size kept between chains (no zeroing; the
+                     // byte-wise vector insert of a 2-4 MB fight chain was a third of the game thread on the Mi A3, 2026-11-12)
+@@ -1756,11 +1759,11 @@
+ #if defined(PS2X_HEADLESS_HOST)
+     const bool toWorker = hl_vuworker::enabled() && !hl_vuworker::onWorker();
+     // what the transfer carries, out of the guest's memory (chains are copied at the kick already)
+-    const auto takeData = [this](PendingTransfer &p) -> std::vector<uint8_t>
++    const auto takeData = [this](PendingTransfer &p) -> hl_vuworker::Bytes
+     {
+         if (!p.chainData.empty())
+             return std::move(p.chainData);
+-        std::vector<uint8_t> copy = hl_vuworker::takeBuffer(); // (Hidden Leaf: the worker's spare, not a new one each)
++        hl_vuworker::Bytes copy = hl_vuworker::takeBuffer(); // (Hidden Leaf: the worker's spare, not a new one each)
+         copy.clear();
+         if (p.qwc == 0u)
+             return copy;
+@@ -1776,13 +1779,15 @@
+         const uint8_t *base = p.fromScratchpad ? m_scratchpad : m_rdram;
+         const uint32_t limit = p.fromScratchpad ? PS2_SCRATCHPAD_SIZE : PS2_RAM_SIZE;
+         uint32_t left = p.qwc * 16u;
+-        copy.reserve(left);
++        copy.resize(left); // (not zeroed: Bytes)
++        uint8_t *out = copy.data();
+         while (left != 0u)
+         {
+             if (src >= limit)
+                 src = 0u;
+             const uint32_t chunk = std::min(left, limit - src);
+-            copy.insert(copy.end(), base + src, base + src + chunk);
++            std::memcpy(out, base + src, chunk);
++            out += chunk;
+             left -= chunk;
+             src += chunk;
+         }
+@@ -1792,7 +1797,7 @@
+     {
+         for (auto &p : m_pendingGifTransfers)
+         {
+-            std::vector<uint8_t> data = takeData(p);
++            hl_vuworker::Bytes data = takeData(p);
+             if (data.empty())
+                 continue;
+             m_seenGifCopy = true;
+@@ -1930,7 +1935,7 @@
+     {
+         for (auto &p : m_pendingVif1Transfers)
+         {
+-            std::vector<uint8_t> data = takeData(p);
++            hl_vuworker::Bytes data = takeData(p);
+             if (!data.empty())
+                 hl_vuworker::post(this, hl_vuworker::Kind::Vif1, std::move(data));
+         }
+@@ -2051,13 +2056,18 @@
+ {
+     std::lock_guard<std::mutex> lock(m_completedDmacMutex);
+     m_completedDmacCauses.push_back(cause);
++    m_completedDmacAny.store(true, std::memory_order_release);
+ }
+ 
+ std::vector<uint32_t> PS2Memory::consumeCompletedDmacCauses()
+ {
++    // Hidden Leaf: Store32 asks after every write; nearly always there is nothing, and the lock was 2% of the game thread
++    if (!m_completedDmacAny.load(std::memory_order_acquire))
++        return {};
+     std::lock_guard<std::mutex> lock(m_completedDmacMutex);
+     std::vector<uint32_t> causes;
+     causes.swap(m_completedDmacCauses);
++    m_completedDmacAny.store(false, std::memory_order_relaxed);
+     return causes;
+ }
+ 
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -575,11 +575,27 @@
+     return _mm_castsi128_ps(_mm_andnot_si128(_mm_and_si128(zeroExp, _mm_set1_epi32(0x7FFFFFFF)), out));
+ }
+ 
+-inline bool ps2_vany_exp255(__m128 r)
++// Hidden Leaf: a lane of a compare's result is set. On arm64 one UMAXV: the NEON shim's _mm_movemask_epi8 is ten
++// instructions, and the VU0 macro ADD/MUL ran it once or twice each (13000 of them in the game's code, 2026-11-12)
++inline bool ps2_vany(__m128i m)
++{
++#if defined(__aarch64__)
++    return vmaxvq_u32(vreinterpretq_u32_s64(m)) != 0u;
++#else
++    return _mm_movemask_epi8(m) != 0;
++#endif
++}
++
++inline __m128i ps2_vexp255(__m128 r)
+ {
+     const __m128i expMask = _mm_set1_epi32(0x7F800000);
+     const __m128i rexp = _mm_and_si128(_mm_castps_si128(r), expMask);
+-    return _mm_movemask_epi8(_mm_cmpeq_epi32(rexp, expMask)) != 0;
++    return _mm_cmpeq_epi32(rexp, expMask);
++}
++
++inline bool ps2_vany_exp255(__m128 r)
++{
++    return ps2_vany(ps2_vexp255(r));
+ }
+ 
+ // VU0 macro ADD/SUB/MUL: denormal operands as zero, rounded toward zero (PCSX2's VU0 MXCSR), exponent 255 as on the
+@@ -610,7 +626,7 @@
+     const __m128i rabs = _mm_and_si128(_mm_castps_si128(r), _mm_set1_epi32(0x7FFFFFFF));
+     const __m128i small = _mm_andnot_si128(_mm_cmpeq_epi32(rabs, _mm_setzero_si128()),
+                                            _mm_cmplt_epi32(rabs, _mm_set1_epi32(48 << 23)));
+-    if (ps2_vany_exp255(r) || _mm_movemask_epi8(small) != 0)
++    if (ps2_vany(_mm_or_si128(ps2_vexp255(r), small)))
+         return ps2_vslow(a, b, Ps2VecOp::Mul);
+ #if defined(__aarch64__)
+     // (Android: the SSE names come from a NEON shim without _mm_fmadd_ps; vfmaq_f32 is the same fused a * b - r)
+@@ -650,9 +666,14 @@
+ // Fast path: Direct RDRAM access (masked).
+ // Slow path: Full runtime->Load/Store
+ 
++// Hidden Leaf: always, since the guest RAM has 64 bytes past its 32 MB (PS2Memory::initialize). An aligned access never
++// crosses the end; an unaligned one across it (no game does that) lands in those bytes instead of wrapping to address 0.
++// The test was a compare and a branch on every load and store of the generated code (2026-11-12).
+ static inline bool Ps2FastRangeIsContiguous(uint32_t offset, uint32_t bytes)
+ {
+-    return offset <= (PS2_RAM_SIZE - bytes);
++    (void)offset;
++    (void)bytes;
++    return true;
+ }
+ 
+ static inline uint8_t Ps2FastRead8(const uint8_t *rdram, uint32_t addr)
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -285,13 +285,16 @@
+     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept
+     {
+         accountCycles(cycles);
+-        if (m_stopRequested.load(std::memory_order_acquire))
++        // (relaxed: a poll of flags other threads raise. Seen a check later, it is the same as before; whatever is set
++        // goes through checkpointDueSlow, which reads them again with acquire. Three LDARs on every loop edge before.)
++        if (m_stopRequested.load(std::memory_order_relaxed))
+         {
++            std::atomic_thread_fence(std::memory_order_acquire);
+             m_hlSuspending = true;
+             return true;
+         }
+-        const uint64_t nextEventCycle = m_nextDeadlineCycle.load(std::memory_order_acquire);
+-        if (!m_checkpointPending.load(std::memory_order_acquire) && (nextEventCycle == 0u || m_eeCycle < nextEventCycle) &&
++        const uint64_t nextEventCycle = m_nextDeadlineCycle.load(std::memory_order_relaxed);
++        if (!m_checkpointPending.load(std::memory_order_relaxed) && (nextEventCycle == 0u || m_eeCycle < nextEventCycle) &&
+             m_eeCycle < m_sliceEndCycle)
+         {
+             return false;
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -2055,6 +2055,18 @@
+ void EeScheduler::processPendingEvents()
+ {
+     assertExecutor();
++    // Hidden Leaf: nothing to do (no timer interrupt; no event, since a posted one sets m_checkpointPending under the lock
++    // and only the end of this function clears it, under the lock, with m_events empty; no deadline reached): the same as
++    // the way below, without its three locks (1-2% of the game thread on the RG Cube, 2026-11-12)
++    if (m_pendingEeTimerInterrupts == 0u && !m_checkpointPending.load(std::memory_order_acquire))
++    {
++        const uint64_t nextEventCycle = m_nextDeadlineCycle.load(std::memory_order_acquire);
++        if (nextEventCycle == 0u || m_eeCycle < nextEventCycle)
++        {
++            applyPendingPreemption();
++            return;
++        }
++    }
+     processDueDeadlines();
+     const uint32_t timerInterrupts = m_pendingEeTimerInterrupts;
+     m_pendingEeTimerInterrupts = 0u;
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -116,14 +116,17 @@
+     constexpr uint32_t EXCEPTION_VECTOR_TLB_REFILL = 0x80000000u;
+     constexpr uint32_t EXCEPTION_VECTOR_BOOT = 0xBFC00200u;
+ 
++    // Hidden Leaf: one ring for the whole program, not one per thread: thread_local in a library loaded with dlopen goes
++    // through the dynamic TLS resolver on every guest call (0.5% of the game thread by itself on the RG Cube, 2026-11-12).
++    // Nearly all of it comes from the EE's thread; a write from another one at the same time can only lose an entry.
+     struct DispatchHistory
+     {
+-        std::array<uint32_t, 64> pcs{};
+-        uint32_t next = 0u;
+-        bool wrapped = false;
++        std::array<std::atomic<uint32_t>, 64> pcs{};
++        std::atomic<uint32_t> next{0u};
++        std::atomic<bool> wrapped{false};
+     };
+ 
+-    thread_local DispatchHistory g_dispatchHistory;
++    DispatchHistory g_dispatchHistory;
+ 
+     bool computeFileCrc32(const std::string &path, uint32_t &crcOut)
+     {
+@@ -170,18 +173,21 @@
+     void pushDispatchPc(uint32_t pc)
+     {
+         DispatchHistory &h = g_dispatchHistory;
+-        h.pcs[h.next] = pc;
+-        h.next = (h.next + 1u) % static_cast<uint32_t>(h.pcs.size());
+-        if (h.next == 0u)
++        const uint32_t at = h.next.load(std::memory_order_relaxed) % static_cast<uint32_t>(h.pcs.size());
++        h.pcs[at].store(pc, std::memory_order_relaxed);
++        const uint32_t next = (at + 1u) % static_cast<uint32_t>(h.pcs.size());
++        h.next.store(next, std::memory_order_relaxed);
++        if (next == 0u)
+         {
+-            h.wrapped = true;
++            h.wrapped.store(true, std::memory_order_relaxed);
+         }
+     }
+ 
+     std::string formatDispatchHistory()
+     {
+         const DispatchHistory &h = g_dispatchHistory;
+-        const uint32_t count = h.wrapped ? static_cast<uint32_t>(h.pcs.size()) : h.next;
++        const uint32_t next = h.next.load(std::memory_order_relaxed);
++        const uint32_t count = h.wrapped.load(std::memory_order_relaxed) ? static_cast<uint32_t>(h.pcs.size()) : next;
+         if (count == 0u)
+         {
+             return "(empty)";
+@@ -191,13 +197,13 @@
+         bool first = true;
+         for (uint32_t i = 0u; i < count; ++i)
+         {
+-            const uint32_t idx = (h.next + h.pcs.size() - count + i) % static_cast<uint32_t>(h.pcs.size());
++            const uint32_t idx = (next + h.pcs.size() - count + i) % static_cast<uint32_t>(h.pcs.size());
+             if (!first)
+             {
+                 oss << " -> ";
+             }
+             first = false;
+-            oss << "0x" << std::hex << h.pcs[idx];
++            oss << "0x" << std::hex << h.pcs[idx].load(std::memory_order_relaxed);
+         }
+         return oss.str();
+     }

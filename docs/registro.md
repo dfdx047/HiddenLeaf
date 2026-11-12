@@ -59,6 +59,46 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 21:40, noite: o EE 20% mais leve (patch `0103`); o limite do Mi A3 passa a ser a VU1
+
+- **Pergunta do desenvolvedor:** o limite é o EE; é da recompilação? Perfil DWARF da GameThread no RG Cube (luta 2x,
+  10 s, `simpleperf -t <GameThread> --call-graph dwarf`): 58% no código gerado, o resto no runtime em volta:
+  `dispatchGuestBranch` 7,6% (próprio), `eeCheckpointDue` 4,0%, `memset` 4,2% (todo de `vector::resize`), mutex 4,7%,
+  `__memcpy` 3,9% (a cópia da cadeia do DMA no `writeIORegister`), VU0 em micro modo no interpretador 3,4%.
+- **Patch `0103-ee-lighter-runtime-paths.patch`:**
+  1. Os buffers das cadeias do DMA e das transferências para o `VuWorker` são `hl_vuworker::Bytes` (vector com
+     alocador que não zera): o `resize(capacity)` zerava até a capacidade inteira a cada cadeia, e o memcpy escrevia por
+     cima. O `takeData` usa `resize` + `memcpy`. O `memset` sumiu do perfil; o EE ficou no ruído (11,4 → 11,3 ms).
+  2. `ps2_vany` (`ps2_runtime_macros.h`): no arm64 o "alguma faixa?" dos `ps2_vadd`/`ps2_vmul` (VU0 macro, 13265 usos
+     no código gerado) é um `UMAXV`; o `_mm_movemask_epi8` do sse2neon era ~10 instruções, uma ou duas vezes por
+     operação. Cube: EE 11,4 / 13,3 → 10,7 / 12,9 ms (fases A / B, `cube_vany`).
+  3. O `Store32` perguntava pelas causas de DMA concluídas travando um mutex em toda escrita de registrador: agora um
+     `atomic<bool>` diz se há alguma. O `processPendingEvents` volta logo quando não há evento, prazo vencido nem
+     interrupção de timer, sem os três locks (o `m_checkpointPending` só é limpo sob o lock com a fila vazia, então ele
+     falso garante que não há evento). O histórico de despachos deixou de ser `thread_local` (numa `.so` aberta por
+     `dlopen` cada acesso passa pelo `tlsdesc_resolver_dynamic`). A RAM do PS2 ganhou 64 bytes de folga depois dos
+     32 MB, e o `Ps2FastRangeIsContiguous` responde sempre sim: o código gerado não testa mais a volta nos 32 MB em cada
+     leitura e escrita (um acesso alinhado nunca cruza o fim). Isso tirou um caminho de volta byte a byte de cada acesso:
+     a `libun5.so` caiu de 161 para 116 MB.
+  - **Cube, luta 2x:** EE 10,7 / 12,9 → **8,8 / 10,5 ms** (`cube_ee3`); a thread do jogo ocupada 4344 amostras em 10 s
+    contra 5527 antes. Mesmas vidas nos mesmos pontos (98, 96, 93, 91, 88, 86), vídeo certo. **Campanha 2x**
+    (`cube_camp_ee3`, v8300–10300): EE 12,5 → 10,1 ms, 49,8 fps; portão, "Skip?", vila, tutorial de pulo, Ichiraku certos.
+  - **Mi A3 (v8.0, 1x, `cmp_default`):** EE 16,6 / 19,2 → 14,8 / 16,3 ms (`mia3_ee3`, `mia3_ee3b`, vídeo certo); fps
+    49,2 / 44,7 → 48,0 / 45,8. **No Mi A3 o limite agora é a VU1 do Nominum** (17,3 / 19,5 ms), não mais o EE.
+  - **A35 no Cube** (pacotes v8.2 e v8.0 refeitos com o `0103`, `cube_a35_ee3`, vídeo certo: carregar, seleção, VS,
+    luta): EE 11,9 / 13,7 → 9,2 / 10,9 ms, 58,9 / 58,7 fps. APK `build/HiddenLeaf-20261112-ee.apk`, instalado no Cube e
+    no Mi A3 (o A35 desligado de novo no Cube).
+  - Perfil depois (`ee3.data`): mutexes 0,85%; sobra `dispatchGuestBranch` 8,2%, `eeCheckpointDue` 5,3%, `__memcpy` 4,6%,
+    VU0 micro 2,9%, `translateAddress` + `inRange` 3,5%.
+- **Tentado e descartado:** `__restrict` no `ctx` das 22560 funções geradas (o compilador poderia manter registradores
+  do PS2 em registradores do ARM entre acessos à RAM, que com `-fno-strict-aliasing` podem apontar para o `ctx`):
+  12,9 → 12,7 ms, dentro do ruído e com risco de comportamento indefinido. `eeCheckpointDue` em linha no código gerado:
+  9,2 / 10,8 ms contra 8,8 / 10,5, e +2,7 MB. Os dois desfeitos.
+- **Resposta:** a recompilação em si (registradores do PS2 no `ctx`, 3 a 7 instruções ARM por instrução MIPS) é a
+  maior parte, mas o que dava para tirar rápido estava em volta dela: código inchado pelo teste de volta, locks e
+  helpers do sse2neon. Recompilar com cache de registradores (variáveis locais por função) seria uma mudança no gerador
+  do PS2Recomp, bem maior.
+
 ### 2026-11-12 20:05, noite: os três mods no RG Cube (2x, VU1 do Nominum); a thread do IOP também nos pacotes de código
 
 - **Importação como jogador:** as três ISOs em `Download` do Cube, importadas pela tela de Mods (A35 16 arquivos,
