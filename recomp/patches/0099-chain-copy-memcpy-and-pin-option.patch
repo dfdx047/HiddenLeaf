@@ -1,0 +1,135 @@
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1388,7 +1388,18 @@
+ #else
+                     std::vector<uint8_t> chainBuf = std::move(m_chainSpare); // (kept: a new one per chain was mmap and page faults)
+ #endif
+-                    chainBuf.clear();
++                    // Hidden Leaf: filled with memcpy past a count of its own, its size kept between chains (no zeroing; the
++                    // byte-wise vector insert of a 2-4 MB fight chain was a third of the game thread on the Mi A3, 2026-11-12)
++                    size_t chainUsed = 0;
++                    if (chainBuf.size() < chainBuf.capacity())
++                        chainBuf.resize(chainBuf.capacity());
++                    auto chainPut = [&](const uint8_t *from, size_t n)
++                    {
++                        if (chainUsed + n > chainBuf.size())
++                            chainBuf.resize(std::max<size_t>(chainUsed + n, chainBuf.size() + chainBuf.size() / 2u + (256u << 10)));
++                        std::memcpy(chainBuf.data() + chainUsed, from, n);
++                        chainUsed += n;
++                    };
+ 
+                     auto appendData = [&](uint32_t srcAddr, uint32_t qwCount)
+                     {
+@@ -1419,7 +1430,7 @@
+                                 chunk = maxSz2 - src;
+                             if (chunk == 0)
+                                 break;
+-                            chainBuf.insert(chainBuf.end(), base2 + src, base2 + src + chunk);
++                            chainPut(base2 + src, chunk);
+                             bytes -= chunk;
+                             src += chunk;
+                         }
+@@ -1438,7 +1449,7 @@
+ 
+                         // CHCR.TTE sends the DMAtag's upper 64 bits to the channel before
+                         // the tag payload. VIF chains use those bytes for two VIFcodes.
+-                        chainBuf.insert(chainBuf.end(), localBase + tagPhys + 8u, localBase + tagPhys + 16u);
++                        chainPut(localBase + tagPhys + 8u, 8u);
+                     };
+ 
+                     const bool isVifChannel =
+@@ -1568,6 +1579,8 @@
+                             break;
+                     }
+ 
++                    chainBuf.resize(chainUsed); // (shrinking: nothing freed or written)
++
+                     // Hidden Leaf: HL_DMA_LOG=1 prints each chain walk (channel, tags, bytes, where it stopped)
+                     static const bool s_dmaLog = std::getenv("HL_DMA_LOG") != nullptr;
+                     if (s_dmaLog)
+--- a/ps2xRuntime/src/lib/hl_vu_worker.cpp
++++ b/ps2xRuntime/src/lib/hl_vu_worker.cpp
+@@ -116,10 +116,21 @@
+                     --s_framesQueued;
+                 // Hidden Leaf: up to 256 kept (a fight frame posts hundreds of transfers: with 16 the game thread
+                 // allocated and freed a vector for most of them), none over 4 MB
+-                if (command.data.capacity() != 0u && command.data.capacity() <= (4u << 20) && s_free.size() < 256u)
++                // (up to 16 MB each: a fight chain is 2-4.5 MB and was freed and mapped again every frame; the size is
++                // kept, the chain walk writes over it without zeroing)
++                if (command.data.capacity() != 0u && command.data.capacity() <= (16u << 20))
+                 {
+-                    command.data.clear();
+-                    s_free.push_back(std::move(command.data));
++                    if (s_free.size() < 256u)
++                        s_free.push_back(std::move(command.data));
++                    else
++                    {   // full: it takes the smallest one's place when larger
++                        size_t small = 0;
++                        for (size_t i = 1; i < s_free.size(); ++i)
++                            if (s_free[i].capacity() < s_free[small].capacity())
++                                small = i;
++                        if (s_free[small].capacity() < command.data.capacity())
++                            s_free[small] = std::move(command.data);
++                    }
+                 }
+                 if (s_gameWaiting)
+                     s_wakeGame.notify_all();
+@@ -209,7 +220,13 @@
+         std::lock_guard lock(s_mutex);
+         if (s_free.empty())
+             return {};
+-        std::vector<uint8_t> buffer = std::move(s_free.back());
++        // the largest kept (the small transfers' buffers are kept too: a chain started in one of them grew it every time)
++        size_t best = 0;
++        for (size_t i = 1; i < s_free.size(); ++i)
++            if (s_free[i].capacity() > s_free[best].capacity())
++                best = i;
++        std::vector<uint8_t> buffer = std::move(s_free[best]);
++        s_free[best] = std::move(s_free.back());
+         s_free.pop_back();
+         return buffer;
+     }
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -95,6 +95,41 @@
+                     std::fprintf(stderr, "[perf] nice %s tid %s: %d (errno %d)\n", comm, entry->d_name, r, r ? errno : 0);
+                     // HL_PIN=0 turns this off: the EE and the VU1 on the big cores only (the scheduler otherwise moves them to small ones as soon as there is room)
+                     const char *pin = std::getenv("HL_PIN");
++                    // HL_PIN=x: one big core each, from the last: the EE, the VU1, PCSX2's GS (three threads that each fill a
++                    // core in a fight; with the set of big cores the scheduler put two on one, Mi A3 2026-11-12)
++                    if (pin && pin[0] == 'x')
++                    {
++                        int capacity[32] = {}, count = 0, lowest = 1 << 30;
++                        for (; count < 32; ++count)
++                        {
++                            char cap[96];
++                            std::snprintf(cap, sizeof(cap), "/sys/devices/system/cpu/cpu%d/cpu_capacity", count);
++                            FILE *c = std::fopen(cap, "r");
++                            if (!c || std::fscanf(c, "%d", &capacity[count]) != 1)
++                            {
++                                if (c)
++                                    std::fclose(c);
++                                break;
++                            }
++                            std::fclose(c);
++                            lowest = std::min(lowest, capacity[count]);
++                        }
++                        int big[32], nbig = 0;
++                        for (int i = count - 1; i >= 0; --i)
++                            if (capacity[i] > lowest)
++                                big[nbig++] = i;
++                        const int slot = std::strcmp(comm, "GameThread\n") == 0 ? 0 : std::strcmp(comm, "VuWorker\n") == 0 ? 1 : 2;
++                        if (nbig >= 3)
++                        {
++                            cpu_set_t one;
++                            CPU_ZERO(&one);
++                            CPU_SET(big[slot], &one);
++                            const int a = sched_setaffinity(static_cast<pid_t>(std::atoi(entry->d_name)), sizeof(one), &one);
++                            std::fprintf(stderr, "[perf] pin %s alone to cpu%d: %d\n", comm, big[slot], a);
++                            ++done;
++                            continue;
++                        }
++                    }
+                     if (!(pin && pin[0] == '0') && (std::strcmp(comm, "GameThread\n") == 0 || std::strcmp(comm, "VuWorker\n") == 0))
+                     {
+                         cpu_set_t set;

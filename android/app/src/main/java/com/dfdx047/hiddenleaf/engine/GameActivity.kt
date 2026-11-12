@@ -183,6 +183,7 @@ class GameActivity : SDLActivity() {
             maxRefresh = DisplayCaps.maxRefresh(this), rendererInUse = rendererInUse,
         )
         return GameMenuHost(this, state, menuActions).also {
+            it.installOwners(window.decorView, layout)
             layout.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             menu = it
         }

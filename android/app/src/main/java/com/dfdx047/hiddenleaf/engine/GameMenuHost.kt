@@ -28,6 +28,17 @@ class GameMenuHost(context: Context, val state: GameMenuState, actions: GameMenu
         visibility = GONE
     }
 
+    /**
+     * Compose looks for the lifecycle from the window's root (the decor view), not from its own view: without these on
+     * the root the first opening crashed (ViewTreeLifecycleOwner not found from SDL's RelativeLayout, Mi A3 2026-11-12).
+     */
+    fun installOwners(vararg roots: android.view.View) {
+        for (root in roots) {
+            root.setViewTreeLifecycleOwner(owner)
+            root.setViewTreeSavedStateRegistryOwner(owner)
+        }
+    }
+
     /** Open (the drawer on screen or the layout editor in its place). */
     val isOpen: Boolean get() = state.open
 

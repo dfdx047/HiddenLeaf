@@ -59,6 +59,30 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 16:00, tarde: menu lateral no Mi A3 e o EE 3 ms mais leve na luta (patch `0099`)
+
+- **Menu lateral** (`lab/side-panel`, `07aee1e`, juntado): no aparelho a primeira abertura derrubava o app
+  (`IllegalStateException: ViewTreeLifecycleOwner not found from RelativeLayout`: o Compose procura o dono do ciclo de
+  vida pela raiz da janela, e a `SDLActivity` não é do AndroidX). `GameMenuHost.installOwners(window.decorView, layout)`
+  antes do `addView`. Testado numa luta (`build/lab/menu_test.sh`, `mia3/menu_shots2`, `menu_ed_shots`): Voltar abre, as
+  5 abas por R1/L1, foco pelo direcional, jogo parado com o menu aberto (v6813 por 6 s) e de volta ao fechar (v6927 →
+  v7155 em 6 s); Toque › Editar layout abre o editor sobre a luta congelada, B volta à gaveta, B fecha. O menu lembra a
+  última aba. Sem controle físico no Mi A3: o mapa de botões e os atalhos SELECT+START / L3+R3 não foram testados.
+- **Onde vai o tempo** (luta, GS, 1x, fase B): três threads cheias nos núcleos grandes, `GameThread` (EE+IOP+SPU2) ~100%,
+  `VuWorker` ~90%, `GS` ~88% (`build/lab/threads.sh`, por `/proc/<pid>/task`). EE 21,5 + IOP 5,5 ms por vsync na
+  `GameThread`. `HL_PROF` (diferença de dois arquivos na fase B): ~30% da `GameThread` na cópia das cadeias do VIF1
+  (`vector::insert` elemento a elemento de 2–4,5 MB por cadeia; buffers acima de 4 MB soltos e alocados de novo a cada
+  quadro; o `takeBuffer` devolvia um buffer qualquer, muitas vezes pequeno).
+- **`0099-chain-copy-memcpy-and-pin-option.patch`:** a cadeia é escrita com `memcpy` sobre um tamanho guardado entre
+  cadeias (sem zerar), o worker guarda buffers de até 16 MB e o `takeBuffer` devolve o maior (cheio, o grande toma o lugar
+  do menor). Resultado (`perf_base2` → `perf_chain`, `fstats.py`): A 42,8 → 45,9 fps, B 36,4 → 39,1, EE B 21,5 → 18,6 ms.
+  Imagem da luta conferida no vídeo (`menu_fight2`).
+- **Sem ganho:** `HL_PIN=x` (novo: um núcleo grande para cada uma das três threads; 39,2 fps); `VsyncEnable=1` pelo
+  `HL_GS_EXTRA` (o swapchain continuou MAILBOX: chave ignorada; 39,5, ruído).
+- **O que falta para 50 na luta no 665:** a `GameThread` ainda leva ~25 ms (EE 18,6, IOP 5,3, espera da VU 1,1) e a
+  `VuWorker` ~20 ms. O próximo passo grande é o IOP (ADX e modhsyn) e o SPU2 numa thread própria (o cpu4 fica livre); o
+  resto do `memcpy` (~19% da `GameThread`) ainda não tem dono achado (sem registro de quem chama no aparelho).
+
 ### 2026-11-12 noite, launcher (`lab/side-panel`): o menu do jogo vira uma gaveta lateral com cinco abas e controle por gamepad
 
 Sem aparelho (só `assembleDebug`, testes de unidade e capturas Robolectric). Substitui o `GamePanel.kt` (cartão no meio).
