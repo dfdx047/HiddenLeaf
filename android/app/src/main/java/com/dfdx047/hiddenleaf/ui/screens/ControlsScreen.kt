@@ -473,9 +473,9 @@ private fun StepCard(
 }
 
 /** The buttons of a step, joined: "△ + ○". */
-private fun stepKeys(skin: PadSkin, buttons: Int): String =
+internal fun stepKeys(skin: PadSkin, buttons: Int): String =
     Ps2.MACRO_BUTTONS.filter { buttons and it != 0 }.joinToString(" + ") { Ps2.label(skin, it) }
 
 /** A macro in one line: its presses in order, "…" for a pause, ⟳ when it repeats. */
-private fun macroSummary(skin: PadSkin, m: Macro): String =
+internal fun macroSummary(skin: PadSkin, m: Macro): String =
     m.steps.joinToString("  ›  ") { if (it.buttons == 0) "…" else stepKeys(skin, it.buttons) } + if (m.repeat) "  ⟳" else ""

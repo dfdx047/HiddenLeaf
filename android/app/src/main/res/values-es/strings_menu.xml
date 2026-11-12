@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- El menú del juego, el cajón sobre el juego en pausa (engine/GameMenu.kt) -->
+<resources>
+    <string name="gm_tab_game">Juego</string>
+    <string name="gm_tab_pad">Mando</string>
+    <string name="gm_tab_touch">Táctil</string>
+    <string name="gm_tab_help">Ayuda</string>
+    <string name="gm_online_running">Online: el juego sigue</string>
+    <string name="gm_online_running_text">Una partida online no se pausa: el juego del otro jugador esperaría a este. Tu luchador se queda quieto mientras este menú está abierto.</string>
+    <string name="gm_assists_online">Online, los dos teléfonos juegan con las reglas del propio juego: las ayudas vuelven a valer en la próxima partida offline.</string>
+    <string name="gm_screen">Pantalla</string>
+    <string name="gm_leave">Salir</string>
+    <string name="gm_quit_q">¿Salir al launcher? Lo que el juego no guardó en la tarjeta de memoria se pierde.</string>
+    <string name="gm_quit_yes">Salir</string>
+    <string name="gm_restart">al reabrir</string>
+    <string name="gm_restart_hint">Se guarda ahora y se aplica la próxima vez que se abra el juego.</string>
+    <string name="gm_live_hint">Lo demás de aquí se aplica al momento; la imagen cambia cuando el juego continúe.</string>
+    <string name="gm_renderer_now">En uso ahora: %1$s</string>
+    <string name="gm_renderer_native">renderizador nativo en los combates</string>
+    <string name="gm_resolution_px">Imagen interna: %1$s.</string>
+    <string name="gm_pads">Mandos</string>
+    <string name="gm_pads_none">No se encontró ningún mando. Los botones de una consola portátil cuentan como uno.</string>
+    <string name="gm_pads_found">Conectado: %1$s</string>
+    <string name="gm_hotkeys">Atajos</string>
+    <string name="gm_menu_key">Abrir este menú</string>
+    <string name="gm_menu_back_only">Solo Atrás</string>
+    <string name="gm_menu_key_hint">Atrás siempre lo abre (y Home o Guía, donde Android deja pasar el botón). En un par, mantén el primero y pulsa el segundo: el juego no recibe el segundo.</string>
+    <string name="gm_map">Botones</string>
+    <string name="gm_map_default">Mapa predeterminado: el mando va directo al juego.</string>
+    <string name="gm_map_custom">Tu propio mapa: Hidden Leaf lee el mando (también los sticks) y le da al juego los botones de PS2 que elegiste.</string>
+    <string name="gm_map_hint">Elige un botón de PS2 y pulsa el botón del mando para él (8 segundos; Atrás cancela). Un botón del mando hace una sola cosa: deja su lugar anterior, que queda vacío.</string>
+    <string name="gm_map_press">Pulsa un botón…</string>
+    <string name="gm_map_reset">Restaurar el mapa predeterminado</string>
+    <string name="gm_sticks_hint">Los sticks son los del PS2. En este menú: cruceta o stick izquierdo para moverse, A elige, B vuelve, L1 / R1 cambian de pestaña, START sigue el juego.</string>
+    <string name="gm_b_attack">Ataque</string>
+    <string name="gm_b_jump">Saltar</string>
+    <string name="gm_b_chakra">Chakra</string>
+    <string name="gm_b_item">Objeto</string>
+    <string name="gm_b_guard">Defensa</string>
+    <string name="gm_b_prev">Objeto anterior</string>
+    <string name="gm_b_next">Objeto siguiente</string>
+    <string name="gm_b_awaken">Despertar</string>
+    <string name="gm_b_l3">L3 (pulsar el stick izquierdo)</string>
+    <string name="gm_b_start">Pausa, START</string>
+    <string name="gm_b_select">SELECT</string>
+    <string name="gm_b_up">Arriba</string>
+    <string name="gm_b_down">Abajo</string>
+    <string name="gm_b_left">Izquierda</string>
+    <string name="gm_b_right">Derecha</string>
+    <string name="gm_edit_hint">El menú se aparta y los controles aparecen sobre el juego en pausa. Arrastra un control para moverlo; tócalo para cambiar el tamaño, la opacidad u ocultarlo. Listo (o Atrás) vuelve aquí.</string>
+    <string name="gm_help_pad">Mando físico</string>
+    <string name="gm_help_pad_menu">Atrás, Guía o %1$s: este menú.</string>
+    <string name="gm_help_pad_menu_back">Atrás o Guía: este menú.</string>
+    <string name="gm_help_pad_nav">En el menú: cruceta o stick izquierdo para moverse, A elige, B vuelve, L1 / R1 cambian de pestaña, START sigue el juego. El mapa de los botones está en la pestaña Mando.</string>
+</resources>

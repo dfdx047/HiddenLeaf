@@ -25,6 +25,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Especiais ↑↑○ e ↓↓○, Toque Pro, guia de botões | não testado | (lab, 11-12) | | capturas Robolectric | botões novos na luta e opções do launcher; nada jogado no aparelho ainda (entrada de 11-12 tarde) |
 | Especial com um botão (Ougi) | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube | jogado por toque, gravado (`p2_cube`, `p3_odin60`, `p4_134`, `p6_cube`, `p8`–`p10`) | ligado e desligado; △△○ à mão e disputa vistos a 50 (Cube), 60 e 120 (Odin); falta o Ougi da CPU a 120 e o Cube a 60 |
 | Painel de pausa (menu do jogo) | funciona | `e3f0d17` | Odin 2 Mini; antes RP5, Cube, Odin 3 | `build/lab/gest/panel.sh` (11-09), rota de campanha (11-05) | menu com abas Gráficos (1x a 8x, 30 a 120 fps), Controles (com dicas) e Layout; "Sair do jogo" volta ao launcher |
+| Menu lateral (gaveta, 5 abas, gamepad, mapa do controle) | não testado | (lab, `lab/side-panel`, 11-12 noite) | | capturas Robolectric (`android/build/shots/menu_*`), `PadMapTest` | substitui o painel de pausa acima; entrada de 11-12 noite |
 | Contador de fps | funciona | `2225a89` | RP5 | prints (11-02) | |
 | 60/120 interpolados | parcial | `app_d6` (lab, 11-05) | Odin 3, Cube (60) | jogado e gravado, `tools/flicker.py` quadro a quadro, antes (`b1_odin120_good1`) e depois (`p10`, `p11`) | avisos 2D não piscam mais; sombra preta não vista; 100–120 e 58–60 apresentações por segundo |
 | Resolução 1x–8x | funciona | `7a5492d` | Odin 2 Mini | matriz de desempenho (11-09 09:00) e térmica de 20 min | 50 fps cravados até 4x (também a 120); 6x 50 fps com 1% low 31–36; 8x perde vsyncs (47 fps) |
@@ -57,6 +58,34 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-12 noite, launcher (`lab/side-panel`): o menu do jogo vira uma gaveta lateral com cinco abas e controle por gamepad
+
+Sem aparelho (só `assembleDebug`, testes de unidade e capturas Robolectric). Substitui o `GamePanel.kt` (cartão no meio).
+
+- **`engine/GameMenu.kt`** (Compose, num `ComposeView` com ciclo de vida próprio, `GameMenuHost.kt`: a `SDLActivity`
+  não é do AndroidX): gaveta à esquerda, ~40% da largura em paisagem (340–460 dp, até 82% numa tela quadrada), folha de
+  baixo (68% da altura) em retrato; jogo parado visível ao lado, escurecido 28%, toque nele volta ao jogo; deslize de
+  200 ms. Abas **Jogo** (continuar, especial de um botão, botão do especial *ao reabrir*, valor do toque, orientação ao
+  vivo, sair com confirmação), **Gráficos** (renderizador em uso; Vulkan/OpenGL ES e nativo *ao reabrir*; resolução
+  *ao reabrir*; filtro, proporção, fps e contador ao vivo), **Controle** (controles conectados, atalho do menu
+  SELECT+START / L3+R3 / só Voltar, mapa dos 16 botões do PS2 com "aperte um botão", restaurar), **Toque** (editar
+  layout sobre o jogo parado, modo, layout do jogo/clássico trocado ao vivo, cena automática, estilo, símbolos,
+  opacidade, tamanho, nomes, vibração, analógico flutuante, Toque Pro inteiro, macros: mostrar/esconder, editar com o
+  editor do launcher, apagar, nova), **Ajuda** (o guia de botões por cena e o controle físico). Mesmos nomes e faixas do
+  launcher (strings reaproveitadas; novas em `strings_menu.xml`, en/pt/es).
+- **Tema:** papel, tinta e laranja do jogo; claro, escuro ou do sistema conforme o tema do launcher (`UiPrefs`,
+  preferências "ui" lidas pelo processo do jogo ao abrir o menu); Material You usa as cores do papel de parede.
+- **Gamepad** (`GameActivity`): Voltar e Guia sempre abrem; o par escolhido também (o segundo botão do par não chega ao
+  jogo). No menu: direcional/analógico/hat movem o foco (repetição 380/110 ms), A = confirmar (vira DPAD_CENTER), B e
+  Voltar voltam (captura, página por cima, pergunta de sair, depois fecha), L1/R1 trocam de aba, START fecha. Anel de
+  foco só quando o menu é usado pelo controle. Ao abrir, as teclas que o SDL tinha apertadas são soltas.
+- **Mapa do controle** (`touch/PadMap.kt`, `controller.json`): com o mapa padrão nada muda (o SDL lê o controle, como
+  antes). Com um mapa próprio, o app lê botões, gatilhos, hat e analógicos e manda pelo `TouchBridge.setPhysical`
+  (somado ao toque); o SDL não vê o controle.
+- **Não feito / a conferir no aparelho:** nada testado em aparelho; o anel de foco não aparece nas capturas
+  (o Robolectric não roda os efeitos do Compose); um controle lido pelo HIDAPI do SDL (sem passar pelo Android) não
+  seria remapeado; sem atalho de avanço rápido (o motor não tem); volume de música/efeitos fora (o motor não lê).
 
 ### 2026-11-12 14:00, tarde: Ougi da Neji destravado (DMAC mascarado, patch `0098`) e o SCANMSK do Ougi ligado da Sakura
 

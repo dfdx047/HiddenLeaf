@@ -67,8 +67,34 @@ object TouchBridge {
         0
     }
 
-    fun setPad(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) {
-        runCatching { nativeSetPad(buttons, lx, ly, rx, ry) }
+    // Player 1 from two places: the on-screen controller and a physical one the app reads itself (a map of the player's,
+    // touch/PadMap.kt). The buttons together; the sticks of whichever is off its centre, the touch's first.
+    private val touch = intArrayOf(0, 128, 128, 128, 128)
+    private val physical = intArrayOf(0, 128, 128, 128, 128)
+
+    /** The on-screen controller's buttons and sticks. */
+    fun setPad(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) = synchronized(this) {
+        touch[0] = buttons; touch[1] = lx; touch[2] = ly; touch[3] = rx; touch[4] = ry
+        push()
+    }
+
+    /** The physical controller's, when the app reads it ([com.dfdx047.hiddenleaf.touch.PadTranslator]). */
+    fun setPhysical(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) = synchronized(this) {
+        physical[0] = buttons; physical[1] = lx; physical[2] = ly; physical[3] = rx; physical[4] = ry
+        push()
+    }
+
+    /** Everything let go (the menu opens, the app goes to the background). */
+    fun releaseAll() = synchronized(this) {
+        touch.fill(128); touch[0] = 0
+        physical.fill(128); physical[0] = 0
+        push()
+    }
+
+    private fun push() {
+        val touchAtRest = touch[1] == 128 && touch[2] == 128 && touch[3] == 128 && touch[4] == 128
+        val sticks = if (touchAtRest) physical else touch
+        runCatching { nativeSetPad(touch[0] or physical[0], sticks[1], sticks[2], sticks[3], sticks[4]) }
     }
 
     fun menuOpen(): Boolean = runCatching { nativeMenuOpen() }.getOrDefault(false)

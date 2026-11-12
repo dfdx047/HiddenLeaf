@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game menu, the drawer over the frozen game (engine/GameMenu.kt) -->
+<resources>
+    <string name="gm_tab_game">Game</string>
+    <string name="gm_tab_pad">Gamepad</string>
+    <string name="gm_tab_touch">Touch</string>
+    <string name="gm_tab_help">Help</string>
+    <string name="gm_online_running">Online: the game keeps going</string>
+    <string name="gm_online_running_text">An online match does not pause: the other player\'s game would wait for this one. Your fighter stands still while this menu is open.</string>
+    <string name="gm_assists_online">Online, both phones play by the game\'s own rules: the assists count again in the next offline game.</string>
+    <string name="gm_screen">Screen</string>
+    <string name="gm_leave">Leave</string>
+    <string name="gm_quit_q">Quit to the launcher? What the game has not saved to its memory card is lost.</string>
+    <string name="gm_quit_yes">Quit</string>
+    <string name="gm_restart">on restart</string>
+    <string name="gm_restart_hint">Saved now; it takes effect the next time the game opens.</string>
+    <string name="gm_live_hint">Everything else here takes effect at once; the picture changes when the game resumes.</string>
+    <string name="gm_renderer_now">In use now: %1$s</string>
+    <string name="gm_renderer_native">native renderer in fights</string>
+    <string name="gm_resolution_px">Internal picture: %1$s.</string>
+    <string name="gm_pads">Controllers</string>
+    <string name="gm_pads_none">No controller found. A handheld\'s own buttons count as one.</string>
+    <string name="gm_pads_found">Connected: %1$s</string>
+    <string name="gm_hotkeys">Hotkeys</string>
+    <string name="gm_menu_key">Open this menu</string>
+    <string name="gm_menu_back_only">Back only</string>
+    <string name="gm_menu_key_hint">Back always opens it (and Home or Guide where Android lets the button through). For a pair, hold the first and press the second: the game does not get the second one.</string>
+    <string name="gm_map">Buttons</string>
+    <string name="gm_map_default">Default map: the controller goes straight to the game.</string>
+    <string name="gm_map_custom">Your own map: Hidden Leaf reads the controller (the sticks too) and hands the game the PS2 buttons you chose.</string>
+    <string name="gm_map_hint">Choose a PS2 button, then press the controller\'s button for it (8 seconds; Back cancels). A controller button does one thing only: it leaves its old place, which is left empty.</string>
+    <string name="gm_map_press">Press a button…</string>
+    <string name="gm_map_reset">Restore the default map</string>
+    <string name="gm_sticks_hint">The sticks are the PS2\'s sticks. In this menu: D-pad or left stick to move, A to choose, B to go back, L1 / R1 to change tabs, START to resume.</string>
+    <string name="gm_b_attack">Attack</string>
+    <string name="gm_b_jump">Jump</string>
+    <string name="gm_b_chakra">Chakra</string>
+    <string name="gm_b_item">Item</string>
+    <string name="gm_b_guard">Guard</string>
+    <string name="gm_b_prev">Previous item</string>
+    <string name="gm_b_next">Next item</string>
+    <string name="gm_b_awaken">Awaken</string>
+    <string name="gm_b_l3">L3 (left stick press)</string>
+    <string name="gm_b_start">Pause, START</string>
+    <string name="gm_b_select">SELECT</string>
+    <string name="gm_b_up">Up</string>
+    <string name="gm_b_down">Down</string>
+    <string name="gm_b_left">Left</string>
+    <string name="gm_b_right">Right</string>
+    <string name="gm_edit_hint">The menu steps aside and the controls show over the paused game. Drag a control to move it; tap it to resize, fade or hide it. Done (or Back) returns here.</string>
+    <string name="gm_help_pad">Physical controller</string>
+    <string name="gm_help_pad_menu">Back, Guide or %1$s: this menu.</string>
+    <string name="gm_help_pad_menu_back">Back or Guide: this menu.</string>
+    <string name="gm_help_pad_nav">In the menu: D-pad or left stick to move, A to choose, B to go back, L1 / R1 to change tabs, START to resume. The buttons\' map is in the Gamepad tab.</string>
+</resources>

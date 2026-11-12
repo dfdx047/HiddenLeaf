@@ -1,20 +1,15 @@
 package com.dfdx047.hiddenleaf.engine
 
-import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.SeekBar
 import android.widget.TextView
 import com.dfdx047.hiddenleaf.MainActivity
 import com.dfdx047.hiddenleaf.R
@@ -22,7 +17,10 @@ import com.dfdx047.hiddenleaf.data.EngineSettings
 import com.dfdx047.hiddenleaf.data.GamePaths
 import com.dfdx047.hiddenleaf.data.Renderer
 import com.dfdx047.hiddenleaf.data.GpuDrivers
-import com.dfdx047.hiddenleaf.touch.PadSkin
+import com.dfdx047.hiddenleaf.touch.PadMap
+import com.dfdx047.hiddenleaf.touch.PadMapStore
+import com.dfdx047.hiddenleaf.touch.PadScene
+import com.dfdx047.hiddenleaf.touch.PadTranslator
 import com.dfdx047.hiddenleaf.touch.TouchConfig
 import com.dfdx047.hiddenleaf.touch.TouchMode
 import com.dfdx047.hiddenleaf.touch.TouchListener
@@ -32,6 +30,8 @@ import com.dfdx047.hiddenleaf.touch.view
 import com.dfdx047.hiddenleaf.touch.TouchStore
 import java.io.File
 import org.libsdl.app.SDLActivity
+import org.libsdl.app.SDLControllerManager
+import org.libsdl.app.SDLSurface
 
 /**
  * The game itself: SDL's activity, which loads libSDL3.so and libun5.so (the recompiled engine) and calls
@@ -44,24 +44,36 @@ import org.libsdl.app.SDLActivity
 class GameActivity : SDLActivity() {
     private lateinit var paths: GamePaths
     private lateinit var store: TouchStore
+    private lateinit var es: EngineSettings
+    private lateinit var padStore: PadMapStore
     private var pad: TouchSurface? = null
+    /** The physical controller's buttons (controller.json); a map of the player's is translated here ([translator]). */
+    private var padMap = PadMap()
+    private val translator = PadTranslator(PadMap())
+    /** What this start of the game draws with, for the menu ("Vulkan", "OpenGL ES"). */
+    private var rendererInUse = "Vulkan"
     /** An online match (the launcher's Online screen started this one): its line on screen and the room's relay. */
     private var online: OnlineGame? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchMenu = object : Runnable {
         override fun run() {
-            pad?.suppressed = panel != null
+            pad?.suppressed = menu?.isOpen == true
             handler.postDelayed(this, 50)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         paths = GamePaths(this).also { it.ensure() }
+        es = EngineSettings(paths.settings)
+        padStore = PadMapStore(paths.root)
+        padMap = padStore.load()
+        translator.map = padMap
         // the renderer for this start (Vulkan, or OpenGL ES for Mali when automatic): written before the engine reads it
         runCatching {
-            val es = EngineSettings(paths.settings)
             Renderer.apply(es, paths)
+            rendererInUse = (if (es.get(EngineSettings.GPU_API, 0) == 1) "OpenGL ES" else "Vulkan") +
+                if (es.get(EngineSettings.NATIVE_RENDER, 0) == 1) " · " + getString(R.string.gm_renderer_native) else ""
             // the in-game menu's language: the launcher's (0 English, 1 Portuguese, 2 Spanish)
             val lang = when (resources.configuration.locales[0].language) { "pt" -> 1; "es" -> 2; else -> 0 }
             if (es.get(EngineSettings.LANG, -1) != lang) es.set(EngineSettings.LANG, lang)
@@ -151,70 +163,174 @@ class GameActivity : SDLActivity() {
         return "$frame\nEE ${cat("EE")}  VU1 ${cat("VU1")}  GS ${cat("GS")}  IOP ${cat("IOP")}  idle ${cat("idle")}"
     }
 
-    // ---- the panel over the game: it freezes the game while open
-    private var panel: GamePanel? = null
+    // ---- the game menu (GameMenu, a drawer at the left): it freezes the game while open (not an online match)
+    private var menu: GameMenuHost? = null
 
-    private fun openPanel() {
-        if (panel != null) return
-        val layout = SDLActivity.getContentView() as? ViewGroup ?: return
-        TouchBridge.setPad(0, 128, 128, 128, 128)
-        // (an online match does not stop: the other phone's game would wait for this one; the panel is over a game going on)
-        if (online == null) TouchBridge.setPaused(true)
-        val es = EngineSettings(paths.settings)
-        val p = GamePanel(
-            this, es,
-            touch = { pad?.config ?: store.load() },
-            setTouch = { c ->
-                pad?.config = c
-                store.save(c)
-            },
-            onApply = { applyVideo(es) },
-            onMeter = { meterLevel = it },
-            onEditLayout = {
-                pad?.editing = true
-                panel?.visibility = View.GONE // the editor is under the panel otherwise; it comes back with Done or the back key
-            },
-            onResume = { closePanel() },
-            onQuit = { quitToApp() },
+    private val menuActions = object : GameMenuActions {
+        override fun setting(key: String, value: Int) = applySetting(key, value)
+        override fun touch(c: TouchConfig) = setTouch(c)
+        override fun padMap(m: PadMap) = setPadMap(m)
+        override fun editLayout() = startLayoutEdit()
+        override fun resume() = closeMenu()
+        override fun quit() = quitToApp()
+    }
+
+    private fun menuHost(): GameMenuHost? {
+        menu?.let { return it }
+        val layout = SDLActivity.getContentView() as? ViewGroup ?: return null
+        val state = GameMenuState(
+            es.snapshot(), pad?.config ?: store.load(), padMap, online = online != null,
+            maxRefresh = DisplayCaps.maxRefresh(this), rendererInUse = rendererInUse,
         )
-        layout.addView(p, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        panel = p
+        return GameMenuHost(this, state, menuActions).also {
+            layout.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            menu = it
+        }
     }
 
-    private fun closePanel() {
-        val p = panel ?: return
-        (p.parent as? ViewGroup)?.removeView(p)
-        panel = null
+    private fun openMenu(byPad: Boolean) {
+        val m = menuHost() ?: return
+        if (m.isOpen) return
+        releaseInputs()
+        // (an online match does not stop: the other phone's game would wait for this one; the menu is over a game going on)
+        if (online == null) TouchBridge.setPaused(true)
+        m.state.engine = es.snapshot()
+        m.state.touch = pad?.config ?: store.load()
+        m.state.padMap = padMap
+        m.state.controllers = connectedControllers()
+        m.state.helpScene = when (TouchBridge.scene()) {
+            1 -> PadScene.MENU
+            3 -> PadScene.CAMPAIGN
+            else -> PadScene.FIGHT
+        }
+        m.state.look = MenuLook.of(this)
+        menuDowns.clear()
+        captureSwallow.clear()
+        m.show(byPad)
+    }
+
+    private fun closeMenu() {
+        val m = menu ?: return
+        if (!m.isOpen) return
+        if (pad?.editing == true) pad?.editing = false
+        stopNav()
+        m.hide()
         if (online == null) TouchBridge.setPaused(false)
+        focusGame()
     }
 
-    private fun applyVideo(es: EngineSettings) {
+    /** The keys go to SDL's surface again (the menu had them). */
+    private fun focusGame() {
+        val layout = SDLActivity.getContentView() as? ViewGroup ?: return
+        (0 until layout.childCount).map { layout.getChildAt(it) }.firstOrNull { it is SDLSurface }?.requestFocus()
+    }
+
+    /** The layout editor over the frozen game: the drawer steps aside until Done (or Back). */
+    private fun startLayoutEdit() {
+        val p = pad ?: return
+        menu?.stepAside()
+        p.editing = true
+    }
+
+    private fun endLayoutEdit() {
+        val p = pad ?: return
+        p.editing = false
+        menu?.let {
+            it.state.touch = p.config
+            if (it.isOpen) it.comeBack()
+        }
+    }
+
+    /** A choice of the menu: saved, and applied at once where the engine or this activity can. */
+    private fun applySetting(key: String, value: Int) {
+        es.set(key, value)
+        when (key) {
+            EngineSettings.SCALE4 -> {
+                // (the GS takes a new resolution at the next start: hl_gsx.cpp applyVideoIfAsked)
+                es.set(EngineSettings.SCALE, EngineSettings.wholeScale(value))
+                applyVideo()
+            }
+            EngineSettings.FILTER, EngineSettings.ASPECT -> applyVideo()
+            EngineSettings.FPS_MODE -> {
+                applyVideo()
+                preferRefresh()
+            }
+            EngineSettings.METER -> meterLevel = value
+            EngineSettings.ORIENTATION -> {
+                orientation = value.coerceIn(0, 2)
+                requestedOrientation = orientationFlag()
+            }
+            EngineSettings.SPECIAL_ONE, EngineSettings.MASH_PERCENT ->
+                TouchBridge.setAssist(es.get(EngineSettings.SPECIAL_ONE, 1), es.get(EngineSettings.MASH_PERCENT, 100))
+            EngineSettings.RENDERER -> runCatching { Renderer.apply(es, paths) }
+        }
+        menu?.state?.engine = es.snapshot()
+    }
+
+    private fun applyVideo() {
         TouchBridge.setVideo(
             es.get(EngineSettings.SCALE4, 4), es.get(EngineSettings.FILTER, 0),
             es.get(EngineSettings.ASPECT, EngineSettings.ASPECT_DEFAULT), es.get(EngineSettings.FPS_MODE, 50),
         )
     }
 
+    /** The on-screen controls' settings; another layout (the game's or the classic) is another view, made here. */
+    private fun setTouch(c: TouchConfig) {
+        val old = pad
+        if (old != null && old.config.layout != c.layout) {
+            val parent = old.view.parent as? ViewGroup
+            if (parent != null) {
+                val at = parent.indexOfChild(old.view)
+                parent.removeView(old.view)
+                val v = createTouchSurface(this, c)
+                v.listener = padListener
+                v.suppressed = old.suppressed
+                parent.addView(v.view, at, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                pad = v
+            }
+        } else {
+            old?.config = c
+        }
+        store.save(c)
+        menu?.state?.touch = c
+    }
+
+    private fun setPadMap(m: PadMap) {
+        padMap = m
+        padStore.save(m)
+        translator.reset()
+        translator.map = m
+        TouchBridge.setPhysical(0, 128, 128, 128, 128)
+        menu?.state?.padMap = m
+    }
+
+    private fun connectedControllers(): List<String> = runCatching {
+        InputDevice.getDeviceIds().toList().mapNotNull { InputDevice.getDevice(it) }
+            .filter { !it.isVirtual && fromController(it.sources) }.map { it.name }.distinct()
+    }.getOrDefault(emptyList())
+
+    private val padListener = object : TouchListener {
+        override fun onPad(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) = TouchBridge.setPad(buttons, lx, ly, rx, ry)
+
+        override fun onMenu() = openMenu(byPad = false)
+
+        override fun onOptions() = openMenu(byPad = false)
+
+        override fun onConfigChanged(config: TouchConfig) {
+            store.save(config)
+            menu?.state?.touch = config
+        }
+
+        override fun onEditDone() = endLayoutEdit()
+    }
+
     private fun addTouchPad() {
         val layout = SDLActivity.getContentView() as? ViewGroup ?: return
         val view = createTouchSurface(this, store.load())
-        view.listener = object : TouchListener {
-            override fun onPad(buttons: Int, lx: Int, ly: Int, rx: Int, ry: Int) = TouchBridge.setPad(buttons, lx, ly, rx, ry)
-
-            override fun onMenu() = openPanel()
-
-            override fun onOptions() = openPanel()
-
-            override fun onConfigChanged(config: TouchConfig) = store.save(config)
-
-            override fun onEditDone() {
-                view.editing = false
-                panel?.visibility = View.VISIBLE
-            }
-        }
+        view.listener = padListener
         layout.addView(view.view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pad = view
-        meterLevel = runCatching { EngineSettings(paths.settings).get(EngineSettings.METER, 0) }.getOrDefault(0)
+        meterLevel = es.get(EngineSettings.METER, 0)
         addPerfOverlay(layout)
     }
 
@@ -226,9 +342,35 @@ class GameActivity : SDLActivity() {
 
     override fun onPause() {
         handler.removeCallbacks(watchMenu)
-        TouchBridge.setPad(0, 128, 128, 128, 128)
+        stopNav()
+        releaseInputs()
         super.onPause()
     }
+
+    // ---- the physical controller
+
+    /** Controller keys down now, for the menu's pair of buttons. */
+    private val held = HashSet<Int>()
+    /** The second button of the menu's pair: its release does not go to the game either. */
+    private val comboSwallow = HashSet<Int>()
+    /** Keys SDL was given pressed (key code to device), let go when the menu opens. */
+    private val sdlDown = HashMap<Int, Int>()
+    /** Keys pressed while the drawer was on screen: only a whole press there closes or goes back. */
+    private val menuDowns = HashSet<Int>()
+    /** A key just mapped in the Gamepad tab: its release is not a choice. */
+    private val captureSwallow = HashSet<Int>()
+    /** Devices whose D-pad sends keys: their hat (if they also report one) does not move the menu twice. */
+    private val dpadKeyDevices = HashSet<Int>()
+
+    /** Nothing held any more: the touch controls, the translated controller and the keys SDL was given. */
+    private fun releaseInputs() {
+        TouchBridge.releaseAll()
+        translator.reset()
+        for ((code, device) in sdlDown) runCatching { SDLControllerManager.onNativePadUp(device, code, 0) }
+        sdlDown.clear()
+    }
+
+    private fun pushPhysical() = TouchBridge.setPhysical(translator.buttons(), translator.lx, translator.ly, translator.rx, translator.ry)
 
     /** A physical controller in use: the on-screen one hides (automatic mode) until the screen is touched again. */
     private fun padUsed() {
@@ -240,12 +382,171 @@ class GameActivity : SDLActivity() {
         source and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
             source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
 
+    private fun isPadKey(ev: KeyEvent): Boolean =
+        KeyEvent.isGamepadButton(ev.keyCode) || fromController(ev.source) ||
+            ev.keyCode in DPAD_KEYS && ev.device?.let { fromController(it.sources) } == true
+
     /** A real push, not the noise of a resting stick, which would hide the on-screen controller by itself on handhelds. */
     private fun axisPushed(ev: MotionEvent): Boolean = PAD_AXES.any { kotlin.math.abs(ev.getAxisValue(it)) > 0.5f }
 
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
-        if (fromController(ev.source) && axisPushed(ev)) padUsed()
+        if (fromController(ev.source) && ev.actionMasked == MotionEvent.ACTION_MOVE) {
+            val m = menu
+            if (m != null && m.isShowing) return menuMotion(m, ev)
+            if (pad?.editing == true) return true
+            if (axisPushed(ev)) padUsed()
+            if (padMap.custom) {
+                val twoSticks = ev.device?.getMotionRange(MotionEvent.AXIS_Z, ev.source) != null
+                translator.axes(
+                    ev.getAxisValue(MotionEvent.AXIS_HAT_X), ev.getAxisValue(MotionEvent.AXIS_HAT_Y),
+                    maxOf(ev.getAxisValue(MotionEvent.AXIS_LTRIGGER), ev.getAxisValue(MotionEvent.AXIS_BRAKE)),
+                    maxOf(ev.getAxisValue(MotionEvent.AXIS_RTRIGGER), ev.getAxisValue(MotionEvent.AXIS_GAS)),
+                    ev.getAxisValue(MotionEvent.AXIS_X), ev.getAxisValue(MotionEvent.AXIS_Y),
+                    ev.getAxisValue(if (twoSticks) MotionEvent.AXIS_Z else MotionEvent.AXIS_RX),
+                    ev.getAxisValue(if (twoSticks) MotionEvent.AXIS_RZ else MotionEvent.AXIS_RY),
+                )
+                pushPhysical()
+                return true
+            }
+        }
         return super.dispatchGenericMotionEvent(ev)
+    }
+
+    // ---- the controller in the menu: the stick and the hat move the focus as the D-pad does, with a repeat when held
+
+    private var navDir = 0
+    private val navRepeat = object : Runnable {
+        override fun run() {
+            if (navDir == 0) return
+            navStep(navDir)
+            handler.postDelayed(this, 110)
+        }
+    }
+
+    private fun stopNav() {
+        navDir = 0
+        handler.removeCallbacks(navRepeat)
+    }
+
+    private fun navStep(code: Int) {
+        menu?.ensureFocus()
+        val t = SystemClock.uptimeMillis()
+        deliver(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0))
+        deliver(KeyEvent(t, t, KeyEvent.ACTION_UP, code, 0))
+    }
+
+    private fun menuMotion(m: GameMenuHost, ev: MotionEvent): Boolean {
+        val st = m.state
+        st.padNav = true
+        val useHat = ev.deviceId !in dpadKeyDevices
+        val hx = if (useHat) ev.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
+        val hy = if (useHat) ev.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f
+        val bit = st.capture
+        if (bit != null) {
+            // a trigger that reports only as an axis, or a hat, can be mapped too
+            val code = when {
+                maxOf(ev.getAxisValue(MotionEvent.AXIS_LTRIGGER), ev.getAxisValue(MotionEvent.AXIS_BRAKE)) > 0.6f -> KeyEvent.KEYCODE_BUTTON_L2
+                maxOf(ev.getAxisValue(MotionEvent.AXIS_RTRIGGER), ev.getAxisValue(MotionEvent.AXIS_GAS)) > 0.6f -> KeyEvent.KEYCODE_BUTTON_R2
+                hy < -0.5f -> KeyEvent.KEYCODE_DPAD_UP
+                hy > 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
+                hx < -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
+                hx > 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
+                else -> 0
+            }
+            if (code != 0) {
+                setPadMap(st.padMap.bind(bit, code))
+                st.capture = null
+            }
+            return true
+        }
+        val x = ev.getAxisValue(MotionEvent.AXIS_X)
+        val y = ev.getAxisValue(MotionEvent.AXIS_Y)
+        val dir = when {
+            hy < -0.5f || y < -0.6f -> KeyEvent.KEYCODE_DPAD_UP
+            hy > 0.5f || y > 0.6f -> KeyEvent.KEYCODE_DPAD_DOWN
+            hx < -0.5f || x < -0.6f -> KeyEvent.KEYCODE_DPAD_LEFT
+            hx > 0.5f || x > 0.6f -> KeyEvent.KEYCODE_DPAD_RIGHT
+            else -> 0
+        }
+        if (dir != navDir) {
+            stopNav()
+            navDir = dir
+            if (dir != 0) {
+                navStep(dir)
+                handler.postDelayed(navRepeat, 380)
+            }
+        }
+        return true
+    }
+
+    /** A key to the view that has the focus (the menu's page), past this activity's own handling. */
+    private fun deliver(ev: KeyEvent): Boolean = super.dispatchKeyEvent(ev)
+
+    /**
+     * The controller's buttons in the menu: the D-pad moves the focus, A chooses (as the D-pad's centre), B and Back go
+     * back (the capture, a page over the menu, then the menu), L1 / R1 change the tab, START goes back to the game. A
+     * button waited for by the Gamepad tab's capture is mapped instead.
+     */
+    private fun menuKey(m: GameMenuHost, ev: KeyEvent, fromPad: Boolean): Boolean {
+        val st = m.state
+        val code = ev.keyCode
+        val down = ev.action == KeyEvent.ACTION_DOWN
+        if (fromPad || code in DPAD_KEYS) st.padNav = true
+        val bit = st.capture
+        if (bit != null) {
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (!down) st.capture = null
+                return true
+            }
+            if (down && ev.repeatCount == 0 && PadMap.bindable(code)) {
+                setPadMap(st.padMap.bind(bit, code))
+                st.capture = null
+                captureSwallow += code
+            }
+            return true
+        }
+        if (code in captureSwallow) {
+            if (!down) captureSwallow -= code
+            return true
+        }
+        if (down && ev.repeatCount == 0) menuDowns += code
+        val pressed = !down && menuDowns.remove(code)
+        when (code) {
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_ESCAPE -> {
+                if (pressed && !st.back()) closeMenu()
+                return true
+            }
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_MODE -> {
+                if (pressed && st.overlay == null) closeMenu()
+                return true
+            }
+            KeyEvent.KEYCODE_BUTTON_L1 -> {
+                if (down && ev.repeatCount == 0) st.nextTab(-1)
+                return true
+            }
+            KeyEvent.KEYCODE_BUTTON_R1 -> {
+                if (down && ev.repeatCount == 0) st.nextTab(1)
+                return true
+            }
+            KeyEvent.KEYCODE_BUTTON_A -> {
+                m.ensureFocus()
+                deliver(
+                    KeyEvent(
+                        ev.downTime, ev.eventTime, ev.action, KeyEvent.KEYCODE_DPAD_CENTER, ev.repeatCount, ev.metaState,
+                        ev.deviceId, ev.scanCode, ev.flags, ev.source,
+                    ),
+                )
+                return true
+            }
+        }
+        if (KeyEvent.isGamepadButton(code)) return true // (the controller's other buttons do nothing here)
+        if (code in DPAD_KEYS) {
+            // (always taken: a move past the page's last control must not carry the focus out to the game's surface)
+            m.ensureFocus()
+            deliver(ev)
+            return true
+        }
+        return deliver(ev)
     }
 
     /**
@@ -300,7 +601,7 @@ class GameActivity : SDLActivity() {
     fun quitToApp() {
         online?.leave() // (the other phone is told before this process goes)
         runOnUiThread {
-            TouchBridge.setPad(0, 128, 128, 128, 128)
+            TouchBridge.releaseAll()
             startActivity(
                 Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -352,25 +653,50 @@ class GameActivity : SDLActivity() {
     }
 
     /**
-     * The back key opens and closes the panel over the game, wherever it comes from. On handhelds such as the AYN Odin the
-     * back button belongs to the built-in controller, and SDL would hand it to the game as that controller's
-     * Back/Select button.
+     * The controller and the keys. Back (wherever it comes from: on handhelds such as the AYN Odin it belongs to the
+     * built-in controller, and SDL would hand it to the game as the Back/Select button), the Guide key and the menu's
+     * pair (SELECT + START by default) open the menu; in the menu the keys are its own ([menuKey]). Otherwise the
+     * controller goes to SDL as it is, or through [translator] when the player mapped its buttons.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-            if (pad?.editing == true) {
-                if (event.action == KeyEvent.ACTION_UP) {
-                    pad?.editing = false
-                    panel?.visibility = View.VISIBLE
-                }
+        val code = event.keyCode
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val fromPad = isPadKey(event)
+        if (fromPad) {
+            if (down) held += code else held -= code
+            if (code in DPAD_KEYS) dpadKeyDevices += event.deviceId
+        }
+        // (the second button of the menu's pair: neither its press nor its release reaches the game)
+        if (!down && comboSwallow.remove(code)) return true
+        if (pad?.editing == true) {
+            // the layout editor over the frozen game: Back or B is its Done
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_B || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (!down) endLayoutEdit()
                 return true
             }
-            if (event.action == KeyEvent.ACTION_UP) {
-                if (panel != null) closePanel() else openPanel()
-            }
+            return if (fromPad) true else super.dispatchKeyEvent(event)
+        }
+        val m = menu
+        if (m != null && m.isShowing) return menuKey(m, event, fromPad)
+        if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_MODE) {
+            if (!down) openMenu(byPad = fromPad || code == KeyEvent.KEYCODE_BUTTON_MODE)
             return true
         }
-        if (KeyEvent.isGamepadButton(event.keyCode) || fromController(event.source)) padUsed()
+        if (fromPad) {
+            padUsed()
+            val combo = padMap.menuCombo.keys
+            if (down && event.repeatCount == 0 && code in combo && held.containsAll(combo)) {
+                comboSwallow += code
+                openMenu(byPad = true)
+                return true
+            }
+            if (padMap.custom && PadMap.bindable(code)) {
+                translator.key(code, down)
+                pushPhysical()
+                return true
+            }
+            if (down) sdlDown[code] = event.deviceId else sdlDown.remove(code)
+        }
         return super.dispatchKeyEvent(event)
     }
 
@@ -432,6 +758,8 @@ class GameActivity : SDLActivity() {
         return arrayOf(paths.root.path, applicationInfo.nativeLibraryDir, driver?.dir?.path ?: "", driver?.library ?: "", isoArg)
     }
 }
+
+private val DPAD_KEYS = setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)
 
 private val PAD_AXES = intArrayOf(
     MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,

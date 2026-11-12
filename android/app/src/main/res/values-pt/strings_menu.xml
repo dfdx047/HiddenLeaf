@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O menu do jogo, a gaveta sobre o jogo parado (engine/GameMenu.kt) -->
+<resources>
+    <string name="gm_tab_game">Jogo</string>
+    <string name="gm_tab_pad">Controle</string>
+    <string name="gm_tab_touch">Toque</string>
+    <string name="gm_tab_help">Ajuda</string>
+    <string name="gm_online_running">Online: o jogo continua</string>
+    <string name="gm_online_running_text">Uma partida online não pausa: o jogo do outro jogador ficaria esperando por este. O seu lutador fica parado enquanto este menu está aberto.</string>
+    <string name="gm_assists_online">Online, os dois celulares jogam pelas regras do próprio jogo: as ajudas voltam a valer no próximo jogo offline.</string>
+    <string name="gm_screen">Tela</string>
+    <string name="gm_leave">Sair</string>
+    <string name="gm_quit_q">Sair para o launcher? O que o jogo não salvou no cartão de memória se perde.</string>
+    <string name="gm_quit_yes">Sair</string>
+    <string name="gm_restart">ao reabrir</string>
+    <string name="gm_restart_hint">Fica salvo agora e vale na próxima vez que o jogo abrir.</string>
+    <string name="gm_live_hint">O resto daqui vale na hora; a imagem muda quando o jogo continuar.</string>
+    <string name="gm_renderer_now">Em uso agora: %1$s</string>
+    <string name="gm_renderer_native">renderizador nativo nas lutas</string>
+    <string name="gm_resolution_px">Imagem interna: %1$s.</string>
+    <string name="gm_pads">Controles</string>
+    <string name="gm_pads_none">Nenhum controle encontrado. Os botões de um portátil contam como um.</string>
+    <string name="gm_pads_found">Conectado: %1$s</string>
+    <string name="gm_hotkeys">Atalhos</string>
+    <string name="gm_menu_key">Abrir este menu</string>
+    <string name="gm_menu_back_only">Só o Voltar</string>
+    <string name="gm_menu_key_hint">O Voltar sempre abre (e o Home ou Guia, onde o Android deixa o botão passar). Num par, segure o primeiro e aperte o segundo: o jogo não recebe o segundo.</string>
+    <string name="gm_map">Botões</string>
+    <string name="gm_map_default">Mapa padrão: o controle vai direto para o jogo.</string>
+    <string name="gm_map_custom">Mapa seu: o Hidden Leaf lê o controle (os analógicos também) e entrega ao jogo os botões do PS2 que você escolheu.</string>
+    <string name="gm_map_hint">Escolha um botão do PS2 e aperte o botão do controle para ele (8 segundos; Voltar cancela). Um botão do controle faz uma coisa só: ele sai do lugar antigo, que fica vazio.</string>
+    <string name="gm_map_press">Aperte um botão…</string>
+    <string name="gm_map_reset">Restaurar o mapa padrão</string>
+    <string name="gm_sticks_hint">Os analógicos são os do PS2. Neste menu: direcional ou analógico esquerdo para mover, A escolhe, B volta, L1 / R1 trocam de aba, START continua o jogo.</string>
+    <string name="gm_b_attack">Ataque</string>
+    <string name="gm_b_jump">Pular</string>
+    <string name="gm_b_chakra">Chakra</string>
+    <string name="gm_b_item">Item</string>
+    <string name="gm_b_guard">Defesa</string>
+    <string name="gm_b_prev">Item anterior</string>
+    <string name="gm_b_next">Próximo item</string>
+    <string name="gm_b_awaken">Despertar</string>
+    <string name="gm_b_l3">L3 (apertar o analógico esquerdo)</string>
+    <string name="gm_b_start">Pausa, START</string>
+    <string name="gm_b_select">SELECT</string>
+    <string name="gm_b_up">Cima</string>
+    <string name="gm_b_down">Baixo</string>
+    <string name="gm_b_left">Esquerda</string>
+    <string name="gm_b_right">Direita</string>
+    <string name="gm_edit_hint">O menu sai da frente e os controles aparecem sobre o jogo pausado. Arraste um botão para movê-lo; toque nele para mudar o tamanho, a opacidade ou escondê-lo. Pronto (ou Voltar) volta para cá.</string>
+    <string name="gm_help_pad">Controle físico</string>
+    <string name="gm_help_pad_menu">Voltar, Guia ou %1$s: este menu.</string>
+    <string name="gm_help_pad_menu_back">Voltar ou Guia: este menu.</string>
+    <string name="gm_help_pad_nav">No menu: direcional ou analógico esquerdo para mover, A escolhe, B volta, L1 / R1 trocam de aba, START continua o jogo. O mapa dos botões fica na aba Controle.</string>
+</resources>

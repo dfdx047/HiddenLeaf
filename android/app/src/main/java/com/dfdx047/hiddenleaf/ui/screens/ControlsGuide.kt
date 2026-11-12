@@ -102,9 +102,9 @@ private val Soft = Color(0xFFB8C0E0)
 private val Dim = Color(0xFF3A4060)
 
 /** One line of the guide: the button, its name and what it does. */
-private data class GuideItem(val ctl: Ctl?, val title: Int, val text: Int, val macro: Macro? = null)
+internal data class GuideItem(val ctl: Ctl?, val title: Int, val text: Int, val macro: Macro? = null)
 
-private fun guideItems(scene: PadScene): List<GuideItem> = when (scene) {
+internal fun guideItems(scene: PadScene): List<GuideItem> = when (scene) {
     PadScene.FIGHT -> listOf(
         GuideItem(Ctl.DPAD, R.string.tc_g_dpad_t, R.string.tc_g_dpad),
         GuideItem(Ctl.ATTACK, R.string.tc_g_attack_t, R.string.tc_g_attack),
