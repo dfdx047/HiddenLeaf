@@ -1,0 +1,12 @@
+{
+    // Copy to wrangler.jsonc, put in the database id that `wrangler d1 create hiddenleaf-online` printed, then: wrangler deploy
+    "name": "hiddenleaf-online",
+    "main": "worker.js",
+    "compatibility_date": "2026-10-01",
+    "d1_databases": [{ "binding": "DB", "database_name": "hiddenleaf-online", "database_id": "<the id wrangler d1 create printed>" }],
+    // the rooms' relay (worker.js, HiddenLeafRelay): a Durable Object per room, SQLite-backed (the free plan's kind)
+    "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "HiddenLeafRelay" }] },
+    "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HiddenLeafRelay"] }],
+    // ALLOWED_VERSIONS: the network version of the app and of the engine (HL_NET_VERSION, Online.NET_VERSION)
+    "vars": { "ALLOWED_VERSIONS": "1", "ROOMS_PER_ADDRESS": "4", "TURN_DAILY_MAX": "300" }
+}

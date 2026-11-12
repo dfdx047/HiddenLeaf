@@ -1,0 +1,4 @@
+# the real config has the account's database id; .wrangler/ is wrangler's local state
+wrangler.jsonc
+.wrangler/
+node_modules/
