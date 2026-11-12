@@ -58,6 +58,33 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-12 14:00, tarde: Ougi da Neji destravado (DMAC mascarado, patch `0098`) e o SCANMSK do Ougi ligado da Sakura
+
+Lutas inteiras no Mi A3 pelo GS, gravadas (`build/lab/mia3/full_sakura`, `full_neji`, `sak_fix`, `neji_fix`).
+
+- **Sakura × Naruto, Ougi ligado:** depois do Ougi, um minuto de linhas alternadas com um quadro antigo por baixo. O
+  jogo escreve SCANMSK 2 nesse Ougi e não volta a 0; a escrita chega ao GS por fora do `dropScanmsk` (log
+  `HL_SCANMSK_LOG`: "GS SCANMSK 2 at a vsync"). `hl_native.cpp` `vsync()`: com o GS sozinho (`!s_on`), SCANMSK volta a 0
+  em todo vsync (`Flush` antes). Regravado (`sak_fix`): luta limpa até o fim.
+- **Neji × Naruto, Ougi (Hakke):** tela branca, 10 fps, EE 90 ms/vsync, 0 MB/f, para sempre (4 de 4 vezes, também com
+  `HL_NATIVE=1`: não é o GS). Achado em passos: `HL_PROF` (diferença de dois arquivos, antes e durante) mostrou
+  `readIORegister` e `sceGsSyncPath`; `HL_IOREAD_LOG` (novo, em `0098`) mostrou as 4 leituras do `sceGsSyncPath` 1M vezes;
+  o laço é `0x108748`–`0x1087cc` (função de quadro `0x108600`): `sceGsSyncPath(0)` enquanto o byte `gp-0x3F0` for 1.
+  Quem zera é o tratador de DMA do VIF1 (`0x108D10` → `0x108F00`, lista de pacotes com call/ret em software; no fim
+  `iDisableDmac(1)`). `HL_DMAH_LOG=<vsync>` (novo, `hl_game.cpp`) mostrou: em v8136 uma transferência avulsa do VIF1
+  (CHCR `0x1`, MADR `0xE9AE80`, a imagem da thread `0x37FFB0` que passa a tela para cinza) também chama o tratador; a
+  cadeia de v8138 nunca recebe o fim.
+- **Causa:** `0x108320` dispara a cadeia (`0x107A20`) e só depois chama `EnableDmac(1)` (`0x15F6B8`). O runtime termina
+  o DMA na hora e, se a fila de fins é esvaziada antes do EnableDmac, `EeScheduler::dispatchIrq` via o canal desligado e
+  descartava o fim. No PS2 o CIS1 fica em D_STAT e a interrupção sai ao religar.
+- **`0098-dmac-pending-irq-and-debug-logs.patch`:** `dispatchIrq` guarda o fim mascarado (`m_pendingDmacMask`) e
+  `setIrqCauseEnabled` o entrega ao religar, se o bit do canal ainda estiver em D_STAT (W1C). Log `[irq] DMAC 1 ended
+  while disabled` (8 primeiras). No mesmo patch, só para depuração: `HL_IOREAD_LOG` (`ps2_memory.cpp`) e o log de
+  desistência do `sceGsSyncPath` (`[gssync]`).
+- **Resultado (`neji_fix`):** o Ougi vai até o fim e a luta segue a 40–43 fps (v11177 em 254 s; antes, 444 s travado).
+  Sakura de novo com `0098` (`sak_reg`): até o fim (v10600, 35–50 fps), SCANMSK zerado no Ougi, nenhum `[irq]`
+  (o caminho novo não age nessa luta). O vídeo dessa rodada veio cortado (sem `moov`); o log basta para a regressão.
+
 ### 2026-11-12 11:30, dia: GS padrão testado no Mi A3 (resoluções, aspectos, OpenGL ES, menus, lutas inteiras, toques), três frentes juntas
 
 Tudo no Mi A3 pelo caminho padrão (GS do ARMSX2, sem `HL_NATIVE`), Nominum, 50 fps.

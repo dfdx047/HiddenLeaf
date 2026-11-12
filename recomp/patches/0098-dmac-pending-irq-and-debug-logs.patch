@@ -1,0 +1,144 @@
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1496,7 +1496,23 @@
+         uint32_t &mask = dmac ? m_enabledDmacMask : m_enabledIntcMask;
+         if (enabled)
+         {
++            const bool wasOff = (mask & (1u << cause)) == 0u;
+             mask |= 1u << cause;
++            // Hidden Leaf: a DMAC channel that ended while its cause was disabled interrupts when it is enabled, as on the
++            // PS2 (the channel's bit stays set in D_STAT until the game clears it). UN5 starts its VIF1 packet chain and
++            // only then calls EnableDmac(1); when the end was dispatched in between, the handler never ran and the frame
++            // loop waited for it forever (Neji's Ougi, 2026-11-12).
++            if (dmac && wasOff && (m_pendingDmacMask & (1u << cause)) != 0u)
++            {
++                m_pendingDmacMask &= ~(1u << cause);
++                if (cause < 10u && (m_runtime.memory().readIORegister(0x1000E010u) & (1u << cause)) != 0u)
++                {
++                    static int s_told = 0;
++                    if (s_told++ < 8)
++                        std::fprintf(stderr, "[irq] DMAC %u ended while disabled: its handlers run at the EnableDmac\n", cause);
++                    dispatchIrq(true, cause);
++                }
++            }
+         }
+         else
+         {
+@@ -1512,8 +1528,12 @@
+     const uint32_t mask = dmac ? m_enabledDmacMask : m_enabledIntcMask;
+     if (cause < 32u && (mask & (1u << cause)) == 0u)
+     {
++        if (dmac)
++            m_pendingDmacMask |= 1u << cause; // (see setIrqCauseEnabled)
+         return;
+     }
++    if (dmac && cause < 32u)
++        m_pendingDmacMask &= ~(1u << cause);
+     const auto &handlers = dmac ? m_dmacHandlers : m_intcHandlers;
+     std::vector<EeIrqHandler> matching;
+     for (const auto &[id, handler] : handlers)
+--- a/ps2xRuntime/include/runtime/ee_scheduler.h
++++ b/ps2xRuntime/include/runtime/ee_scheduler.h
+@@ -485,6 +485,7 @@
+     int m_dmacTailOrder = 1000;
+     uint32_t m_enabledIntcMask = 0xFFFFFFFFu;
+     uint32_t m_enabledDmacMask = 0xFFFFFFFFu;
++    uint32_t m_pendingDmacMask = 0u; // (Hidden Leaf: DMAC ends that came while their cause was disabled)
+     int m_currentThreadId = 0;
+     bool m_rescheduleRequested = false;
+     bool m_timeSliceExpired = false;
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -1267,11 +1267,28 @@
+ 
+             uint32_t count = 0;
+             constexpr uint32_t kTimeout = 0x1000000;
++            // Hidden Leaf: which channel stays busy when the wait gives up (Neji's Ougi on the GS path, 2026-11-12)
++            struct TimeoutLog
++            {
++                ~TimeoutLog()
++                {
++                    if (!armed)
++                        return;
++                    static int s_told = 0;
++                    if (s_told++ < 12)
++                        std::fprintf(stderr, "[gssync] gave up: VIF1_CHCR %08x GIF_CHCR %08x VIF1_STAT %08x GIF_STAT %08x\n",
++                                     m->readIORegister(0x10009000), m->readIORegister(0x1000A000), m->readIORegister(0x10003C00),
++                                     m->readIORegister(0x10003020));
++                }
++                PS2Memory *m;
++                bool armed;
++            } timeoutLog{&mem, false};
+ 
+             while ((mem.readIORegister(0x10009000) & 0x100) != 0)
+             {
+                 if (++count > kTimeout)
+                 {
++                    timeoutLog.armed = true;
+                     setReturnS32(ctx, -1);
+                     return;
+                 }
+@@ -1281,6 +1298,7 @@
+             {
+                 if (++count > kTimeout)
+                 {
++                    timeoutLog.armed = true;
+                     setReturnS32(ctx, -1);
+                     return;
+                 }
+@@ -1290,6 +1308,7 @@
+             {
+                 if (++count > kTimeout)
+                 {
++                    timeoutLog.armed = true;
+                     setReturnS32(ctx, -1);
+                     return;
+                 }
+@@ -1299,6 +1318,7 @@
+             {
+                 if (++count > kTimeout)
+                 {
++                    timeoutLog.armed = true;
+                     setReturnS32(ctx, -1);
+                     return;
+                 }
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -2479,6 +2479,37 @@
+ 
+ uint32_t PS2Memory::readIORegister(uint32_t address)
+ {
++    // Hidden Leaf: HL_IOREAD_LOG=1, the I/O registers read most, every 4M reads (a guest loop that polls one: Neji's Ougi
++    // on 2026-11-12, EE at 90 ms a vsync)
++    {
++        static const bool s_ioLog = std::getenv("HL_IOREAD_LOG") != nullptr;
++        if (s_ioLog)
++        {
++            static uint32_t s_count[4096];
++            static uint32_t s_total = 0;
++            ++s_count[(address >> 2) & 4095u];
++            if (++s_total >= (4u << 20))
++            {
++                std::string line;
++                for (int k = 0; k < 5; ++k)
++                {
++                    uint32_t best = 0, at = 0;
++                    for (uint32_t i = 0; i < 4096u; ++i)
++                        if (s_count[i] > best)
++                            best = s_count[i], at = i;
++                    if (best == 0)
++                        break;
++                    char item[48];
++                    std::snprintf(item, sizeof(item), " ...%05x:%u", at << 2, best);
++                    line += item;
++                    s_count[at] = 0;
++                }
++                std::fprintf(stderr, "[ioread] last 4M:%s\n", line.c_str());
++                std::fill(std::begin(s_count), std::end(s_count), 0u);
++                s_total = 0;
++            }
++        }
++    }
+ #if defined(PS2X_HEADLESS_HOST)
+     // sceGsSyncPath asks these two whether anything is still going. The game saw its DMA end at the kick; here too what
+     // the worker has queued counts as done, and the queue keeps the order of whatever comes next. (Only the bits it asks

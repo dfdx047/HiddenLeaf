@@ -1169,6 +1169,9 @@ namespace
 			std::memcpy(&hi, data + at + 8, 8);
 			const uint32_t qwords = tagQwords(lo), flg = (lo >> 58) & 3u, nreg = ((lo >> 60) & 15u) ? ((lo >> 60) & 15u) : 16u;
 			uint8_t* body = data + at + 16u;
+			if (flg == 0u && at + 16u + qwords * 16u > size && s_scanLog)
+				std::fprintf(stderr, "hl_native: v%llu a PACKED tag runs past its packet (%u of %u bytes)\n", static_cast<unsigned long long>(s_vsync),
+					size - at, 16u + qwords * 16u);
 			if (flg == 0u && at + 16u + qwords * 16u <= size)
 			{
 				const uint32_t nloop = lo & 0x7FFFu;
@@ -1180,7 +1183,11 @@ namespace
 					{
 						uint8_t* q = body + (l * nreg + i) * 16u;
 						if ((q[8] & 0xFFu) == R_SCANMSK)
+						{
+							if (s_scanLog && (q[0] & 3u))
+								std::fprintf(stderr, "hl_native: v%llu game SCANMSK %u, 0 to the GS\n", static_cast<unsigned long long>(s_vsync), q[0] & 3u);
 							std::memset(q, 0, 8);
+						}
 					}
 				}
 			}
@@ -2934,6 +2941,20 @@ bool transfer(uint8_t path, uint8_t* data, uint32_t size)
 void vsync()
 {
 	MTGS::RunOnGSThread([]() { armKick(); });
+	// The GS alone: SCANMSK back to 0 at every vsync. The game writes SCANMSK 2 in some Ougi (Sakura's linked one, rec
+	// sak_scan 2026-11-12) and never 0 again, and that write reaches the GS past dropScanmsk: the screen then kept every
+	// other line of an old picture for a minute. With this, at most the frame of the write is drawn on half the lines.
+	if (!s_on && !s_scanKeep)
+		MTGS::RunOnGSThread([]() {
+			if (g_gs_renderer && (g_gs_renderer->m_env.SCANMSK.U64 & 3u))
+			{
+				static int s_told = 0;
+				if (s_told++ < 8)
+					std::fprintf(stderr, "hl_native: GS SCANMSK %llu at a vsync, back to 0\n", static_cast<unsigned long long>(g_gs_renderer->m_env.SCANMSK.U64 & 3u));
+				g_gs_renderer->Flush(GSState::VSYNC);
+				g_gs_renderer->m_env.SCANMSK.U64 = 0;
+			}
+		});
 	if (s_scanLog)
 		MTGS::RunOnGSThread([]() {
 			static uint64_t s_last = ~0ull;

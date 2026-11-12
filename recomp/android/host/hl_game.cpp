@@ -1203,6 +1203,44 @@ namespace
         }
     }
 
+
+    // HL_DMAH_LOG=1: the game's VIF1 packet chain (kick 0x107A20, DMAC handler 0x108D10 -> 0x108F00) and the byte it
+    // waits on (gp-0x3F0) at each step, a few hundred lines. Neji's Ougi left the main loop spinning on it (2026-11-12).
+    PS2Runtime::RecompiledFunction g_dmaKickOriginal = nullptr, g_dmaHandlerOriginal = nullptr, g_dmaPacketOriginal = nullptr;
+    int g_dmahLines = 0;
+    uint64_t g_dmahFrom = 0; // (HL_DMAH_LOG=<vsync>: from there)
+    bool dmahLog() { return g_tick >= g_dmahFrom && g_dmahLines++ < 400; }
+    uint32_t dmahFlag(R5900Context *ctx) { return g_rdram[(GPR_U32(ctx, 28) - 0x3F0u) & 0x1FFFFFFu]; }
+    void dmaKick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t obj = GPR_U32(ctx, 4);
+        g_dmaKickOriginal(rdram, ctx, runtime);
+        if (dmahLog())
+            std::fprintf(stderr, "[dmah] v%llu kick obj %x list %x flag %u CHCR %08x MADR %08x TADR %08x\n", static_cast<unsigned long long>(g_tick), obj,
+                         read32(obj + 0x1D0u), dmahFlag(ctx), runtime->memory().readIORegister(0x10009000u), runtime->memory().readIORegister(0x10009010u),
+                         runtime->memory().readIORegister(0x10009030u));
+    }
+    void dmaHandler(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        auto &m = runtime->memory();
+        const uint32_t chcr = m.readIORegister(0x10009000u), madr = m.readIORegister(0x10009010u), tadr = m.readIORegister(0x10009030u),
+                       asr0 = m.readIORegister(0x10009040u), stat = m.readIORegister(0x1000E010u);
+        g_dmaHandlerOriginal(rdram, ctx, runtime);
+        if (dmahLog())
+            std::fprintf(stderr, "[dmah] v%llu handler CHCR %08x MADR %08x TADR %08x ASR0 %08x STAT %08x -> v0 %d flag %u, now CHCR %08x\n",
+                         static_cast<unsigned long long>(g_tick), chcr, madr, tadr, asr0, stat, static_cast<int>(GPR_U32(ctx, 2)), dmahFlag(ctx),
+                         m.readIORegister(0x10009000u));
+    }
+    void dmaPacket(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t pkt = GPR_U32(ctx, 4), asp = GPR_U32(ctx, 6);
+        const uint32_t w0 = read32(pkt), w1 = read32(pkt + 4u), w2 = read32(pkt + 8u), w3 = read32(pkt + 12u), cb = read32(pkt + 0x18u);
+        g_dmaPacketOriginal(rdram, ctx, runtime);
+        if (dmahLog())
+            std::fprintf(stderr, "[dmah] v%llu packet %x tag %08x %08x %08x %08x cb %x asp %u -> v0 %d\n", static_cast<unsigned long long>(g_tick), pkt, w0, w1,
+                         w2, w3, cb, asp, static_cast<int>(GPR_U32(ctx, 2)));
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_rdram == nullptr)
@@ -1217,6 +1255,16 @@ namespace
                 runtime->registerFunction(kCameraMatrices, cameraMatrices);
             if (std::getenv("HL_CAM_LOG") != nullptr && (g_camSetOriginal = runtime->lookupFunction(0x10EED0u)) != nullptr)
                 runtime->registerFunction(0x10EED0u, cameraSetScale);
+            if (const char *dmah = std::getenv("HL_DMAH_LOG"))
+            {
+                g_dmahFrom = std::strtoull(dmah, nullptr, 10);
+                if ((g_dmaKickOriginal = runtime->lookupFunction(0x107A20u)) != nullptr)
+                    runtime->registerFunction(0x107A20u, dmaKick);
+                if ((g_dmaHandlerOriginal = runtime->lookupFunction(0x108D10u)) != nullptr)
+                    runtime->registerFunction(0x108D10u, dmaHandler);
+                if ((g_dmaPacketOriginal = runtime->lookupFunction(0x108F00u)) != nullptr)
+                    runtime->registerFunction(0x108F00u, dmaPacket);
+            }
             if ((g_mallocOriginal = runtime->lookupFunction(0x17A610u)) != nullptr)
                 runtime->registerFunction(0x17A610u, gameMalloc);
             if ((g_callRpcOriginal = runtime->lookupFunction(0x1629E8u)) != nullptr)
