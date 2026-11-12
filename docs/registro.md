@@ -38,6 +38,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | VIF1 e VU1 do Nominum (`NOMINUM_VU1=1`, teste, desligado por padrão) | parcial | `0e8e877` + Nominum `b2ff28b` (APK de 11-04 14:02) | Odin 3 (16:9 e 20:9), RP5 (sd480p, Qualcomm e Turnip), Cube | rotas v3 e de campanha `rec/n3_*_b`, `HL_PERF`, capturas | VU1 25–30% mais barata; RP5 sd480p a 50 na campanha; no Cube a campanha cai (GS do Nominum sobe), ver 11-04 15:00 |
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
+| Online de dois jogadores (lockstep, salas na Cloudflare) | não testado | branch do agente (`af052ef`, `a3555f7` e o commit do launcher) | nenhum | testes de unidade no PC (`host/online/tests/run.sh`: lockstep 892, sessão 2042, partida 76 checagens, 0 falhas; `node online/worker/test.mjs`), `assembleDebug` e foto da tela Online (Robolectric) | nada rodou em aparelho nem na Cloudflare de verdade; o servidor precisa ser publicado (`online/worker/README.md`) |
 
 ### Lutas contra o PCSX2 (bancada no PC, desde 2026-11-08)
 
@@ -55,6 +56,27 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-12 tarde: online de dois jogadores (salas, lockstep no motor, tela Online); não testado em aparelho
+
+Feito numa branch de agente, a partir do online do Dragon Rage (BT2), sem build do motor nem aparelho.
+
+- **Servidor** (`online/worker/`, commit `af052ef`): Cloudflare Worker com D1 e um Durable Object de relay (`HiddenLeafRelay`).
+  Salas de 6 dígitos, `fp` igual obrigatório (versão do app, motor, mods ligados), opções de quem cria (atraso 0–4 quadros,
+  relay). Passo a passo em português no `README.md`. `node test.mjs` passa.
+- **Motor** (`recomp/android/host/online/`, commit `a3555f7`): `link` (UDP, STUN, furo de NAT, relay pela sala via o app),
+  `lockstep` (20 ms por vsync, atraso 2–8 vsyncs), `session` e `match_session` (encontro no primeiro vsync, quem cria é o P1,
+  checagem da RAM a cada 32 vsyncs pulando as páginas de `docs/online.md`). `hl_online.cpp` lê `<root>/online/session.txt`
+  (renomeia para `session.used.txt`), põe cartão de memória próprio (`online/saves`), relógio fixo (`HL_FIXED_CLOCK`, TZ UTC),
+  tudo liberado, ajudas do toque desligadas, câmera 4:3 do jogo nos dois. Patch `0097`: gancho dos pads por porta
+  (`g_hlPadPortHook`, porta 0 = P1, porta 1 = P2) e `sceCdReadClock` fixo. Testes no PC (ASan/UBSan) passam; `hl_online.cpp`
+  e `un5_main.cpp` passam no `-fsyntax-only` do NDK.
+- **Launcher**: página Online (nome, criar sala, entrar com código, atraso, relay, servidor e "Testar conexão"); STUN em
+  Kotlin no mesmo porto UDP que o motor reabre; `OnlineGame` no `GameActivity` (linha de estado no canto, relay por
+  WebSocket, aviso de saída ao outro). O painel não pausa o jogo numa partida online.
+- **Falta**: build do motor com o `0097`, publicar o Worker, teste em dois aparelhos (mesma versão e mods). Riscos: o porto
+  UDP reaberto pelo motor (NAT), o determinismo entre aparelhos diferentes (só a mesma build foi vista igual), o relay na
+  Cloudflare de verdade.
 
 ### 2026-11-12 12:00, dia: nativo × GS do ARMSX2 no Mi A3 a 1x; **o GS passa a ser o padrão**, o nativo vira opção
 

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Online play (ui/screens/OnlineScreen.kt, data/Online.kt, engine/OnlineGame.kt) -->
+<resources>
+    <string name="nav_online">Online</string>
+    <string name="online_subtitle">Uma luta contra um amigo, cada um no seu celular.</string>
+    <string name="online_play_title">Jogar</string>
+    <string name="online_need_game">Instale o jogo primeiro (Início).</string>
+    <string name="online_need_server">Coloque o endereço do servidor de salas em Servidor, aqui embaixo.</string>
+    <string name="online_name">Seu nome</string>
+    <string name="online_create">Criar sala</string>
+    <string name="online_or_join">ou entre na sala de um amigo</string>
+    <string name="online_code">Código da sala</string>
+    <string name="online_join">Entrar</string>
+    <string name="online_dismiss">OK</string>
+    <string name="online_cancel">Cancelar</string>
+    <string name="online_room_code">Passe este código para o seu amigo</string>
+    <string name="online_waiting">Esperando o outro jogador…</string>
+    <string name="online_starting">%1$s chegou: o jogo está abrindo…</string>
+    <string name="online_step_address">Descobrindo o endereço deste celular…</string>
+    <string name="online_step_room">Abrindo a sala…</string>
+    <string name="online_step_join">Entrando na sala…</string>
+    <string name="online_guide_title">Como funciona</string>
+    <string name="online_guide">Um jogador cria a sala e passa o código; o outro entra com ele. O jogo abre nos dois celulares: quem criou a sala é o jogador 1 e mexe nos menus, o outro é o jogador 2. Escolham a luta de dois jogadores (Free Battle, 1P vs 2P) e lutem.\n\nOs dois celulares precisam da mesma versão do Hidden Leaf e dos mesmos mods ligados. A partida usa um cartão de memória próprio (os seus saves não são mexidos) e todos os personagens ficam liberados. As ajudas do toque (especial com um toque, valor do toque) ficam desligadas: os dois jogam pelas regras do próprio jogo. Abrir o menu do jogo não pausa a partida.</string>
+    <string name="online_options_title">Opções da partida</string>
+    <string name="online_delay">Atraso dos comandos (quadros do jogo)</string>
+    <string name="online_delay_auto">Auto</string>
+    <string name="online_delay_hint">Cada quadro são 40 ms. No automático, ele sai da distância medida entre os celulares. Vale a escolha de quem criou a sala.</string>
+    <string name="online_relay">Permitir o relay</string>
+    <string name="online_relay_hint">Quando os celulares não conseguem se falar direto (algumas redes móveis e roteadores), a partida passa pelo servidor. Um pouco mais lento, mas joga.</string>
+    <string name="online_server_card">Servidor</string>
+    <string name="online_server">Endereço do servidor de salas</string>
+    <string name="online_server_hint">O endereço do Worker do Hidden Leaf Online (https://…workers.dev). Os dois jogadores precisam usar o mesmo.</string>
+    <string name="online_test">Testar conexão</string>
+    <string name="online_test_ok">OK: %1$d ms (%2$s)</string>
+    <string name="online_err_version">O seu Hidden Leaf é de outra versão que a do servidor. Atualize o app.</string>
+    <string name="online_err_different">O jogo da sala não é igual ao seu: os dois precisam da mesma versão do app e dos mesmos mods ligados.</string>
+    <string name="online_err_no_room">Não há sala com esse código (ou ela fechou).</string>
+    <string name="online_err_full">A sala já tem dois jogadores.</string>
+    <string name="online_err_busy">Servidor ocupado: tente de novo daqui a pouco.</string>
+    <string name="online_err_server">Confira o endereço do servidor (começa com https://).</string>
+    <string name="online_err_network">O servidor não respondeu. Confira a internet e o endereço do servidor.</string>
+    <string name="online_err_other">O servidor recusou.</string>
+    <string name="online_err_code">O código tem 6 dígitos.</string>
+    <string name="online_game_linking">Conectando com %1$s…</string>
+    <string name="online_game_playing">Online %1$s contra %2$s · %3$s · atraso %4$s</string>
+    <string name="online_game_via_relay"> · relay</string>
+    <string name="online_game_desync"> · os jogos diferem</string>
+    <string name="online_game_peer_left">%1$s saiu da partida.</string>
+    <string name="online_game_over">Você saiu da partida.</string>
+    <string name="online_game_no_meet">O jogo de %1$s não abriu. Saia e crie outra sala.</string>
+    <string name="online_game_desync_end">Os dois jogos se separaram: a partida acabou.</string>
+    <string name="online_game_lost">A conexão com %1$s caiu.</string>
+    <string name="online_game_failed">A partida não pôde começar (rede).</string>
+</resources>

@@ -57,6 +57,7 @@ import com.dfdx047.hiddenleaf.ui.components.leafBackground
 import com.dfdx047.hiddenleaf.ui.screens.ControlsScreen
 import com.dfdx047.hiddenleaf.ui.screens.HomeScreen
 import com.dfdx047.hiddenleaf.ui.screens.ModsScreen
+import com.dfdx047.hiddenleaf.ui.screens.OnlineScreen
 import com.dfdx047.hiddenleaf.ui.screens.SettingsScreen
 import com.dfdx047.hiddenleaf.ui.screens.TexturesScreen
 import com.dfdx047.hiddenleaf.ui.screens.UpdateDialog
@@ -97,6 +98,7 @@ class MainActivity : ComponentActivity() {
 private enum class Dest(val route: String, val label: Int, val icon: ImageVector) {
     HOME("home", R.string.nav_home, NinjaIcons.Gate),
     MODS("mods", R.string.nav_mods, NinjaIcons.Scroll),
+    ONLINE("online", R.string.nav_online, NinjaIcons.Kunai),
     CONTROLS("controls", R.string.nav_controls, NinjaIcons.Shuriken),
     TEXTURES("textures", R.string.nav_textures, NinjaIcons.BrushPen),
     DRIVERS("drivers", R.string.nav_drivers, NinjaIcons.Bolt),
@@ -159,6 +161,7 @@ private fun HiddenLeafApp(vm: AppViewModel) {
                     composable(Dest.HOME.route) { HomeScreen(vm) }
                     composable(Dest.TEXTURES.route) { TexturesScreen(vm) }
                     composable(Dest.MODS.route) { ModsScreen(vm) }
+                    composable(Dest.ONLINE.route) { OnlineScreen(vm) }
                     composable(Dest.CONTROLS.route) { ControlsScreen(vm) }
                     composable(Dest.DRIVERS.route) { DriversScreen(vm) }
                     composable(Dest.DEBUG.route) { DebugScreen(vm) }
