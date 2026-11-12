@@ -17,6 +17,13 @@ enum class TouchLayout { MOBILE, CLASSIC }
 enum class TouchMode { OFF, AUTO, ALWAYS }
 
 /**
+ * Where the fight's D-pad and the campaign's stick sit under the thumb in "Toque Pro": FIXED where they were placed;
+ * FLOATING their centre where the thumb lands (anywhere in the left zone); DYNAMIC as floating, and the centre follows
+ * the thumb when it goes past the edge, so turning back is a press the other way at once (the mobile ports' default).
+ */
+enum class FloatMode { FIXED, FLOATING, DYNAMIC }
+
+/**
  * What the game is showing, and so which controls are on the screen:
  *  - FIGHT: a 2D fight. A D-pad (the fights are on a plane), the fighting buttons and one-touch jutsu;
  *  - CAMPAIGN: the Master mode's map, walked with the stick;
@@ -46,6 +53,9 @@ object Ps2 {
 
     /** Buttons a macro step can press, in the order the editor lists them. */
     val MACRO_BUTTONS = listOf(CROSS, CIRCLE, SQUARE, TRIANGLE, L1, R1, L2, R2, UP, DOWN, LEFT, RIGHT, L3, R3, START, SELECT)
+
+    /** The four directions: a sequence that presses one of them owns the D-pad while it plays. */
+    const val DIRECTIONS = UP or RIGHT or DOWN or LEFT
 
     /** A button's name in a console's look (positions stay the PS2's: south is cross). */
     fun label(skin: PadSkin, bit: Int): String = when (bit) {
@@ -79,7 +89,10 @@ data class MacroStep(val buttons: Int, val ms: Int)
 /**
  * The controls of Ultimate Ninja 5. The functions are the series' on the PS2 (Ultimate Ninja 2's manual: ○ attack,
  * ✕ jump, △ chakra for a secret technique, □ item, L1/R1 change item, L2/R2 guard); the one-touch jutsu play the
- * series' inputs: △ then ○ for a jutsu, △ △ then ○ for the ultimate one. To check on the game when it runs.
+ * series' inputs: △ then ○ for a jutsu, △ △ then ○ for the ultimate one; the two specials play the game's ↑ ↑ ○ and
+ * ↓ ↓ ○ (the direction let go between the two, so the game sees two presses). Touched on a device (docs/registro.md,
+ * 2026-11-09): the D-pad, attack, jump, chakra, item, guard, jutsu, Ougi and START. R3 (AWAKEN) was never seen doing
+ * anything in UN5, so it starts hidden ([PadDefaults.FIGHT]); the layout editor still shows it.
  */
 enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List<MacroStep> = emptyList()) {
     DPAD(CtlKind.DPAD, 0, 140f),
@@ -91,6 +104,12 @@ enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List
     JUTSU(CtlKind.MACRO, 0, 60f, listOf(MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90))),
     OUGI(CtlKind.MACRO, 0, 60f, listOf(
         MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
+    )),
+    SPECIAL_UP(CtlKind.MACRO, 0, 56f, listOf(
+        MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
+    )),
+    SPECIAL_DOWN(CtlKind.MACRO, 0, 56f, listOf(
+        MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
     )),
     GUARD(CtlKind.BUTTON, Ps2.R2, 60f),
     AWAKEN(CtlKind.BUTTON, Ps2.R3, 52f),
@@ -122,8 +141,11 @@ object PadDefaults {
         Ctl.ITEM to Placement(0.725f, 0.82f),   // (0.82 / 0.83: above the game's item bar, L1/R1 x∞, at the bottom)
         Ctl.JUTSU to Placement(0.73f, 0.58f),
         Ctl.OUGI to Placement(0.80f, 0.29f),
+        Ctl.SPECIAL_UP to Placement(0.68f, 0.30f),
+        Ctl.SPECIAL_DOWN to Placement(0.63f, 0.47f),
         Ctl.GUARD to Placement(0.955f, 0.83f),
-        Ctl.AWAKEN to Placement(0.955f, 0.38f),
+        // (R3 was never seen doing anything in a fight of UN5: hidden until it is; the layout editor shows it)
+        Ctl.AWAKEN to Placement(0.955f, 0.38f, visible = false),
         Ctl.ITEM_PREV to Placement(0.07f, 0.20f),
         Ctl.ITEM_NEXT to Placement(0.93f, 0.17f),
     ) + top
@@ -156,8 +178,8 @@ object PadDefaults {
         PadScene.MENU -> MENU
     }
 
-    /** Where the user's own macros start (by their place in the list). */
-    fun macroPlace(i: Int) = Placement(0.62f - 0.075f * (i % 3), 0.40f - 0.13f * (i / 3))
+    /** Where the user's own macros start (by their place in the list): left of the specials, in rows of three. */
+    fun macroPlace(i: Int) = Placement(0.54f - 0.075f * (i % 3), 0.40f - 0.14f * (i / 3))
 }
 
 /**
@@ -189,6 +211,8 @@ data class TouchConfig(
     // (2026-11-10, for the launch; tapping a menu item directly comes later). Stored as "menuGestures": the "menuTouch"
     // that earlier versions saved as true is not read, so everyone gets the pad.
     val menuTouch: Boolean = false,
+    val showNames: Boolean = false, // the action's name under each fight button (off: the icon and the console letter)
+    val pro: ProTouch = ProTouch(),
 ) {
     fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
@@ -205,6 +229,8 @@ data class TouchConfig(
         put("layout", layout.name)
         put("autoMode", autoMode)
         put("menuGestures", menuTouch)
+        put("showNames", showNames)
+        put("pro", pro.json())
         put("classicPlaces", JSONObject().apply { classicPlaces.forEach { (n, p) -> put(n, p.json()) } })
         put("macros", JSONArray().apply {
             macros.forEach { m ->
@@ -263,6 +289,8 @@ data class TouchConfig(
                 classicPlaces = classic,
                 macros = macros,
                 menuTouch = o.optBoolean("menuGestures", false),
+                showNames = o.optBoolean("showNames", false),
+                pro = o.optJSONObject("pro")?.let { ProTouch.fromJson(it) } ?: ProTouch(),
             )
         }
 
@@ -274,6 +302,42 @@ data class TouchConfig(
             o.optDouble("s", 1.0).toFloat().coerceIn(0.4f, 2.5f),
             o.optBoolean("v", true),
             o.optInt("o", 100).coerceIn(10, 100),
+        )
+    }
+}
+
+/**
+ * "Toque Pro": the controller tuned for fast play (online, competitive). Off, the controller is the plain one. On:
+ *  - [slideAll]: a finger sliding off a control onto another presses the new one, the jutsu, the specials, the macros
+ *    and L1/R1 included (the plain controller slides between the action buttons only);
+ *  - [move]: the fight's D-pad and the campaign's stick float or follow the thumb ([FloatMode]), anywhere in the left
+ *    [zone] % of the screen;
+ *  - [padSize] % of their size, [dead] % of their radius that presses nothing, [hit] % of a button's size a touch
+ *    counts on.
+ * Kept in touch_controls.json as "pro" (absent before 2026-11-12: the defaults, off).
+ */
+data class ProTouch(
+    val on: Boolean = false,
+    val slideAll: Boolean = true,
+    val move: FloatMode = FloatMode.DYNAMIC,
+    val padSize: Int = 85,
+    val dead: Int = 18,
+    val zone: Int = 45,
+    val hit: Int = 120,
+) {
+    fun json(): JSONObject = JSONObject()
+        .put("on", on).put("slideAll", slideAll).put("move", move.name)
+        .put("padSize", padSize).put("dead", dead).put("zone", zone).put("hit", hit)
+
+    companion object {
+        fun fromJson(o: JSONObject) = ProTouch(
+            on = o.optBoolean("on", false),
+            slideAll = o.optBoolean("slideAll", true),
+            move = runCatching { FloatMode.valueOf(o.optString("move")) }.getOrDefault(FloatMode.DYNAMIC),
+            padSize = o.optInt("padSize", 85).coerceIn(50, 150),
+            dead = o.optInt("dead", 18).coerceIn(0, 50),
+            zone = o.optInt("zone", 45).coerceIn(25, 60),
+            hit = o.optInt("hit", 120).coerceIn(100, 160),
         )
     }
 }
