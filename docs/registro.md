@@ -42,6 +42,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 | Online de dois jogadores (lockstep, salas na Cloudflare) | não testado | branch do agente (`af052ef`, `a3555f7` e o commit do launcher) | nenhum | testes de unidade no PC (`host/online/tests/run.sh`: lockstep 892, sessão 2042, partida 76 checagens, 0 falhas; `node online/worker/test.mjs`), `assembleDebug` e foto da tela Online (Robolectric) | nada rodou em aparelho nem na Cloudflare de verdade; o servidor precisa ser publicado (`online/worker/README.md`) |
 | Online em rede local (Wi-Fi, sem servidor; escolha na página Online) | não testado | branch do agente de 2026-11-13 23:20 | nenhum | `LanCodecTest`, `LanSessionTest`, foto `online_lan_portrait`, `assembleDebug` | descoberta por broadcast na porta 47655, entrada pelo socket do jogo; mesmo motor e mesmo arquivo de sessão do online (`relay=0`); falta testar em dois aparelhos na mesma rede |
+| Partida rápida (oponente aleatório) e aviso do online grátis esgotado | não testado | branch do agente de 2026-11-13 23:59 | nenhum | `node online/worker/test.mjs`, `OnlineQuotaTest`, fotos `online_quota_*`, `online_mods_*` | `/v1/quick` e `hl_queue` no Worker (não publicado); online e rede local só no jogo base |
 
 ### Lutas contra o PCSX2 (bancada no PC, desde 2026-11-08)
 
@@ -59,6 +60,46 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-13 23:59: partida rápida, aviso do online grátis esgotado e online só no jogo base; não testado em aparelho
+
+Pedidos do desenvolvedor: oponente aleatório ("Partida rápida"), um aviso claro quando o plano grátis da Cloudflare
+acaba no dia e, para o lançamento, online e rede local só no jogo base. Feito numa branch de agente; nada publicado na
+Cloudflare (o Worker novo precisa do `schema.sql` antes do deploy, ver abaixo).
+
+- **Servidor (`online/worker/`):** `POST /v1/quick {v, game, fp, name, addrs, opts, who}`. Quem pede entra na sala de
+  quem espera há mais tempo com o mesmo `v`, `game` e `fp` (como convidado, igual ao `/v1/join`: `role: "join"`), ou
+  ganha uma sala própria na fila (`role: "host"`) e daí em diante é uma sala comum (`poll`, `addrs`, `leave`, `ws` sem
+  mudança). `fp` diferente nunca se encontra. Sala da fila sem `poll` do dono por 15 s não é dada a ninguém e some na
+  busca seguinte (o `poll` dela responde `no room` e o app busca de novo). `who` (aleatório, do app) impede que o
+  celular caia na sala que ele mesmo deixou. Dois que buscam no mesmo instante: o segundo desfaz a sua sala e entra na
+  do primeiro. Tabela nova `hl_queue` (`CREATE TABLE IF NOT EXISTS`, nada apagado). Escritas no D1 por partida: 2
+  linhas de quem espera, 2 de quem chega e 1 a cada 5 s de espera: o `poll` de todas as salas agora só grava a hora a
+  cada 5 s (`TOUCH_EVERY`) ou quando o endereço muda. `/v1/hello` com `fp` diz quantos procuram (`waiting`, só
+  leitura). Erro de limite do D1/Durable Objects vira `429 {error: "quota"}`. `node test.mjs` passa (testes novos da
+  fila, expiração, corrida de dois, contagem de escritas, `quota`).
+- **Launcher:** botão "Partida rápida" no alto do cartão Jogar do online (criar sala e entrar por código continuam
+  embaixo, "ou jogue com um amigo, por código"); estado "Procurando um oponente… m:ss" com Cancelar
+  (`LobbyState.Searching`, `OnlineLobby.quick`); desiste em 10 min. Quem cai na sala de outro segue como convidado e
+  quem espera como anfitrião, pelo mesmo `launchMatch`. A espera do anfitrião virou `waitForGuest` (mesma das salas).
+- **Aviso do plano grátis (`data/OnlineQuota.kt`):** 429 que não é JSON do Worker (página da Cloudflare, erro 1027),
+  qualquer resposta com "1027" ou o `quota` do Worker guardam a hora nas preferências ("online", `quota_at`). No
+  Início e na página Online aparece o cartão laranja (no jeito do aviso do Dragon Rage): "O online grátis esgotou por
+  hoje. Volta em até 24 horas (o limite reinicia à 00:00 UTC, X horas daqui)." e "Rede local (Wi-Fi) continua
+  funcionando." (na página Online, com o botão "Jogar na rede local"). Some sozinho depois da 00:00 UTC ou na primeira
+  resposta do Worker. Ao abrir a página Online, um `/v1/hello` (com `fp`) deixa o aviso e o número de quem procura em
+  dia. O 429 `busy` do próprio Worker (salas demais por endereço) continua "Servidor ocupado".
+- **Só jogo base:** com qualquer mod ligado (`un5_mods.txt` não vazio ou um mod ligado na lista), a página Online (internet
+  e rede local) troca os botões por "O online é só no jogo base por enquanto. Desligue os mods em Mais → Mods para jogar
+  online." e o botão "Abrir Mods" (vai a Mais → Mods). O `OnlineLobby` recusa também por conta própria. A conferência do
+  `fp` continua igual (protege contra versões diferentes do app).
+- **Testes:** `OnlineQuotaTest` (hora da volta, horas arredondadas para cima, quais respostas contam), fotos novas
+  `online_quota_portrait`, `home_quota_portrait`, `online_mods_portrait`, `online_lan_mods_portrait`; as fotos do online
+  não fazem mais pedido de verdade (`OnlineLobby.autoCheck`). Todos os testes do launcher passam (45, 0 falhas);
+  `assembleDebug` compila; `node online/worker/test.mjs` passa.
+- **Não testado:** em aparelho nenhum e na Cloudflare de verdade (nem a partida rápida entre dois celulares, nem o 429
+  real). **Antes do deploy:** `npx wrangler d1 execute hiddenleaf-online --remote --file schema.sql` (cria a
+  `hl_queue`); o `wrangler.jsonc` não muda.
 
 ### 2026-11-13 23:20: multijogador em rede local (Wi-Fi) no launcher; não testado em aparelho
 

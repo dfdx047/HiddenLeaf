@@ -58,6 +58,8 @@ object Online {
     data class Room(val code: String, val key: String)
     data class Joined(val key: String, val host: Peer, val opts: Opts)
     data class Hello(val ok: Boolean, val ms: Long, val colo: String, val country: String)
+    /** A quick match's answer: [host] set = put in that player's room as its guest; null = a room of one's own, waiting in the queue. */
+    data class Quick(val code: String, val key: String, val host: Peer?, val opts: Opts)
 
     fun isPlaceholder(server: String) = server.contains("SEU-SUBDOMINIO")
 
@@ -77,6 +79,9 @@ object Online {
         return "a${BuildConfig.VERSION_CODE}.$lib.$mods".replace(Regex("[^0-9A-Za-z._:+-]"), "_").take(96)
     }
 
+    /** Whether any mod is switched on (the engine's list, un5_mods.txt): online and local matches are base game only for now. */
+    fun modsOn(paths: GamePaths): Boolean = runCatching { paths.activeMods.readLines() }.getOrDefault(emptyList()).any { it.isNotBlank() }
+
     // ---- the service
 
     suspend fun hello(server: String): Hello = withContext(Dispatchers.IO) {
@@ -88,10 +93,23 @@ object Online {
         Hello(r.optBoolean("ok"), ms, r.optString("colo"), r.optString("country"))
     }
 
+    /** One /v1/hello with this phone's [fp] (no timing): keeps the free-plan notice current; how many search a quick match it would meet. */
+    fun status(server: String, fp: String): Int =
+        post(server, "/v1/hello", JSONObject().put("v", NET_VERSION).put("game", GAME).put("fp", fp)).optInt("waiting", 0)
+
     fun host(server: String, name: String, fp: String, addrs: List<String>, opts: Opts): Room {
-        val r = post(server, "/v1/host", base(name, fp, addrs).put("opts", JSONObject().put("delay", opts.delay).put("relay", opts.relay)))
+        val r = post(server, "/v1/host", base(name, fp, addrs).put("opts", optsJson(opts)))
         return Room(r.getString("code"), r.getString("key"))
     }
+
+    /** Quick match: the room of whoever waits longest with the same [fp], or one of this phone's own that waits in the queue. */
+    fun quick(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, who: String): Quick {
+        val r = post(server, "/v1/quick", base(name, fp, addrs).put("opts", optsJson(opts)).put("who", who))
+        val joined = r.optString("role") == "join"
+        return Quick(r.getString("code"), r.getString("key"), if (joined) peer(r.getJSONObject("host")) else null, if (joined) opts(r.optJSONObject("opts")) else opts)
+    }
+
+    private fun optsJson(o: Opts) = JSONObject().put("delay", o.delay).put("relay", o.relay)
 
     fun join(server: String, code: String, name: String, fp: String, addrs: List<String>): Joined {
         val r = post(server, "/v1/join", base(name, fp, addrs).put("code", code))
@@ -130,9 +148,15 @@ object Online {
             c.setRequestProperty("Content-Type", "application/json")
             c.setRequestProperty("User-Agent", "HiddenLeaf-Android")
             c.outputStream.use { it.write(body.toString().toByteArray()) }
-            if (c.responseCode == 429) throw Failure("limit") // (the free plan's limit; Cloudflare's own page is no JSON)
-            val stream = if (c.responseCode < 400) c.inputStream else (c.errorStream ?: throw Failure("network"))
-            val json = JSONObject(stream.bufferedReader().use { it.readText() })
+            val code = c.responseCode
+            val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+            // (the free plan used up for the day: Cloudflare's own page, which is no JSON, or the Worker's "quota")
+            if (code >= 400 && OnlineQuota.isQuotaAnswer(code, text)) {
+                OnlineQuota.exhausted()
+                throw Failure("quota")
+            }
+            val json = JSONObject(text)
+            OnlineQuota.working() // (the Worker itself answered, even if with an error of its own)
             json.optString("error").takeIf { it.isNotEmpty() }?.let { throw Failure(it) }
             return json
         } catch (e: Failure) {
@@ -151,7 +175,8 @@ object Online {
         "different" -> R.string.online_err_different
         "no room" -> R.string.online_err_no_room
         "full" -> R.string.online_err_full
-        "busy", "limit" -> R.string.online_err_busy
+        "busy" -> R.string.online_err_busy
+        "quota" -> R.string.online_err_quota
         "server" -> R.string.online_err_server
         "network" -> R.string.online_err_network
         else -> R.string.online_err_other
@@ -326,6 +351,8 @@ sealed interface LobbyState {
     data class Working(val step: Int) : LobbyState
     /** The room is open: its code, while nobody has joined. */
     data class Waiting(val code: String) : LobbyState
+    /** Quick match: searching for an opponent since [since] (ms), in another player's room or in one of this phone's that waits. */
+    data class Searching(val since: Long) : LobbyState
     /** The other player is there: the game is starting. */
     data class Starting(val peer: String, val code: String) : LobbyState
     data class Failed(val message: Int) : LobbyState
@@ -361,6 +388,36 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
     private var socket: DatagramSocket? = null
     private var room: Online.Room? = null
     private var roomServer = ""
+    /** This phone for the quick-match queue (the service never gives it a room it left waiting itself). */
+    private val who = ByteArray(12).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+
+    private val _waiting = MutableStateFlow(0)
+    /** How many players search a quick match this phone would meet (the service's answer when the page opened). */
+    val waiting: StateFlow<Int> = _waiting.asStateFlow()
+
+    init {
+        OnlineQuota.attach(app)
+    }
+
+    /** The page opened: one cheap request, so that the free-plan notice and the number searching are current. */
+    fun checkService(fp: String) {
+        if (!autoCheck) return
+        val server = Online.cleanServer(prefs.state.value.server)
+        viewModelScope.launch(Dispatchers.IO) {
+            _waiting.value = try {
+                Online.status(server, fp)
+            } catch (e: Online.Failure) {
+                0
+            }
+        }
+    }
+
+    /** Online and local matches are base game only for now: false (and the page's notice) while a mod is switched on. */
+    private fun baseGameOnly(): Boolean {
+        if (!Online.modsOn(paths)) return true
+        _state.value = LobbyState.Failed(R.string.online_mods_only)
+        return false
+    }
 
     fun update(s: OnlinePrefs.State) {
         prefs.set(s)
@@ -382,7 +439,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
 
     /** Opens the room and waits for someone; [start] runs on the main thread once the session file is written. */
     fun create(fp: String, start: () -> Unit) {
-        if (job?.isActive == true) return
+        if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         val server = Online.cleanServer(p.server)
         job = viewModelScope.launch(Dispatchers.IO) {
@@ -397,26 +454,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 roomServer = server
                 _state.value = LobbyState.Waiting(r.code)
                 ActivityLog.info("online", "room ${r.code} open")
-                var every = 2000L
-                var lastStun = System.currentTimeMillis()
-                while (isActive) {
-                    delay(every)
-                    val guest = try {
-                        Online.pollGuest(server, r).also { every = 2000L }
-                    } catch (e: Online.Failure) {
-                        if (e.why == "limit" || e.why == "network") { every = (every * 2).coerceAtMost(30_000L); null } else throw e
-                    }
-                    if (guest != null) {
-                        ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
-                        launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key)), start)
-                        room = null // (the room stays on the service for the relay's connection; it goes by itself)
-                        return@launch
-                    }
-                    if (System.currentTimeMillis() - lastStun > 20_000) {
-                        lastStun = System.currentTimeMillis()
-                        Online.stun(s, 600) // (keeps the router's mapping of this port alive while the room waits)
-                    }
-                }
+                waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "room failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))
@@ -428,9 +466,90 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * The host's wait in its room [r]: a poll every 2 s (up to [maxBackoff] apart while the service does not answer), the router's
+     * mapping kept alive, and the match once someone has joined. True once it started; false at [until] (ms) with nobody.
+     */
+    private suspend fun waitForGuest(server: String, r: Online.Room, s: DatagramSocket, p: OnlinePrefs.State, start: () -> Unit, maxBackoff: Long, until: Long): Boolean {
+        var every = 2000L
+        var lastStun = System.currentTimeMillis()
+        while (System.currentTimeMillis() < until) {
+            delay(every)
+            val guest = try {
+                Online.pollGuest(server, r).also { every = 2000L }
+            } catch (e: Online.Failure) {
+                if (e.why == "network") { every = (every * 2).coerceAtMost(maxBackoff); null } else throw e
+            }
+            if (guest != null) {
+                ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
+                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key)), start)
+                room = null // (the room stays on the service for the relay's connection; it goes by itself)
+                return true
+            }
+            if (System.currentTimeMillis() - lastStun > 20_000) {
+                lastStun = System.currentTimeMillis()
+                Online.stun(s, 600) // (keeps the router's mapping of this port alive while the room waits)
+            }
+        }
+        return false
+    }
+
+    /**
+     * Quick match: a random opponent with the same app and mods (the same fingerprint). The service puts this phone in the room of whoever
+     * waits longest, or gives it a room of its own that waits in the queue (polled as a created room is); a waiting room the service let
+     * go (no poll for 15 s: the network was away) is searched again. It gives up after [QUICK_MAX_MS]. [start] as for [create].
+     */
+    fun quick(fp: String, start: () -> Unit) {
+        if (job?.isActive == true || !baseGameOnly()) return
+        val p = prefs.state.value
+        val server = Online.cleanServer(p.server)
+        job = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _state.value = LobbyState.Working(R.string.online_step_address)
+                val s = openSocket()
+                val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
+                ActivityLog.info("online", "quick match: own addresses ${addrs.joinToString()}")
+                val began = System.currentTimeMillis()
+                _state.value = LobbyState.Searching(began)
+                while (isActive) {
+                    if (System.currentTimeMillis() - began > QUICK_MAX_MS) {
+                        ActivityLog.info("online", "quick match: nobody in ${QUICK_MAX_MS / 60_000} minutes")
+                        _state.value = LobbyState.Failed(R.string.online_err_quick_timeout)
+                        closeRoom()
+                        return@launch
+                    }
+                    val q = Online.quick(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), who)
+                    if (q.host != null) {
+                        ActivityLog.info("online", "quick match: in room ${q.code} of ${q.host.name} (${q.host.seen}), addresses ${q.host.addrs.joinToString()}")
+                        launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key)), start)
+                        return@launch
+                    }
+                    val r = Online.Room(q.code, q.key)
+                    room = r
+                    roomServer = server
+                    ActivityLog.info("online", "quick match: waiting in room ${r.code}")
+                    try {
+                        if (waitForGuest(server, r, s, p, start, maxBackoff = 4000L, until = began + QUICK_MAX_MS)) return@launch
+                    } catch (e: Online.Failure) {
+                        if (e.why != "no room") throw e
+                        ActivityLog.info("online", "quick match: room ${r.code} let go by the service, searching again")
+                        room = null
+                    }
+                }
+            } catch (e: Online.Failure) {
+                ActivityLog.info("online", "quick match failed: ${e.why}")
+                _state.value = LobbyState.Failed(Online.explain(e.why))
+                closeRoom()
+            } catch (e: java.io.IOException) {
+                _state.value = LobbyState.Failed(R.string.online_err_network)
+                closeRoom()
+            }
+        }
+    }
+
     /** Joins the room [code]; [start] runs on the main thread once the session file is written. */
     fun join(code: String, fp: String, start: () -> Unit) {
-        if (job?.isActive == true) return
+        if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         val server = Online.cleanServer(p.server)
         val digits = code.filter { it.isDigit() }
@@ -470,7 +589,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
      * [start] runs on the main thread once the session file is written.
      */
     fun hostLan(fp: String, start: () -> Unit) {
-        if (job?.isActive == true) return
+        if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -546,7 +665,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
 
     /** Listens for local matches ([lanHosts]) until one is picked, the screen is left or [Lan.SEARCH_MAX_MS] goes by. */
     fun searchLan() {
-        if (job?.isActive == true) return
+        if (job?.isActive == true || !baseGameOnly()) return
         _lanHosts.value = emptyList()
         job = viewModelScope.launch(Dispatchers.IO) {
             val lock = Lan.multicastLock(getApplication<Application>())
@@ -723,5 +842,12 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
         closeSocket()
         closeScan()
         room?.let { r -> Thread { Online.leave(roomServer, r) }.start() }
+    }
+
+    companion object {
+        /** A quick match gives up after this long with nobody (each minute waiting is ~12 rows written on the free plan). */
+        const val QUICK_MAX_MS = 10 * 60_000L
+        /** The page's request when it opens ([checkService]); off in the screen tests, which must not reach the real service. */
+        @Volatile var autoCheck = true
     }
 }

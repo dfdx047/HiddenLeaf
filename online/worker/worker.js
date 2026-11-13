@@ -6,7 +6,8 @@
 // The match goes between the phones over UDP (recomp/android/host/online/link.cpp), through the relay only when it must.
 //
 // Requests: POST /v1/<what> with a JSON body; answers are JSON (errors: {error: "..."} with a 4xx status).
-//   /v1/hello  {v, game}                                -> {ok, v, game, colo, country, time}   (the app's connection test)
+//   /v1/hello  {v, game, fp?}                           -> {ok, v, game, colo, country, time, waiting?}   (the app's connection
+//                                                          test; with `fp`, `waiting`: how many search a quick match it would meet)
 //   /v1/host   {v, game, fp, name, addrs, opts}         -> {code, key, you}
 //   /v1/join   {v, game, fp, code, name, addrs}         -> {key, you, host: {name, addrs, seen}, opts}
 //                                                          ("no room", "version", "game", "different", "full")
@@ -15,6 +16,14 @@
 //   /v1/addrs  {code, key, addrs}                      -> {}   (one's addresses again)
 //   /v1/relay  {code, key}                             -> {turn: {server, username, credential}} | {noRelay: why}   (host only)
 //   /v1/leave  {code, key}                             -> {}   (the host leaving closes the room; the guest leaving frees it)
+//   /v1/quick  {v, game, fp, name, addrs, opts, who}   -> {role: "join", code, key, you, host: {name, addrs, seen}, opts}
+//                                                       | {role: "host", code, key, you}   ("version", "game", "busy")
+//       quick match: the caller is put in the room of whoever has waited longest with the same v, game and fp (as its
+//       guest, as /v1/join makes one), or, if nobody waits, is given a room of its own that waits in the queue
+//       (hl_queue): it then polls it as any host does (/v1/poll, /v1/addrs, /v1/leave, /v1/ws all the same). A waiting
+//       room whose host has not polled for QUICK_IDLE seconds is given to nobody and goes at the next search (its host's
+//       poll then gets "no room": it searches again). `who` is a random text the app made up, so that a room it left
+//       behind (it searched, then searched again) is not the one it is given.
 //   GET /v1/ws?code=&key=   (a WebSocket)              the room's relay: the room's own Durable Object (HiddenLeafRelay)
 //                      passes binary messages between the host and the guest, as they are.
 // `v` is the network version (HL_NET_VERSION in recomp/android/host/online/net_version.h and Online.NET_VERSION in the app):
@@ -34,6 +43,8 @@
 
 export const GAME = "un5";
 const ROOM_IDLE = 180;       // seconds a room lives with nobody asking about it
+const QUICK_IDLE = 15;       // seconds a quick-match room waits in the queue without its host's poll (the app polls every 2 s)
+const TOUCH_EVERY = 5;       // a poll writes the room's time only this often (D1's free plan counts rows written)
 const RELAY_PER_DAY = 300;
 const MAX_BODY = 4096;
 const MAX_RELAY_MESSAGE = 1600;
@@ -70,6 +81,11 @@ export function versionAllowed(env, v) {
     return list.length === 0 || list.includes(v);
 }
 
+// Whether an error thrown by D1 or a Durable Object says a free daily limit is used up (rows read or written, requests).
+export function quotaError(message) {
+    return /exceed|quota|daily limit|rows (read|written)/i.test(String(message ?? ""));
+}
+
 function randomKey() {
     const b = new Uint8Array(16);
     crypto.getRandomValues(b);
@@ -80,6 +96,35 @@ function randomCode() {
     const b = new Uint32Array(1);
     crypto.getRandomValues(b);
     return String(100000 + (b[0] % 900000)); // six digits, easy to read out over a call
+}
+
+// A room of [ip]'s with the body's player as its host: {code, key}, or null if no free code was found.
+async function makeRoom(env, body, ip, now) {
+    const key = randomKey();
+    for (let tries = 0; tries < 8; tries++) {
+        const code = randomCode();
+        const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, host_key, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(code, body.v, GAME, cleanFp(body.fp), key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
+        if (r.meta.changes === 1) return { code, key };
+    }
+    return null;
+}
+
+async function tooManyRooms(env, ip) {
+    const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM hl_rooms WHERE host_seen = ?").bind(ip).first();
+    return open && open.n >= (Number(env.ROOMS_PER_ADDRESS) || 4);
+}
+
+// The quick-match rooms that wait for a guest with one v, game and fp (bound in that order, then the oldest poll time
+// taken: now - QUICK_IDLE). The longest waiting comes first by the queue's rowid.
+const WAITING = "FROM hl_queue q JOIN hl_rooms r ON r.code = q.code WHERE q.v = ? AND q.game = ? AND q.fp = ? AND r.guest_key IS NULL AND r.touched >= ?";
+
+// Makes the caller [room]'s guest, as /v1/join does; null if someone else got there first.
+async function takeRoom(env, room, body, ip, now) {
+    const key = randomKey();
+    const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
+        .bind(key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, room.code).run();
+    return r.meta.changes === 1 ? { key, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) } : null;
 }
 
 async function sweep(env, now) {
@@ -166,21 +211,62 @@ export async function handle(request, env, now) {
 
     if (what === "hello") {
         const cf = request.cf || {};
-        return reply({ ok: versionAllowed(env, body.v) && body.game === GAME, v: body.v ?? null, game: GAME, colo: cf.colo ?? "", country: cf.country ?? "", time: now });
+        const ok = versionAllowed(env, body.v) && body.game === GAME;
+        const out = { ok, v: body.v ?? null, game: GAME, colo: cf.colo ?? "", country: cf.country ?? "", time: now };
+        if (ok && typeof body.fp === "string") { // (a read only: nothing written)
+            const n = await env.DB.prepare(`SELECT COUNT(*) AS n ${WAITING}`).bind(body.v, GAME, cleanFp(body.fp), now - QUICK_IDLE).first();
+            out.waiting = n ? n.n : 0;
+        }
+        return reply(out);
     }
     await sweep(env, now);
 
     if (what === "host") {
         if (body.game !== GAME) return reply({ error: "game" }, 409);
         if (!versionAllowed(env, body.v)) return reply({ error: "version" }, 409);
-        const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM hl_rooms WHERE host_seen = ?").bind(ip).first();
-        if (open && open.n >= (Number(env.ROOMS_PER_ADDRESS) || 4)) return reply({ error: "busy" }, 429);
-        const key = randomKey();
-        for (let tries = 0; tries < 8; tries++) {
-            const code = randomCode();
-            const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, host_key, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                .bind(code, body.v, GAME, cleanFp(body.fp), key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
-            if (r.meta.changes === 1) return reply({ code, key, you: ip });
+        if (await tooManyRooms(env, ip)) return reply({ error: "busy" }, 429);
+        const made = await makeRoom(env, body, ip, now);
+        return made ? reply({ ...made, you: ip }) : reply({ error: "busy" }, 503);
+    }
+
+    if (what === "quick") {
+        if (body.game !== GAME) return reply({ error: "game" }, 409);
+        if (!versionAllowed(env, body.v)) return reply({ error: "version" }, 409);
+        const who = typeof body.who === "string" ? body.who.replace(/[^0-9A-Za-z]/g, "").slice(0, 32) : "";
+        if (who.length < 8) return reply({ error: "bad request" }, 400);
+        const fp = cleanFp(body.fp);
+        // Out of the queue: rooms whose host stopped polling and rooms this same phone left waiting (nobody in them yet);
+        // then the queue's entries whose room is gone (left, swept, or just deleted here).
+        await env.DB.prepare("DELETE FROM hl_rooms WHERE guest_key IS NULL AND code IN (SELECT code FROM hl_queue) AND (touched < ? OR code IN (SELECT code FROM hl_queue WHERE who = ?))")
+            .bind(now - QUICK_IDLE, who).run();
+        await env.DB.prepare("DELETE FROM hl_queue WHERE code NOT IN (SELECT code FROM hl_rooms)").run();
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const waiting = await env.DB.prepare(`SELECT r.* ${WAITING} AND q.who <> ? ORDER BY q.rowid LIMIT 1`)
+                .bind(body.v, GAME, fp, now - QUICK_IDLE, who).first();
+            if (waiting) {
+                const joined = await takeRoom(env, waiting, body, ip, now);
+                if (joined) {
+                    await env.DB.prepare("DELETE FROM hl_queue WHERE code = ?").bind(waiting.code).run();
+                    return reply({ role: "join", code: waiting.code, ...joined });
+                }
+                continue; // someone else took that one this moment: the next
+            }
+            if (await tooManyRooms(env, ip)) return reply({ error: "busy" }, 429);
+            const mine = await makeRoom(env, body, ip, now);
+            if (!mine) return reply({ error: "busy" }, 503);
+            await env.DB.prepare("INSERT INTO hl_queue (code, v, game, fp, who, made) VALUES (?, ?, ?, ?, ?, ?)").bind(mine.code, body.v, GAME, fp, who, now).run();
+            // Two who search in the same moment both find nobody and both make a room. The one whose room came second
+            // sees the first one's here, gives its own up (unless someone is in it already) and takes the first.
+            const earlier = await env.DB.prepare(`SELECT q.code ${WAITING} AND q.who <> ? AND q.rowid < (SELECT rowid FROM hl_queue WHERE code = ?) LIMIT 1`)
+                .bind(body.v, GAME, fp, now - QUICK_IDLE, who, mine.code).first();
+            if (earlier) {
+                const gone = await env.DB.prepare("DELETE FROM hl_rooms WHERE code = ? AND guest_key IS NULL").bind(mine.code).run();
+                if (gone.meta.changes === 1) {
+                    await env.DB.prepare("DELETE FROM hl_queue WHERE code = ?").bind(mine.code).run();
+                    continue;
+                }
+            }
+            return reply({ role: "host", ...mine, you: ip });
         }
         return reply({ error: "busy" }, 503);
     }
@@ -205,11 +291,14 @@ export async function handle(request, env, now) {
     const code = who.room.code;
 
     if (what === "poll") {
+        // (the room's time is written once in TOUCH_EVERY seconds, or when the player's address changed: a poll every 2 s
+        // would otherwise be a row written every 2 s)
+        const stale = now - who.room.touched >= TOUCH_EVERY;
         if (who.host) {
-            await env.DB.prepare("UPDATE hl_rooms SET touched = ?, host_seen = ? WHERE code = ?").bind(now, ip, code).run();
+            if (stale || who.room.host_seen !== ip) await env.DB.prepare("UPDATE hl_rooms SET touched = ?, host_seen = ? WHERE code = ?").bind(now, ip, code).run();
             return reply({ guest: guestOf(who.room), opts: JSON.parse(who.room.opts) });
         }
-        await env.DB.prepare("UPDATE hl_rooms SET touched = ?, guest_seen = ? WHERE code = ?").bind(now, ip, code).run();
+        if (stale || who.room.guest_seen !== ip) await env.DB.prepare("UPDATE hl_rooms SET touched = ?, guest_seen = ? WHERE code = ?").bind(now, ip, code).run();
         return reply({ host: hostOf(who.room), opts: JSON.parse(who.room.opts) });
     }
 
@@ -239,7 +328,10 @@ export default {
         try {
             return await handle(request, env, Math.floor(Date.now() / 1000));
         } catch (e) {
-            console.error("hiddenleaf-online: " + (e && e.message));
+            const why = String((e && e.message) || "");
+            console.error("hiddenleaf-online: " + why);
+            // D1's or the Durable Objects' free daily limits used up: the app says so (they come back at 00:00 UTC)
+            if (quotaError(why)) return reply({ error: "quota" }, 429);
             return reply({ error: "unavailable" }, 503);
         }
     },

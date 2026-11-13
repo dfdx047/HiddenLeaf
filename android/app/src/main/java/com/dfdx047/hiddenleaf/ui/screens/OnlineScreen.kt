@@ -1,16 +1,25 @@
 package com.dfdx047.hiddenleaf.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -23,13 +32,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -45,11 +60,13 @@ import com.dfdx047.hiddenleaf.data.Lan
 import com.dfdx047.hiddenleaf.data.LobbyState
 import com.dfdx047.hiddenleaf.data.Online
 import com.dfdx047.hiddenleaf.data.OnlineLobby
+import com.dfdx047.hiddenleaf.data.OnlineQuota
 import com.dfdx047.hiddenleaf.data.ServerTest
 import com.dfdx047.hiddenleaf.ui.components.NinjaIcons
 import com.dfdx047.hiddenleaf.ui.components.ScreenTitle
 import com.dfdx047.hiddenleaf.ui.components.SectionCard
 import com.dfdx047.hiddenleaf.ui.theme.Konoha
+import kotlinx.coroutines.delay
 
 /**
  * Online: two players, each on their phone. One creates a room and tells the other its six-digit code; the other joins with it. The
@@ -58,29 +75,41 @@ import com.dfdx047.hiddenleaf.ui.theme.Konoha
  *
  * At the top the player picks how the two phones meet: through the rooms service on the internet, or on the same Wi-Fi (data/Lan.kt),
  * where one creates a match and the other picks it from the list of matches heard on the network. The match itself is the same.
+ * On the internet there is also the quick match: a random opponent with the same app and mods, no code (the service pairs the two).
+ *
+ * For now online and local matches are base game only: with a mod switched on, the page says so and leads to the Mods page
+ * ([onOpenMods]) instead of its buttons. When the service's free plan is used up for the day, a notice says until when.
  */
 @Composable
-fun OnlineScreen(vm: AppViewModel) {
+fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
     val lobby: OnlineLobby = viewModel()
     val prefs by lobby.prefs.state.collectAsStateWithLifecycle()
     val state by lobby.state.collectAsStateWithLifecycle()
     val test by lobby.test.collectAsStateWithLifecycle()
+    val waiting by lobby.waiting.collectAsStateWithLifecycle()
     val install by vm.install.collectAsStateWithLifecycle()
+    val fileMods by vm.fileMods.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val ready = install is InstallState.Installed && vm.engineAvailable
     val serverSet = prefs.server.startsWith("https://") && !Online.isPlaceholder(prefs.server)
     val idle = state is LobbyState.Idle || state is LobbyState.Failed
+    // (online and local matches are base game only for now: the launcher's list, and the engine's own as a check)
+    val modsOn = remember(fileMods) { fileMods.any { it.enabled } || Online.modsOn(vm.paths) }
     var code by rememberSaveable { mutableStateOf("") }
     val fp = { Online.fingerprint(context, vm.paths) }
 
     // (a local match or search stops with the page: nobody would see the other player arrive)
     DisposableEffect(lobby) { onDispose { lobby.leaveScreen() } }
+    // (one cheap request as the page opens: the free plan's notice and the number searching a quick match are current)
+    LaunchedEffect(prefs.server) { if (serverSet) lobby.checkService(fp()) }
 
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         ScreenTitle(stringResource(R.string.nav_online), stringResource(R.string.online_subtitle))
+
+        OnlineQuotaNotice(onLan = if (prefs.lan || !idle) null else ({ lobby.update(prefs.copy(lan = true)) }))
 
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             listOf(false to R.string.online_mode_internet, true to R.string.online_mode_lan).forEachIndexed { i, (lan, label) ->
@@ -93,7 +122,7 @@ fun OnlineScreen(vm: AppViewModel) {
             }
         }
 
-        if (prefs.lan) LanPlay(lobby, ready, fp) { vm.play() }
+        if (prefs.lan) LanPlay(lobby, ready, modsOn, onOpenMods, fp) { vm.play() }
         else SectionCard(stringResource(R.string.online_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
             when {
                 !ready -> Text(stringResource(R.string.online_need_game), style = MaterialTheme.typography.bodyMedium)
@@ -109,15 +138,23 @@ fun OnlineScreen(vm: AppViewModel) {
             )
             when (val s = state) {
                 is LobbyState.Waiting -> RoomCode(s.code) { lobby.cancel() }
+                is LobbyState.Searching -> QuickSearching(s.since) { lobby.cancel() }
                 is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
                 is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
-                else -> {
-                    Button(
-                        onClick = { lobby.create(fp()) { vm.play() } },
-                        enabled = ready && serverSet && prefs.name.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(R.string.online_create)) }
-                    Text(stringResource(R.string.online_or_join), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> if (modsOn) ModsOnly(onOpenMods) else {
+                    val can = ready && serverSet && prefs.name.isNotBlank()
+                    Button(onClick = { lobby.quick(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.online_quick))
+                    }
+                    Text(
+                        stringResource(R.string.online_quick_hint) +
+                            (if (waiting > 0) " " + pluralStringResource(R.plurals.online_quick_others, waiting, waiting) + "." else ""),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(stringResource(R.string.online_or_friend), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FilledTonalButton(onClick = { lobby.create(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.online_create))
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = code,
@@ -129,7 +166,7 @@ fun OnlineScreen(vm: AppViewModel) {
                         )
                         Button(
                             onClick = { lobby.join(code, fp()) { vm.play() } },
-                            enabled = ready && serverSet && code.length == 6 && prefs.name.isNotBlank(),
+                            enabled = can && code.length == 6,
                         ) { Text(stringResource(R.string.online_join)) }
                     }
                     if (s is LobbyState.Failed) {
@@ -200,7 +237,7 @@ fun OnlineScreen(vm: AppViewModel) {
 
 /** The local network's card: the name, then creating a match or searching for one (the list of matches heard, tap to join). */
 @Composable
-private fun LanPlay(lobby: OnlineLobby, ready: Boolean, fp: () -> String, start: () -> Unit) {
+private fun LanPlay(lobby: OnlineLobby, ready: Boolean, modsOn: Boolean, onOpenMods: () -> Unit, fp: () -> String, start: () -> Unit) {
     val prefs by lobby.prefs.state.collectAsStateWithLifecycle()
     val state by lobby.state.collectAsStateWithLifecycle()
     val hosts by lobby.lanHosts.collectAsStateWithLifecycle()
@@ -227,7 +264,7 @@ private fun LanPlay(lobby: OnlineLobby, ready: Boolean, fp: () -> String, start:
             }
             is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
             is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
-            else -> {
+            else -> if (modsOn) ModsOnly(onOpenMods) else {
                 val can = ready && prefs.name.isNotBlank()
                 Button(onClick = { lobby.hostLan(fp(), start) }, enabled = can, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.lan_create))
@@ -294,6 +331,69 @@ private fun RoomCode(code: String, onCancel: () -> Unit) {
             Text(stringResource(R.string.online_waiting), style = MaterialTheme.typography.bodyMedium)
         }
         TextButton(onClick = onCancel) { Text(stringResource(R.string.online_cancel)) }
+    }
+}
+
+/** Quick match: searching, how long so far, and a way out. */
+@Composable
+private fun QuickSearching(since: Long, onCancel: () -> Unit) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(since) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    val s = ((now - since) / 1000).coerceAtLeast(0)
+    Busy(stringResource(R.string.online_quick_searching, "%d:%02d".format(s / 60, s % 60)), onCancel)
+}
+
+/** A mod is switched on: online and local matches are base game only for now. Instead of the buttons: why, and the way to the Mods page. */
+@Composable
+private fun ModsOnly(onOpenMods: () -> Unit) {
+    Text(stringResource(R.string.online_mods_only), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = Konoha.NarutoOrangeDeep)
+    FilledTonalButton(onClick = onOpenMods) { Text(stringResource(R.string.online_mods_open)) }
+}
+
+/**
+ * The rooms service's free plan used up for the day (data/OnlineQuota.kt): what happened, when it comes back (00:00 UTC, the hours to
+ * it) and that the local network still works; [onLan] switches the Online page to it. Nothing while the service works. Shown on Home
+ * and on the Online page, in the look of Dragon Rage's online banner.
+ */
+@Composable
+fun OnlineQuotaNotice(onLan: (() -> Unit)? = null) {
+    val since by OnlineQuota.since.collectAsStateWithLifecycle()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(since) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(60_000)
+        }
+    }
+    if (!OnlineQuota.active(since, now)) return
+    val color = Konoha.NarutoOrange
+    val hours = OnlineQuota.hoursLeft(since, now)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        // (a dark card of its own, readable on the page's night and on the cream cards alike)
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.13f).compositeOver(Konoha.NightHigh), contentColor = Konoha.ScrollCream),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.6f)),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
+                Spacer(Modifier.width(10.dp))
+                Text(stringResource(R.string.online_quota_label).uppercase(), style = MaterialTheme.typography.labelLarge, color = color)
+            }
+            Text(stringResource(R.string.online_quota_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.online_quota_text, pluralStringResource(R.plurals.online_quota_hours, hours, hours)),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(stringResource(R.string.online_quota_lan), style = MaterialTheme.typography.bodyMedium, color = Konoha.LeeGreenLight)
+            if (onLan != null) FilledTonalButton(onClick = onLan) { Text(stringResource(R.string.online_quota_use_lan)) }
+        }
     }
 }
 

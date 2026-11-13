@@ -23,3 +23,13 @@ CREATE TABLE IF NOT EXISTS hl_relay_days (
     day INTEGER PRIMARY KEY,
     n INTEGER NOT NULL
 );
+-- quick match (/v1/quick): the rooms that wait for a random opponent, the longest waiting first (by rowid);
+-- a room leaves it when someone takes it, its host stops polling, or it is gone
+CREATE TABLE IF NOT EXISTS hl_queue (
+    code TEXT PRIMARY KEY,
+    v INTEGER NOT NULL,
+    game TEXT NOT NULL,
+    fp TEXT NOT NULL DEFAULT '',
+    who TEXT NOT NULL,
+    made INTEGER NOT NULL
+);

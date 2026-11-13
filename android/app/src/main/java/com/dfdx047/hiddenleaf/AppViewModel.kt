@@ -167,6 +167,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshAll()
+        com.dfdx047.hiddenleaf.data.OnlineQuota.attach(app) // (Home shows the online service's free-plan notice)
     }
 
     // ---- renderer: Vulkan, or OpenGL ES (chosen by itself for Mali GPUs)

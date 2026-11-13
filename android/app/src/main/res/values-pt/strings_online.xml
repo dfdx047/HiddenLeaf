@@ -73,4 +73,27 @@
     <string name="lan_err_refused">O outro celular recusou a partida.</string>
     <string name="lan_err_host_timeout">Ninguém entrou em 10 minutos: a partida foi fechada.</string>
     <string name="lan_err_search_timeout">A busca parou depois de 5 minutos.</string>
+
+    <!-- Partida rápida, aviso do plano grátis, só o jogo base (data/Online.kt, data/OnlineQuota.kt) -->
+    <string name="online_quick">Partida rápida</string>
+    <string name="online_quick_hint">Um oponente qualquer com o mesmo Hidden Leaf, sem código.</string>
+    <string name="online_quick_searching">Procurando um oponente… %1$s</string>
+    <plurals name="online_quick_others">
+        <item quantity="one">%d jogador procurando agora</item>
+        <item quantity="other">%d jogadores procurando agora</item>
+    </plurals>
+    <string name="online_or_friend">ou jogue com um amigo, por código</string>
+    <string name="online_err_quick_timeout">Ninguém apareceu em 10 minutos. Tente de novo mais tarde, ou crie uma sala e passe o código.</string>
+    <string name="online_err_quota">O online grátis esgotou por hoje: volta às 00:00 UTC. A rede local (Wi-Fi) continua funcionando.</string>
+    <string name="online_quota_label">Online</string>
+    <string name="online_quota_title">O online grátis esgotou por hoje.</string>
+    <string name="online_quota_text">Volta em até 24 horas (o limite reinicia à 00:00 UTC, %1$s daqui).</string>
+    <plurals name="online_quota_hours">
+        <item quantity="one">%d hora</item>
+        <item quantity="other">%d horas</item>
+    </plurals>
+    <string name="online_quota_lan">Rede local (Wi-Fi) continua funcionando.</string>
+    <string name="online_quota_use_lan">Jogar na rede local</string>
+    <string name="online_mods_only">O online é só no jogo base por enquanto. Desligue os mods em Mais → Mods para jogar online.</string>
+    <string name="online_mods_open">Abrir Mods</string>
 </resources>

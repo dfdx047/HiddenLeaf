@@ -3,8 +3,10 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { handle, HiddenLeafRelay, GAME } from "./worker.js";
+import worker, { handle, HiddenLeafRelay, GAME, quotaError } from "./worker.js";
 
+let written = 0;          // rows D1 would count as written (the free plan's daily limit)
+let beforeQueue = null;   // see run() below
 const db = new DatabaseSync(":memory:");
 db.exec(fs.readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
 const D1 = {
@@ -14,7 +16,13 @@ const D1 = {
             bind(...a) { this.args = a; return this; },
             async first() { return db.prepare(sql).get(...this.args) ?? null; },
             async all() { return { results: db.prepare(sql).all(...this.args) }; },
-            async run() { const r = db.prepare(sql).run(...this.args); return { meta: { changes: r.changes } }; },
+            async run() {
+                // (a test may step in just before a quick-match room enters the queue: another player searching at that moment)
+                if (beforeQueue && sql.startsWith("INSERT INTO hl_queue")) { const h = beforeQueue; beforeQueue = null; await h(); }
+                const r = db.prepare(sql).run(...this.args);
+                written += Number(r.changes);
+                return { meta: { changes: r.changes } };
+            },
         };
     },
     async batch(list) { return Promise.all(list.map((s) => s.run())); },
@@ -120,6 +128,104 @@ assert.equal((await call("poll", { code: h2.code, key: j2.key })).error, "no roo
 // one address cannot hold more than ROOMS_PER_ADDRESS rooms
 for (let i = 0; i < 4; i++) assert.equal((await call("host", { v, game: GAME, fp, name: "Spam", addrs: [] }, "192.0.2.50")).status, 200);
 assert.equal((await call("host", { v, game: GAME, fp, name: "Spam", addrs: [] }, "192.0.2.50")).error, "busy");
+
+// ---- quick match
+const quick = (name, who, ip, f = fp) => call("quick", { v, game: GAME, fp: f, name, addrs: ["10.1.0." + name.length + ":6000"], opts: { delay: 1, relay: true }, who }, ip);
+const fpMod = "app42+mods:un6_a35";
+now += 1000; // (the rooms above are long gone)
+
+// refused: another game or version, no `who`
+assert.equal((await call("quick", { v: 7, game: GAME, fp, name: "Q", addrs: [], who: "abcdefgh1" })).error, "version");
+assert.equal((await call("quick", { v, game: "bt2", fp, name: "Q", addrs: [], who: "abcdefgh1" })).error, "game");
+assert.equal((await call("quick", { v, game: GAME, fp, name: "Q", addrs: [] })).status, 400);
+assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 0);
+assert.equal((await call("hello", { v, game: GAME })).waiting, undefined);
+
+// nobody waits: a room of one's own, in the queue (two rows written: the room and its place in the queue)
+written = 0;
+let qa = await quick("Naruto", "whoAAAAAAAA", "203.0.113.20");
+assert.equal(qa.role, "host");
+assert.match(qa.code, /^\d{6}$/);
+assert.equal(written, 2);
+assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 1);
+assert.equal((await call("hello", { v, game: GAME, fp: fpMod })).waiting, 0);
+// its polls in the same seconds write nothing
+written = 0;
+assert.equal((await call("poll", { code: qa.code, key: qa.key }, "203.0.113.20")).guest, null);
+assert.equal(written, 0);
+
+// another build (other mods) never meets it: a room of its own
+const qm = await quick("Modded", "whoMMMMMMMM", "203.0.113.21", fpMod);
+assert.equal(qm.role, "host");
+assert.notEqual(qm.code, qa.code);
+
+// the same phone searching again: its old room is gone, a new one waits (it is never given its own)
+const qa2 = await quick("Naruto", "whoAAAAAAAA", "203.0.113.20");
+assert.equal(qa2.role, "host");
+assert.notEqual(qa2.code, qa.code);
+assert.equal((await call("poll", { code: qa.code, key: qa.key }, "203.0.113.20")).error, "no room");
+qa = qa2;
+
+// a second player with the same build: put in the first one's room as its guest (two rows: the guest, the queue's place)
+written = 0;
+const qb = await quick("Sasuke", "whoBBBBBBBB", "198.51.100.30");
+assert.equal(qb.role, "join");
+assert.equal(qb.code, qa.code);
+assert.equal(qb.host.name, "Naruto");
+assert.equal(qb.host.seen, "203.0.113.20");
+assert.deepEqual(qb.opts, { delay: 1, relay: true });
+assert.equal(written, 2);
+// from here it is a room like any other: the host's poll has the guest, the guest's has the host, the relay takes both
+p = await call("poll", { code: qa.code, key: qa.key }, "203.0.113.20");
+assert.equal(p.guest.name, "Sasuke");
+assert.equal(p.guest.seen, "198.51.100.30");
+assert.equal((await call("poll", { code: qa.code, key: qb.key }, "198.51.100.30")).host.name, "Naruto");
+relayCalls.length = 0;
+await handle(new Request(`https://t/v1/ws?code=${qa.code}&key=${qb.key}`, { headers: { upgrade: "websocket" } }), env, now);
+assert.deepEqual(relayCalls.map((c) => [c.room, c.who]), [[qa.code, "g"]]);
+// and it is out of the queue: a third player waits on its own
+assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 0);
+const qc = await quick("Sakura", "whoCCCCCCCC", "198.51.100.31");
+assert.equal(qc.role, "host");
+
+// a waiting room is kept by its host's polls; one not polled for QUICK_IDLE seconds is given to nobody and goes
+for (let i = 0; i < 5; i++) {
+    now += 4;
+    assert.equal((await call("poll", { code: qc.code, key: qc.key }, "198.51.100.31")).guest, null);
+}
+assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 1);
+assert.equal((await call("hello", { v, game: GAME, fp: fpMod })).waiting, 0); // (the modded one stopped polling long ago)
+const qd = await quick("Rock Lee", "whoDDDDDDDD", "198.51.100.32");
+assert.equal(qd.role, "join");
+assert.equal(qd.code, qc.code);
+const qm2 = await quick("Modded2", "whoNNNNNNNN", "198.51.100.33", fpMod);
+assert.equal(qm2.role, "host"); // (not the stale one)
+assert.equal((await call("poll", { code: qm.code, key: qm.key }, "203.0.113.21")).error, "no room");
+await call("leave", { code: qm2.code, key: qm2.key }, "198.51.100.33");
+assert.equal((await call("hello", { v, game: GAME, fp: fpMod })).waiting, 0);
+
+// two searching in the same moment both find nobody: the second gives its room up and joins the first
+const race = "app43+mods:none";
+let qf = null;
+beforeQueue = async () => { qf = await quick("First", "whoFFFFFFFF", "198.51.100.40", race); };
+const qg = await quick("Second", "whoGGGGGGGG", "198.51.100.41", race);
+assert.equal(qf.role, "host");
+assert.equal(qg.role, "join");
+assert.equal(qg.code, qf.code);
+assert.equal((await call("poll", { code: qf.code, key: qf.key }, "198.51.100.40")).guest.name, "Second");
+assert.equal((await call("hello", { v, game: GAME, fp: race })).waiting, 0);
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM hl_rooms WHERE fp = ?").get(race).n, 1);
+
+// D1's free limits used up: the app is told "quota" (429), not a plain failure
+assert.equal(quotaError("D1_ERROR: Exceeded maximum daily rows written"), true);
+assert.equal(quotaError("D1_ERROR: no such table: hl_rooms"), false);
+const spent = { DB: { prepare() { throw new Error("D1_ERROR: You have exceeded the daily limit of rows read"); } }, ALLOWED_VERSIONS: "1" };
+let qr = await worker.fetch(new Request("https://t/v1/quick", { method: "POST", body: JSON.stringify({ v, game: GAME, fp, who: "whoZZZZZZZZ" }) }), spent);
+assert.equal(qr.status, 429);
+assert.equal((await qr.json()).error, "quota");
+const broken = { DB: { prepare() { throw new Error("D1_ERROR: no such table: hl_rooms"); } }, ALLOWED_VERSIONS: "1" };
+qr = await worker.fetch(new Request("https://t/v1/host", { method: "POST", body: JSON.stringify({ v, game: GAME, fp }) }), broken);
+assert.equal(qr.status, 503);
 
 // bad bodies
 let bad = await handle(new Request("https://t/v1/host", { method: "POST", body: "not json" }), env, now);

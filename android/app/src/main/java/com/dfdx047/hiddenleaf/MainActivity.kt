@@ -204,7 +204,7 @@ private fun HiddenLeafApp(vm: AppViewModel, startPage: String? = null) {
                     modifier = Modifier.widthIn(max = 760.dp).fillMaxSize(),
                 ) {
                     composable(Dest.HOME.route) { HomeScreen(vm) }
-                    composable(Dest.ONLINE.route) { OnlineScreen(vm) }
+                    composable(Dest.ONLINE.route) { OnlineScreen(vm) { go(Dest.MORE); open(Dest.MODS) } }
                     composable(Dest.CONTROLS.route) { ControlsScreen(vm) }
                     composable(Dest.SETTINGS.route) { SettingsScreen(vm) }
                     composable(Dest.MORE.route) {

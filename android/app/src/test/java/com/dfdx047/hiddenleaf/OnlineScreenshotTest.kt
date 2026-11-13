@@ -9,11 +9,14 @@ import androidx.lifecycle.ViewModelProvider
 import com.dfdx047.hiddenleaf.data.Online
 import com.dfdx047.hiddenleaf.data.GamePaths
 import com.dfdx047.hiddenleaf.data.OnlineLobby
+import com.dfdx047.hiddenleaf.data.OnlineQuota
 import com.dfdx047.hiddenleaf.engine.OnlineBridge
+import com.dfdx047.hiddenleaf.ui.screens.HomeScreen
 import com.dfdx047.hiddenleaf.ui.screens.OnlineScreen
 import com.dfdx047.hiddenleaf.ui.theme.HiddenLeafTheme
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,13 +32,16 @@ import org.robolectric.annotation.GraphicsMode
 class OnlineScreenshotTest {
     private val out = File(System.getProperty("hl.shots") ?: "build/shots").also { it.mkdirs() }
 
-    private fun shoot(name: String, lan: Boolean = false) {
+    private fun shoot(name: String, lan: Boolean = false, home: Boolean = false) {
+        OnlineLobby.autoCheck = false // (no request to the real service from a test)
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
         // (the page's choice through its own model: Robolectric keeps the preferences of an earlier test in a cache)
         val lobby = ViewModelProvider(activity)[OnlineLobby::class.java]
         lobby.update(lobby.prefs.state.value.copy(lan = lan))
-        activity.setContent { HiddenLeafTheme { OnlineScreen(AppViewModel(activity.application)) } }
+        activity.setContent {
+            HiddenLeafTheme { if (home) HomeScreen(AppViewModel(activity.application)) else OnlineScreen(AppViewModel(activity.application)) }
+        }
         repeat(20) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50)) }
         val v = activity.window.decorView
         val bmp = Bitmap.createBitmap(v.width, v.height, Bitmap.Config.ARGB_8888)
@@ -54,6 +60,36 @@ class OnlineScreenshotTest {
     @Test
     @Config(qualifiers = "pt-w400dp-h880dp-port-xhdpi")
     fun lanPortrait() = shoot("online_lan_portrait", lan = true)
+
+    /** The free plan used up: the notice on the Online page and on Home. */
+    @Test
+    @Config(qualifiers = "pt-w400dp-h880dp-port-xhdpi")
+    fun quotaNotice() {
+        OnlineQuota.exhausted()
+        try {
+            shoot("online_quota_portrait")
+            shoot("home_quota_portrait", home = true)
+        } finally {
+            OnlineQuota.working()
+        }
+    }
+
+    /** A mod switched on: the page leads to the Mods page instead of its buttons (online and local matches are base game only). */
+    @Test
+    @Config(qualifiers = "pt-w400dp-h880dp-port-xhdpi")
+    fun modsOnly() {
+        val paths = GamePaths(androidx.test.core.app.ApplicationProvider.getApplicationContext())
+        paths.activeMods.parentFile?.mkdirs()
+        paths.activeMods.writeText("modlib/un6_a35/disc\n")
+        try {
+            assertTrue(Online.modsOn(paths))
+            shoot("online_mods_portrait")
+            shoot("online_lan_mods_portrait", lan = true)
+        } finally {
+            paths.activeMods.delete()
+        }
+        assertFalse(Online.modsOn(paths))
+    }
 
     @Test
     fun sessionFile() {

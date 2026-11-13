@@ -112,7 +112,9 @@ Segundo o que o Dragon Rage anotou ao usar o mesmo tipo de servidor (confira na 
   espera: 10 minutos de espera são 300 pedidos. Quem entra faz poucos pedidos.
 - O TURN da Cloudflare é gratuito até **1.000 GB por mês** (só conta se você ligar o passo 7).
 
-Quando o limite do dia acaba, a Cloudflare responde 429 e o app mostra "Servidor ocupado".
+Quando o limite do dia acaba, a Cloudflare responde 429 e o app avisa, no Início e na página Online, que o online grátis
+esgotou por hoje e volta às 00:00 UTC (a rede local continua). O aviso some sozinho depois desse horário ou no próximo
+pedido que der certo.
 
 ## Testes
 
@@ -127,13 +129,14 @@ enviado para a internet.
 
 | Pedido | Corpo | Resposta |
 |---|---|---|
-| `POST /v1/hello` | `{v, game}` | `{ok, v, game, colo, country, time}` |
+| `POST /v1/hello` | `{v, game, fp?}` | `{ok, v, game, colo, country, time}`; com `fp`, também `waiting` (quantos procuram partida rápida com esse `fp`) |
 | `POST /v1/host` | `{v, game, fp, name, addrs, opts}` | `{code, key, you}` |
 | `POST /v1/join` | `{v, game, fp, code, name, addrs}` | `{key, you, host, opts}`; erros `no room`, `version`, `game`, `different`, `full` |
 | `POST /v1/poll` | `{code, key}` | quem criou: `{guest, opts}`; quem entrou: `{host, opts}` |
 | `POST /v1/addrs` | `{code, key, addrs}` | `{}` |
 | `POST /v1/relay` | `{code, key}` | `{turn}` ou `{noRelay}` (só quem criou) |
 | `POST /v1/leave` | `{code, key}` | `{}` |
+| `POST /v1/quick` | `{v, game, fp, name, addrs, opts, who}` | `{role: "join", code, key, you, host, opts}` ou `{role: "host", code, key, you}`; erros `version`, `game`, `busy` |
 | `GET /v1/ws?code=&key=` | WebSocket | o relay da sala: o que um manda, o outro recebe |
 
 - `v`: a versão de rede; `game`: sempre `un5`.
@@ -141,3 +144,24 @@ enviado para a internet.
   ligados). A sala só aceita quem tem o mesmo `fp` de quem criou (erro `different`).
 - `opts`: as escolhas de quem criou, `{delay: 0 (automático) a 4 quadros, relay: true/false}`.
 - Uma sala sem pedidos por 3 minutos some.
+
+### Partida rápida (`/v1/quick`)
+
+Um oponente qualquer, sem código. Quem pede entra na sala de quem espera há mais tempo com o mesmo `v`, `game` e `fp`
+(como convidado, igual ao `/v1/join`) e recebe `role: "join"`. Se ninguém espera, ganha uma sala própria que fica na fila
+(tabela `hl_queue`) e recebe `role: "host"`: daí em diante é uma sala comum, e o app pergunta por ela com `/v1/poll` a
+cada 2 s até alguém entrar (o resto, `addrs`, `leave`, `ws`, é igual). `fp` diferente (outra versão do app ou outros
+mods) nunca se encontra.
+
+- Uma sala da fila cujo dono não pergunta há **15 s** (`QUICK_IDLE`) não é dada a ninguém e some na próxima busca; o
+  `poll` do dono responde então `no room`, e o app busca de novo.
+- `who` é um texto aleatório que o app cria: uma sala que o mesmo celular deixou na fila (buscou, cancelou e buscou de
+  novo) some e nunca é dada a ele mesmo.
+- Dois que buscam no mesmo instante e não acham ninguém criam duas salas; o segundo vê a do primeiro, desfaz a sua e
+  entra na dele.
+- Escritas no D1 por partida: 2 linhas de quem espera (a sala e o lugar na fila), 2 de quem chega (o convidado e a saída
+  da fila), e uma a cada 5 s de espera (o `poll` só grava a hora da sala a cada 5 s, `TOUCH_EVERY`, em todas as salas).
+
+Quando o limite diário do D1 ou dos Durable Objects acaba, o Worker responde `429 {error: "quota"}`; quando acaba o dos
+pedidos do Worker, a própria Cloudflare responde 429 (erro 1027). Nos dois casos o app mostra que o online grátis
+esgotou até 00:00 UTC (quando os limites do plano gratuito reiniciam) e que a rede local continua funcionando.

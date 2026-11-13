@@ -108,6 +108,8 @@ fun HomeScreen(vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
             )
         }
+        // (the online service's free plan used up for today: until when, and that the local network still works)
+        OnlineQuotaNotice()
         if (installed) {
             OutlinedButton(onClick = vm::createPlayShortcut, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Rounded.AddToHomeScreen, null, Modifier.size(20.dp))
