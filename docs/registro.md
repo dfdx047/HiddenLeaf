@@ -59,6 +59,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 13:40: despertar da Hinata no Mi A3 (patches 0107/0108, Nominum faa7af3)
+
+- **Cena:** Practice, Hinata contra Naruto, vida 0.2 no início, ↑ segurado (`build/lab/env_hin_prac.txt`, rota do
+  aparelho com 7×RIGHT na escolha e DOWN extra no modo).
+- **Modo leve ligado** (Nominum VU1 + GS dividido): "Guardian Dance Mode" e ícone "Grd" por ~20 s, HUD estável. Vídeo da
+  luta inteira (`build/lab/mia3/hin_light2/rec_5..8`): 0 piscadas de um quadro na região do HUD, sem lixo amarelo/verde,
+  sem tela vermelha ou branca. 41–49 fps.
+- **Modo leve desligado:** 6 capturas durante o despertar, HUD inteiro, nada quebrado; 17–24 fps (esperado). Os vídeos
+  da luta se perderam: o Mi A3 saiu da rede no fim da rodada (Wi-Fi), e o `light_mode` dele ficou `0` (voltar para `1`).
+- **Cube:** não testado; estava em uso com outro app (Fractal), configurações devolvidas ao original.
+- **Falta:** vídeo do modo desligado; ver se as barras pretas da vitória e os golpes sem efeito somem com a mesma correção.
+
 ### 2026-11-13 13:00: tudo dentro da pasta do projeto (pedido do desenvolvedor)
 
 - **Pedido:** nada de trabalho fora de `~/AndroidStudioProjects`, nada em pasta temporária, apagar o que não serve. Regra
