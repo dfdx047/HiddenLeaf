@@ -95,7 +95,8 @@ else()
     message(STATUS "Nominum VU1: no recompiled blocks (no ${HL_NOMINUM_DIR}/build/vu1rec)")
 endif()
 target_include_directories(nominum_vu1 PUBLIC "${HL_NOMINUM_DIR}")
-target_compile_options(nominum_vu1 PRIVATE -O2 -Wno-unused-parameter -Wno-unused-variable -Wno-unused-label
+# -O3: the recompiled VU1 blocks 3% faster than at -O2 on the Mi A3 (the replay, 2026-11-12)
+target_compile_options(nominum_vu1 PRIVATE -O3 -Wno-unused-parameter -Wno-unused-variable -Wno-unused-label
     -Wno-unused-but-set-variable -Wno-deprecated-enum-enum-conversion)
 set_source_files_properties("${HL_NOMINUM_DIR}/core/vu1/vu_fast.cpp" PROPERTIES COMPILE_FLAGS "-mllvm -tail-dup-pred-size=4096 -mllvm -tail-dup-succ-size=4096")
 

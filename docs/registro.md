@@ -59,6 +59,43 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 00:40, madrugada: a VU1 do Nominum mais barata (`052f000`); o limite do Mi A3 é o GS do ARMSX2
+
+- **Pedido do desenvolvedor:** "o que da pra fazer na VU1 do Mi a3 faca, quero ele segurando a luta em pelo menos 1x ou
+  talvez 1.5 ou 1.25x".
+- **Nominum `052f000`** (registro dele, 2026-11-12 23:00): o corpo de cada bloco recompilado da VU1 recebe `vf`, `vi` e
+  `vuData` como ponteiros `__restrict` (a escrita na memória de dados, por ponteiro de bytes, fazia o compilador recarregar
+  os registros depois de cada `SQ`); o IMAGE do VIF1 sem vetor novo a cada pedaço. O replay da luta no próprio Mi A3
+  (`nominum-vifreplay` estático, `odin3_43_luta_inicio`): VIF1+VU1 15,47 → 14,95 ms por vsync, a VU1 12,46 → 11,95.
+  ctest `^vif` 106/106, `arm64_qemu.sh` 130/130 bit a bit.
+- **Aqui:** `NOMINUM_COMMIT` `85726f6` → `052f000` (`recomp/android/build.sh`, `recomp/pc/build.sh`; o catálogo
+  `build/vu1rec` é o mesmo, copiado para `build/nominum-052f000/build/vu1rec`), e a `nominum_vu1` com `-O3` em vez de
+  `-O2` (`recomp/android/CMakeLists.txt`; no replay, −0,4 ms por vsync sozinho).
+- **Mi A3, luta 1x (`cmp_default`, v8.0):** VU1 18,7 ms na fase B (antes 18,1–19,1), fps **48,7 / 46,8** (`mia3_vu2a`,
+  `mia3_vu2b`; antes 48,4–49,1 / 46,6–48,2): a VU1 ganhou ~0,3 ms no jogo e o fps não mudou.
+- **Por que o fps não sobe:** na fase B, 56–58% das janelas já estão a 48,5 fps ou mais; as lentas (10 de 41, mínimo
+  35,6) são o Ougi do Naruto com os clones nos telhados (v7500–7800) e trechos de combo. Nelas o quadro leva ~27 ms e a
+  thread `GS` do ARMSX2 fica 25–28 ms ocupada por quadro (4,0–4,5 MB/f), a VU1 23–24 ms esperando o anel dele. **O
+  limite do Mi A3 é o GS do ARMSX2**: no perfil do processo, `GSLocalMemory WriteImage` 13% e `GSXXH3_64_Block` (hash
+  de textura) 13% da thread, `GSRendererHW::Draw` 6,5%.
+- **Resolução:** a 1,25x e a 1,5x o fps é quase o mesmo da 1x: **48,5 / 46,3** (`mia3_s125`) e **48,3 / 46,5**,
+  **48,0 / 46,5** (`mia3_s15`, `mia3_s15b`); o GS sobe ~1 ms. Imagens a 1,5x certas (luta, Ougi, golpe com "hits").
+  **O Mi A3 pode usar 1,5x** sem perder mais do que já perde a 1x.
+- **Tentados e descartados:**
+  - A "CPU Thread" do ARMSX2 (copia o anel ao vivo para o MTGS; 12% do processo, livre em todos os núcleos) presa aos
+    núcleos pequenos (`HL_PIN_CPUT=l`, experimento no `hl_perf.cpp`, desfeito): 48,7 / 46,7 e 48,6 / 46,6, igual.
+    `taskset` pelo `run-as` não pode (permissão negada).
+  - Os clocks no Mi A3 durante a luta: A73 a 2016 MHz (o máximo), A53 1,3–1,8 GHz, GPU a 600 MHz (máx. 950) e 56%
+    ocupada. Não há estrangulamento térmico.
+- **Cube:** luta 2x base 49,4 / 50,0 fps, VU1 10,2 / 11,8 ms (`cube_vu1r`; antes 12,0–12,2 na fase B). A35 (pacotes v8.2
+  e v8.0 refeitos): 59,2 / 56,6 fps (`cube_a35_vu1r`). A fase B pegou o Ougi da CPU (v7315–7427, 37 fps, VU1 25 ms);
+  na `cube_a35_ee3` o mesmo tipo de cena caiu fora da janela (v9343–9753, 24 fps, VU1 39 ms). Capturas certas (luta,
+  golpe, seleção). O A35 desligado de novo no Cube.
+- **Próximo passo para o Mi A3 segurar 50:** o GS do ARMSX2 (`libbt4gsx`): o upload (`WriteImage`) e o hash de textura
+  nas cenas de 4 MB/f. Na VU1 ainda há o laço de `HL_COMMIT_FLAGS` (um quarto do bloco mais quente), mas ele não muda o
+  fps enquanto o GS for o limite.
+- APK `build/HiddenLeaf-20261113-vu.apk`, instalado no Mi A3 e no Cube.
+
 ### 2026-11-12 21:40, noite: o EE 20% mais leve (patch `0103`); o limite do Mi A3 passa a ser a VU1
 
 - **Pergunta do desenvolvedor:** o limite é o EE; é da recompilação? Perfil DWARF da GameThread no RG Cube (luta 2x,
