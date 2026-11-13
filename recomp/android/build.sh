@@ -48,7 +48,7 @@ done
 
 # Nominum Render's VIF1 and VU1 (NOMINUM_VU1=1, host/hl_nominum_vu1.cpp): an export of one commit of its repository (read
 # only; this tree never writes there), and its recompiled VU1 blocks in build/nominum-<commit>/build/vu1rec (made on the PC by
-# nominum-vurec from ~/Downloads/vifdumps; game code, so build/ only). Without them, its VU1 runs the fast path only.
+# nominum-vurec from build/vifdumps; game code, so build/ only). Without them, its VU1 runs the fast path only.
 NOMINUM_REPO="${NOMINUM_REPO:-$HOME/AndroidStudioProjects/Nominum-Render}"
 NOMINUM_COMMIT="${NOMINUM_COMMIT:-faa7af3}"
 nominum="$B/nominum-$NOMINUM_COMMIT"

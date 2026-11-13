@@ -59,6 +59,19 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 13:00: tudo dentro da pasta do projeto (pedido do desenvolvedor)
+
+- **Pedido:** nada de trabalho fora de `~/AndroidStudioProjects`, nada em pasta temporária, apagar o que não serve. Regra
+  global em `~/.claude/CLAUDE.md`.
+- **Movido:** o PCSX2 da bancada `~/build/pcsx2-bench` → `build/pcsx2-bench` (caminhos trocados no `run.sh`, `runrc.sh`,
+  cache do CMake e configs das dependências; precisa reconfigurar e recompilar uma vez). Os dumps do VIF1
+  `~/Downloads/vifdumps` → `build/vifdumps` (o `NOMINUM_VIFDUMPS` do Nominum aponta para lá). As entradas antigas deste
+  registro ainda citam os caminhos velhos.
+- **Apagado** (~34 GB): o `build/lab` inteiro menos scripts, rotas e envs (quadros, gravações, dumps, APKs e binários de
+  teste: 29 GB), as 9 APKs `build/HiddenLeaf-2026111*.apk`, `build/gsx-dr-20261112`, `build/gsx-nominum`,
+  `build/linux-armsx2-hl`, `build/linux-armsx2-tsan`, as exportações antigas do Nominum (fica a `faa7af3`, com o catálogo
+  `build/vu1rec` copiado da `758e4e7`), os dumps de GS/VIF e quadros em `build/disc`, o rascunho da sessão no `/tmp`.
+
 ### 2026-11-13 12:40, meio-dia: Despertar da Hinata, lista PACKED partida entre DIRECTs (patches 0107, 0108, Nominum faa7af3)
 
 - **Reproduzido no PC** (`un5pc`, sem o nativo: `HL_NATIVE=0`), modo Practice (Mode Select ↓↓), Hinata 7× → a partir do

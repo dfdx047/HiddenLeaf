@@ -7,7 +7,7 @@ Para a Fase 3 do Nominum (VIF1 + VU1 dentro do Nominum). Um par de arquivos por 
 
 Com isso, um VIF1 + VU1 novo pode ser comparado bit a bit, pacote a pacote, com o que o Hidden Leaf faz hoje.
 
-Os dumps ficam em `~/Downloads/vifdumps/<aparelho>_<cena>.vif.zst` e `.gif.zst`, fora do git, porque são dados do jogo. O leitor e conferidor é `tools/vifdump.py info <base>`.
+Os dumps ficam em `build/vifdumps/<aparelho>_<cena>.vif.zst` e `.gif.zst`, fora do git, porque são dados do jogo. O leitor e conferidor é `tools/vifdump.py info <base>`.
 
 ## Como gravar
 

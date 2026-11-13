@@ -1,5 +1,5 @@
 // Comparison bench against PCSX2 (PC only; docs/plano.md "Bancada contra o PCSX2"). The same records as the PCSX2 bench
-// hook (~/build/pcsx2-bench/src/pcsx2/HLBench.cpp, kept out of this repository), read by tools/hlbench.py.
+// hook (build/pcsx2-bench/src/pcsx2/HLBench.cpp, kept out of this repository), read by tools/hlbench.py.
 //
 //   HLB_OUT=<prefix>   <prefix>.bin (records) and <prefix>.txt (events); nothing is hooked without it
 //   HLB_RNG=1          at the start of each fight the Mersenne Twister's index (gp-0x7FA8 = 0x60FF48) becomes 0x271, so its

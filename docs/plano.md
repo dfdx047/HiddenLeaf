@@ -660,13 +660,13 @@ Relatórios completos dos dois agentes: copiados em `build/lab/bench/bt4-vs-hl.m
 
 ### A bancada (CPU contra CPU, sem savestate)
 
-- **PCSX2 da bancada** (fora do repositório): `~/build/pcsx2-bench/src` (PCSX2 `v2.9.162`) com o gancho
+- **PCSX2 da bancada** (fora do repositório): `build/pcsx2-bench/src` (PCSX2 `v2.9.162`) com o gancho
   `pcsx2/HLBench.cpp`, ligado por `HLB_OUT`. Usa o mecanismo de ponto de parada do recompilador do EE para chamar o gancho
   (sem pausar) na entrada de `0x21E660`. Configuração portátil em `b/bin` (`portable.ini`): BIOS `scph39001`, renderizador
   por software, sem patches nem cheats, cartão em pasta formatado e vazio no slot 1 (o recomp tem um de 8 MB formatado e
-  vazio), slot 2 vazio. Rodar: `~/build/pcsx2-bench/run.sh <prefixo>` (Qt em `xcb`, sem MangoHud).
+  vazio), slot 2 vazio. Rodar: `build/pcsx2-bench/run.sh <prefixo>` (Qt em `xcb`, sem MangoHud).
 - **Recomp do PC:** `recomp/runtime/hl_bench.cpp` (só fora do Android), mesmo gancho por `registerFunction`, os mesmos
-  registros; rodar com `~/build/pcsx2-bench/runrc.sh <prefixo>`. Os botões vêm do `HL_PADROUTE` (no PCSX2, `HLB_ROUTE`, mesma sintaxe).
+  registros; rodar com `build/pcsx2-bench/runrc.sh <prefixo>`. Os botões vêm do `HL_PADROUTE` (no PCSX2, `HLB_ROUTE`, mesma sintaxe).
 - **Registro** (`<prefixo>.bin`): a cada chamada de `0x21E660` (a entrada de cada lutador, uma vez por quadro do jogo, 25 por
   segundo): vsync, luta, número da chamada, endereço do lutador, `ra`, índice do Mersenne Twister, hash do estado dos dois
   geradores, a câmera (`*(0x617ACC)`), os 0xC00 bytes do lutador e os 0x280 da câmera. `<prefixo>.txt` tem os eventos.

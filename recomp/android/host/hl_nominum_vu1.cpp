@@ -9,7 +9,7 @@
 // game reads (vif1_regs, the VU1 memories, a DIRECT's debt, the PATH3 mask): they go in before each transfer, back after it.
 //
 // Nominum's code is built from build/nominum-<commit> (git archive of the Nominum repository; recomp/android/CMakeLists.txt,
-// HL_NOMINUM_DIR), and its catalog from build/nominum-<commit>/build/vu1rec (nominum-vurec over ~/Downloads/vifdumps: game
+// HL_NOMINUM_DIR), and its catalog from build/nominum-<commit>/build/vu1rec (nominum-vurec over build/vifdumps: game
 // code, never in git).
 #include "runtime/hl_nominum_vu1.h"
 
