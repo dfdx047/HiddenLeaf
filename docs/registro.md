@@ -59,6 +59,14 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 16:30: barras da vitória no Mi A3 (19,5:9), modo leve ligado
+
+- Libs v8.0/v8.2 e A35 refeitas com `1d33084`. Rota de sempre até a vitória das duas lutas (`build/lab/env_victory.txt`,
+  vídeo em `build/lab/mia3/victory/`): a câmera volta à escala do jogo em v7594 e v11220, os quadros exatos em que o
+  painel de arte aparece. No vídeo, os dois painéis (pinceladas, "WINNER", nome, pose, esmaecer para o resultado)
+  enchem a tela inteira, sem barra preta em nenhum momento.
+- **Falta:** os mods (A35 e Alpha 1.1X: conferir se `0x617D3C` é o mesmo ponteiro, `HL_WATCH=617d3c`) e o Cube.
+
 ### 2026-11-13 15:40: barras pretas na tela de vitória (16:9 e 20:9): câmera larga desligada no quadro do fim do round
 
 - **Reproduzido no PC** (`un5pc`, 1080x486 = 20:9, GS do ARMSX2; Free Battle com a Hinata, `HL_CPU_HP=@1+450,@2+450`,
