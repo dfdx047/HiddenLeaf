@@ -59,6 +59,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 18:40: instalação limpa no RG Cube (APK final)
+
+- Backup dos dados antigos do Cube em `build/lab/cube_backup` (saves, configurações, mods importados); app
+  desinstalado e o APK final instalado do zero, depois o caminho de um jogador novo pela tela:
+  - Primeira abertura: tela "Sua GPU" (Mali-G57) com as otimizações; "Aplicar" funcionou.
+  - Sem o jogo, o JOGAR fica cinza e desligado, e o cartão "Dados do jogo" mostra o "Selecionar ISO".
+  - ISO europeia pelo seletor do Android: "Versão europeia verificada · 19 arquivos · 11,2 MB" em menos de 1 minuto.
+  - Mods pela ISO: Alpha 3.5 (16 arquivos, 1020 MB) e Alpha 1.1X (6 arquivos, 934 MB), cada um ligado ao importar.
+  - Ícone novo na tela inicial do Cube conferido.
+- Rotas (modo leve desligado, padrão do Cube; configurações da instalação limpa, sem forçar escala):
+  - Jogo base (`mia3/cube_base`): 50 fps quase a rota inteira (queda a 37 na troca de round), luta, seleção, carregamento.
+  - Alpha 1.1X (`mia3/cube_a11x`): luta a 50 fps, 28 a 40 só na tela "Round 2 / VS".
+  - Alpha 3.5 sem save (`mia3/cube_a35`): a mensagem do próprio mod ("dados não encontrados no slot 1"), como esperado.
+    Com o save do backup devolvido (`mia3/cube_a35b`): seleção, luta e volta à seleção a 60 fps (uma queda a 28).
+  - A lista de mods voltou a desligada depois de cada rota.
+- `adb push` não cria pasta dentro de `Android/data` no Cube (Android 13); a pasta do save nasceu numa tentativa e os
+  arquivos entraram depois, um a um.
+
 ### 2026-11-13 18:00: testes finais no Mi A3 (mods, clones, modo leve desligado)
 
 - **Alpha 1.1X** (`build/lab/mia3/a11x_final`, modo leve ligado, Nominum): luta inteira, tela de vitória ocupando a
