@@ -69,23 +69,14 @@
     <string name="tc_g_mstart">Empieza en la pantalla de título y hace entrar al 2.º jugador.</string>
 
     <string name="tp_title">Toque Pro</string>
-    <string name="tp_intro">Para jugar rápido, contra otra persona u online: el dedo se desliza entre todos los botones, la cruceta aparece bajo el pulgar, y ajustas el tamaño, la zona muerta y el área de toque. Desactivado, el mando es el normal.</string>
+    <string name="tp_intro">Para jugar rápido, contra otra persona u online: el dedo se desliza entre todos los botones, la cruceta del combate es más grande y fija, con un área de toque amplia, y ajustas su tamaño, la zona muerta y el área de toque. Desactivado, el mando es el normal.</string>
     <string name="tp_guide">Cómo funciona</string>
     <string name="tp_on">Activar el Toque Pro</string>
     <string name="tp_on_text">Vale para el mando del juego, en todas las escenas.</string>
     <string name="tp_slide">Deslizar entre todos los botones</string>
     <string name="tp_slide_text">Arrastra el dedo de un botón a otro y el nuevo se pulsa al momento, sin levantar el dedo: incluye Jutsu, Ougi, especiales, macros y L1/R1. Desactivado: solo entre Ataque, Saltar, Chakra, Objeto y Defensa.</string>
-    <string name="tp_move">Cruceta (combate) y joystick (campaña)</string>
-    <string name="tp_move_fixed">Fijo</string>
-    <string name="tp_move_floating">Flotante</string>
-    <string name="tp_move_dynamic">Dinámico</string>
-    <string name="tp_move_fixed_text">Se quedan donde los pusiste en el editor de diseño.</string>
-    <string name="tp_move_floating_text">Aparecen donde apoyes el pulgar, en la zona izquierda. Tocar la propia cruceta también funciona.</string>
-    <string name="tp_move_dynamic_text">Como el flotante, y el centro sigue al pulgar cuando pasa del borde: volver al otro lado responde al momento.</string>
-    <string name="tp_zone">Zona del pulgar</string>
-    <string name="tp_zone_text">Hasta dónde, desde el borde izquierdo, un toque hace aparecer la cruceta.</string>
-    <string name="tp_pad_size">Tamaño de la cruceta y del joystick</string>
-    <string name="tp_pad_size_text">Más pequeño ocupa menos pantalla y pide movimientos más cortos del pulgar.</string>
+    <string name="tp_pad_size">Tamaño de la cruceta (combate)</string>
+    <string name="tp_pad_size_text">La cruceta se queda donde la pusiste en el editor de diseño. Más grande es más fácil de acertar sin mirar; un toque bien alrededor de ella todavía cuenta.</string>
     <string name="tp_dead">Zona muerta</string>
     <string name="tp_dead_text">El centro que no pulsa ninguna dirección. Mayor evita direcciones sin querer; menor responde antes.</string>
     <string name="tp_hit">Área de toque de los botones</string>
@@ -96,8 +87,8 @@
     <string name="tpg_intro">Los gestos del mando en pantalla y lo que cambia el Toque Pro.</string>
     <string name="tpg_slide">Deslizar entre botones</string>
     <string name="tpg_slide_text">Con el dedo en Ataque, desliza hasta el Jutsu o un especial: cada botón en el que entra el dedo se pulsa, y el anterior se suelta. Con el Toque Pro vale para todos los botones de acción, los especiales y las macros.</string>
-    <string name="tpg_float">Cruceta flotante y dinámica</string>
-    <string name="tpg_float_text">En el combate, apoya el pulgar en cualquier punto de la zona izquierda: la cruceta aparece ahí. En modo dinámico, si el pulgar pasa del borde, la cruceta lo sigue.</string>
+    <string name="tpg_dpad">Cruceta fija</string>
+    <string name="tpg_dpad_text">En el combate la cruceta se queda en su sitio, más grande que la normal, y un toque dentro de la caja amplia a su alrededor cae en ella. Con el pulgar en ella, son ocho direcciones, diagonales incluidas, aunque el pulgar pase del borde.</string>
     <string name="tpg_dead">Zona muerta</string>
     <string name="tpg_dead_text">El círculo del centro no pulsa ninguna dirección. Mayor si apoyas el pulgar, menor si quieres respuesta rápida.</string>
     <string name="tpg_hit">Área de toque</string>

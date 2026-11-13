@@ -98,7 +98,6 @@ import androidx.compose.ui.unit.sp
 import com.dfdx047.hiddenleaf.R
 import com.dfdx047.hiddenleaf.data.EngineSettings
 import com.dfdx047.hiddenleaf.data.Renderer
-import com.dfdx047.hiddenleaf.touch.FloatMode
 import com.dfdx047.hiddenleaf.touch.Macro
 import com.dfdx047.hiddenleaf.touch.MacroStep
 import com.dfdx047.hiddenleaf.touch.MenuCombo
@@ -678,9 +677,7 @@ private fun TouchTab(state: GameMenuState, actions: GameMenuActions) {
     }) { set(c.copy(scale = (size + 1).coerceAtMost(20) / 10f)) }
     if (mobile) Toggle(stringResource(R.string.tc_show_names), stringResource(R.string.tc_show_names_text), c.showNames) { set(c.copy(showNames = it)) }
     Toggle(stringResource(R.string.touch_haptics), stringResource(R.string.touch_haptics_text), c.haptics) { set(c.copy(haptics = it)) }
-    if (!mobile || !c.pro.on) {
-        Toggle(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { set(c.copy(sticksFloat = it)) }
-    }
+    Toggle(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { set(c.copy(sticksFloat = it)) }
 
     if (mobile) ProSection(state, c) { set(c.copy(pro = it)) }
     MacroSection(state, c, actions)
@@ -694,29 +691,8 @@ private fun ProSection(state: GameMenuState, c: TouchConfig, set: (ProTouch) -> 
     Toggle(stringResource(R.string.tp_on), stringResource(R.string.tp_on_text), p.on) { set(p.copy(on = it)) }
     if (p.on) {
         Toggle(stringResource(R.string.tp_slide), stringResource(R.string.tp_slide_text), p.slideAll) { set(p.copy(slideAll = it)) }
-        Label(stringResource(R.string.tp_move))
-        Chips(
-            listOf(
-                stringResource(R.string.tp_move_fixed) to FloatMode.FIXED.ordinal,
-                stringResource(R.string.tp_move_floating) to FloatMode.FLOATING.ordinal,
-                stringResource(R.string.tp_move_dynamic) to FloatMode.DYNAMIC.ordinal,
-            ),
-            p.move.ordinal,
-        ) { set(p.copy(move = FloatMode.entries[it])) }
-        Hint(
-            stringResource(
-                when (p.move) {
-                    FloatMode.FIXED -> R.string.tp_move_fixed_text
-                    FloatMode.FLOATING -> R.string.tp_move_floating_text
-                    FloatMode.DYNAMIC -> R.string.tp_move_dynamic_text
-                },
-            ),
-        )
-        // (the launcher's ranges: zone 25..60 in 5s, size 50..150 in 5s, dead zone 0..40, hit area 100..160 in 5s)
-        if (p.move != FloatMode.FIXED) {
-            Stepper(stringResource(R.string.tp_zone), "${p.zone}%", p.zone > 25, p.zone < 60, { set(p.copy(zone = p.zone - 5)) }) { set(p.copy(zone = p.zone + 5)) }
-        }
-        Stepper(stringResource(R.string.tp_pad_size), "${p.padSize}%", p.padSize > 50, p.padSize < 150, {
+        // (the launcher's ranges: D-pad size 80..160 in 5s, dead zone 0..40, hit area 100..160 in 5s)
+        Stepper(stringResource(R.string.tp_pad_size), "${p.padSize}%", p.padSize > 80, p.padSize < 160, {
             set(p.copy(padSize = p.padSize - 5))
         }) { set(p.copy(padSize = p.padSize + 5)) }
         Stepper(stringResource(R.string.tp_dead), "${p.dead}%", p.dead > 0, p.dead < 40, { set(p.copy(dead = p.dead - 1)) }) { set(p.copy(dead = p.dead + 1)) }

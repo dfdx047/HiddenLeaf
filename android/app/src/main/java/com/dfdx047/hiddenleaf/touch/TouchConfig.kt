@@ -17,13 +17,6 @@ enum class TouchLayout { MOBILE, CLASSIC }
 enum class TouchMode { OFF, AUTO, ALWAYS }
 
 /**
- * Where the fight's D-pad and the campaign's stick sit under the thumb in "Toque Pro": FIXED where they were placed;
- * FLOATING their centre where the thumb lands (anywhere in the left zone); DYNAMIC as floating, and the centre follows
- * the thumb when it goes past the edge, so turning back is a press the other way at once (the mobile ports' default).
- */
-enum class FloatMode { FIXED, FLOATING, DYNAMIC }
-
-/**
  * What the game is showing, and so which controls are on the screen:
  *  - FIGHT: a 2D fight. A D-pad (the fights are on a plane), the fighting buttons and one-touch jutsu;
  *  - CAMPAIGN: the Master mode's map, walked with the stick;
@@ -310,33 +303,33 @@ data class TouchConfig(
  * "Toque Pro": the controller tuned for fast play (online, competitive). Off, the controller is the plain one. On:
  *  - [slideAll]: a finger sliding off a control onto another presses the new one, the jutsu, the specials, the macros
  *    and L1/R1 included (the plain controller slides between the action buttons only);
- *  - [move]: the fight's D-pad and the campaign's stick float or follow the thumb ([FloatMode]), anywhere in the left
- *    [zone] % of the screen;
- *  - [padSize] % of their size, [dead] % of their radius that presses nothing, [hit] % of a button's size a touch
- *    counts on.
- * Kept in touch_controls.json as "pro" (absent before 2026-11-12: the defaults, off).
+ *  - the fight's D-pad is fixed where the layout editor put it, [padSize] % of its plain size (larger by default), and
+ *    a touch well around it still lands on it ([PRO_DPAD_HIT]); a thumb that went down on it steers it from anywhere;
+ *  - [dead] % of the D-pad's (and the stick's) radius presses nothing, [hit] % of a button's size a touch counts on.
+ * Kept in touch_controls.json as "pro" (absent before 2026-11-12: the defaults, off). Until 2026-11-13 the D-pad and
+ * the stick could float under the thumb ("move", "zone": no longer read) and "padSize" was 85% by default: the size
+ * is stored as "dpadSize" now, so the larger fixed D-pad is everyone's default.
  */
 data class ProTouch(
     val on: Boolean = false,
     val slideAll: Boolean = true,
-    val move: FloatMode = FloatMode.DYNAMIC,
-    val padSize: Int = 85,
+    val padSize: Int = 125,
     val dead: Int = 18,
-    val zone: Int = 45,
     val hit: Int = 120,
 ) {
     fun json(): JSONObject = JSONObject()
-        .put("on", on).put("slideAll", slideAll).put("move", move.name)
-        .put("padSize", padSize).put("dead", dead).put("zone", zone).put("hit", hit)
+        .put("on", on).put("slideAll", slideAll)
+        .put("dpadSize", padSize).put("dead", dead).put("hit", hit)
 
     companion object {
+        /** How far around the Toque Pro D-pad a touch still lands on it: of its half-size, each way. */
+        const val PRO_DPAD_HIT = 1.5f
+
         fun fromJson(o: JSONObject) = ProTouch(
             on = o.optBoolean("on", false),
             slideAll = o.optBoolean("slideAll", true),
-            move = runCatching { FloatMode.valueOf(o.optString("move")) }.getOrDefault(FloatMode.DYNAMIC),
-            padSize = o.optInt("padSize", 85).coerceIn(50, 150),
+            padSize = o.optInt("dpadSize", 125).coerceIn(80, 160),
             dead = o.optInt("dead", 18).coerceIn(0, 50),
-            zone = o.optInt("zone", 45).coerceIn(25, 60),
             hit = o.optInt("hit", 120).coerceIn(100, 160),
         )
     }

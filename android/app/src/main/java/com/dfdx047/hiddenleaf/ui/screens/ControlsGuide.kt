@@ -55,7 +55,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.dfdx047.hiddenleaf.R
 import com.dfdx047.hiddenleaf.touch.Ctl
-import com.dfdx047.hiddenleaf.touch.FloatMode
 import com.dfdx047.hiddenleaf.touch.Macro
 import com.dfdx047.hiddenleaf.touch.MacroStep
 import com.dfdx047.hiddenleaf.touch.NinjaPadView
@@ -179,31 +178,7 @@ internal fun TouchProSection(c: TouchConfig, onChange: (TouchConfig) -> Unit, on
             HorizontalDivider()
             ToggleRow(stringResource(R.string.tp_slide), stringResource(R.string.tp_slide_text), p.slideAll) { set(p.copy(slideAll = it)) }
             HorizontalDivider()
-            Text(stringResource(R.string.tp_move), style = MaterialTheme.typography.titleSmall)
-            ChipRow(
-                options = listOf(
-                    stringResource(R.string.tp_move_fixed) to FloatMode.FIXED.ordinal,
-                    stringResource(R.string.tp_move_floating) to FloatMode.FLOATING.ordinal,
-                    stringResource(R.string.tp_move_dynamic) to FloatMode.DYNAMIC.ordinal,
-                ),
-                selected = p.move.ordinal,
-                onSelect = { set(p.copy(move = FloatMode.entries[it])) },
-            )
-            Text(
-                stringResource(
-                    when (p.move) {
-                        FloatMode.FIXED -> R.string.tp_move_fixed_text
-                        FloatMode.FLOATING -> R.string.tp_move_floating_text
-                        FloatMode.DYNAMIC -> R.string.tp_move_dynamic_text
-                    },
-                ),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (p.move != FloatMode.FIXED) {
-                StepSlider(stringResource(R.string.tp_zone), { "${it * 5}%" }, p.zone / 5, 5..12) { set(p.copy(zone = it * 5)) }
-                Text(stringResource(R.string.tp_zone_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            StepSlider(stringResource(R.string.tp_pad_size), { "${it * 5}%" }, p.padSize / 5, 10..30) { set(p.copy(padSize = it * 5)) }
+            StepSlider(stringResource(R.string.tp_pad_size), { "${it * 5}%" }, p.padSize / 5, 16..32) { set(p.copy(padSize = it * 5)) }
             Text(stringResource(R.string.tp_pad_size_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             StepSlider(stringResource(R.string.tp_dead), { "$it%" }, p.dead, 0..40) { set(p.copy(dead = it)) }
             Text(stringResource(R.string.tp_dead_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -247,7 +222,7 @@ internal fun ProGuideContent(c: TouchConfig, onDismiss: () -> Unit) {
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, stringResource(R.string.close)) }
                 }
                 GuideCard(R.string.tpg_slide, R.string.tpg_slide_text) { drawSlide(painter) }
-                GuideCard(R.string.tpg_float, R.string.tpg_float_text) { drawFloat(painter) }
+                GuideCard(R.string.tpg_dpad, R.string.tpg_dpad_text) { drawFixedDpad(painter) }
                 GuideCard(R.string.tpg_dead, R.string.tpg_dead_text) { drawDead() }
                 GuideCard(R.string.tpg_hit, R.string.tpg_hit_text) { drawHit(painter) }
                 GuideCard(R.string.tpg_specials, R.string.tpg_specials_text) { drawSpecials(painter) }
@@ -319,17 +294,15 @@ private fun DrawScope.drawSlide(painter: NinjaPadView) {
     thumb(Offset(xs[2] + u(0.05f), y + u(0.1f)), u(0.07f))
 }
 
-/** The D-pad where it was placed (dim), and where the thumb landed; the arrow: it follows past the edge. */
-private fun DrawScope.drawFloat(painter: NinjaPadView) {
-    val zone = size.width * 0.45f
-    drawRect(Konoha.ChakraBlue.copy(alpha = 0.08f), Offset(0f, u(0.3f)), Size(zone, size.height - u(0.3f)))
-    drawLine(Konoha.ChakraBlue.copy(alpha = 0.6f), Offset(zone, u(0.3f)), Offset(zone, size.height), u(0.01f), pathEffect = dashes(this))
-    val home = Offset(size.width * 0.13f, u(0.62f))
-    drawCircle(Dim, u(0.2f), home, style = Stroke(u(0.012f), pathEffect = dashes(this)))
-    val at = Offset(size.width * 0.32f, u(0.56f))
-    ctl(painter, Ctl.DPAD, at, u(0.52f))
-    arrow(Offset(at.x + u(0.3f), at.y), Offset(at.x + u(0.58f), at.y - u(0.06f)), Konoha.ChakraAmber, u(0.014f))
-    thumb(Offset(at.x + u(0.66f), at.y - u(0.04f)), u(0.07f))
+/** The fixed D-pad with the wide box a touch lands on it, and a thumb on a diagonal at the box's edge. */
+private fun DrawScope.drawFixedDpad(painter: NinjaPadView) {
+    val c = Offset(size.width * 0.5f, u(0.5f))
+    val d = u(0.56f)
+    val box = d / 2 * com.dfdx047.hiddenleaf.touch.ProTouch.PRO_DPAD_HIT
+    drawRect(Konoha.ChakraAmber.copy(alpha = 0.10f), Offset(c.x - box, c.y - box), Size(box * 2, box * 2))
+    drawRect(Konoha.ChakraAmber, Offset(c.x - box, c.y - box), Size(box * 2, box * 2), style = Stroke(u(0.012f), pathEffect = dashes(this)))
+    ctl(painter, Ctl.DPAD, c, d)
+    thumb(Offset(c.x + box * 0.82f, c.y - box * 0.78f), u(0.07f))
 }
 
 /** Rings: the dead zone (nothing) and the rest of the D-pad. */

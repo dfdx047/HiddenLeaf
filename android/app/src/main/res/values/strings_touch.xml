@@ -69,23 +69,14 @@
     <string name="tc_g_mstart">Starts at the title screen and lets the 2nd player join.</string>
 
     <string name="tp_title">Pro Touch</string>
-    <string name="tp_intro">For fast play, against another person or online: your finger slides across every button, the D-pad appears under your thumb, and you set the size, the dead zone and the touch area. Off, the controller is the plain one.</string>
+    <string name="tp_intro">For fast play, against another person or online: your finger slides across every button, the fight\'s D-pad is larger and fixed with a wide touch area, and you set its size, the dead zone and the touch area. Off, the controller is the plain one.</string>
     <string name="tp_guide">How it works</string>
     <string name="tp_on">Turn Pro Touch on</string>
     <string name="tp_on_text">For the game layout, in every scene.</string>
     <string name="tp_slide">Slide across all buttons</string>
     <string name="tp_slide_text">Drag your finger from one button to another and the new one is pressed at once, without lifting: Jutsu, Ougi, specials, macros and L1/R1 included. Off: only between Attack, Jump, Chakra, Item and Guard.</string>
-    <string name="tp_move">D-pad (fight) and stick (campaign)</string>
-    <string name="tp_move_fixed">Fixed</string>
-    <string name="tp_move_floating">Floating</string>
-    <string name="tp_move_dynamic">Dynamic</string>
-    <string name="tp_move_fixed_text">They stay where you put them in the layout editor.</string>
-    <string name="tp_move_floating_text">They appear where your thumb lands, in the left zone. Touching the D-pad itself works too.</string>
-    <string name="tp_move_dynamic_text">Like floating, and the centre follows your thumb when it goes past the edge: turning back responds at once.</string>
-    <string name="tp_zone">Thumb zone</string>
-    <string name="tp_zone_text">How far from the left edge a touch makes the D-pad appear.</string>
-    <string name="tp_pad_size">D-pad and stick size</string>
-    <string name="tp_pad_size_text">Smaller takes less of the screen and asks for shorter thumb moves.</string>
+    <string name="tp_pad_size">D-pad size (fight)</string>
+    <string name="tp_pad_size_text">The D-pad stays where you put it in the layout editor. Larger is easier to hit without looking; a touch well around it still counts.</string>
     <string name="tp_dead">Dead zone</string>
     <string name="tp_dead_text">The centre that presses no direction. Larger avoids directions you did not mean; smaller responds earlier.</string>
     <string name="tp_hit">Buttons\' touch area</string>
@@ -96,8 +87,8 @@
     <string name="tpg_intro">The on-screen controller\'s gestures and what Pro Touch changes.</string>
     <string name="tpg_slide">Sliding across buttons</string>
     <string name="tpg_slide_text">With your finger on Attack, slide onto the Jutsu or a special: each button your finger enters is pressed, and the previous one is let go. With Pro Touch it works for every action button, the specials and the macros.</string>
-    <string name="tpg_float">Floating and dynamic D-pad</string>
-    <string name="tpg_float_text">In a fight, put your thumb anywhere in the left zone: the D-pad appears there. In dynamic mode, if your thumb goes past the edge, the D-pad comes along.</string>
+    <string name="tpg_dpad">Fixed D-pad</string>
+    <string name="tpg_dpad_text">In a fight the D-pad stays in its place, larger than the plain one, and a touch inside the wide box around it lands on it. Once your thumb is on it, it steers in eight directions, diagonals included, even if it slides past the edge.</string>
     <string name="tpg_dead">Dead zone</string>
     <string name="tpg_dead_text">The middle circle presses no direction. Larger if you rest your thumb, smaller if you want a quick response.</string>
     <string name="tpg_hit">Touch area</string>

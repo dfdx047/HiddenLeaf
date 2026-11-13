@@ -196,9 +196,7 @@ internal fun ControlsContent(
                 ToggleRow(stringResource(R.string.tc_show_names), stringResource(R.string.tc_show_names_text), c.showNames) { onTouch(c.copy(showNames = it)) }
             }
             ToggleRow(stringResource(R.string.touch_haptics), stringResource(R.string.touch_haptics_text), c.haptics) { onTouch(c.copy(haptics = it)) }
-            if (!mobile || !c.pro.on) {
-                ToggleRow(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { onTouch(c.copy(sticksFloat = it)) }
-            }
+            ToggleRow(stringResource(R.string.touch_float), stringResource(R.string.touch_float_text), c.sticksFloat) { onTouch(c.copy(sticksFloat = it)) }
         }
 
         if (mobile) TouchProSection(c, onChange = onTouch, onEditLayout = { editing = true })

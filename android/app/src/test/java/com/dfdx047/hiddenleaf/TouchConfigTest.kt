@@ -1,7 +1,6 @@
 package com.dfdx047.hiddenleaf
 
 import com.dfdx047.hiddenleaf.touch.Ctl
-import com.dfdx047.hiddenleaf.touch.FloatMode
 import com.dfdx047.hiddenleaf.touch.PadScene
 import com.dfdx047.hiddenleaf.touch.ProTouch
 import com.dfdx047.hiddenleaf.touch.TouchConfig
@@ -41,7 +40,7 @@ class TouchConfigTest {
 
     @Test
     fun newFieldsGoRound() {
-        val c = TouchConfig(showNames = true, pro = ProTouch(on = true, slideAll = false, move = FloatMode.FLOATING, padSize = 70, dead = 25, zone = 50, hit = 140))
+        val c = TouchConfig(showNames = true, pro = ProTouch(on = true, slideAll = false, padSize = 140, dead = 25, hit = 140))
         val back = TouchConfig.fromJson(JSONObject(c.toJson().toString()))
         assertEquals(c.showNames, back.showNames)
         assertEquals(c.pro, back.pro)

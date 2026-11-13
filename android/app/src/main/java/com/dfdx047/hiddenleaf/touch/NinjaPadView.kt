@@ -40,8 +40,8 @@ import kotlin.math.sin
  *
  * Touches become the PS2 pad's buttons and stick ([TouchListener.onPad]); the jutsu buttons, the two specials (↑ ↑ ○,
  * ↓ ↓ ○) and the user's macros play their sequence of presses. The buttons show their icon only; the names come with
- * [TouchConfig.showNames]. "Toque Pro" ([TouchConfig.pro]) slides across every control and floats the D-pad and the
- * stick under the thumb. In edit mode the controls of the scene shown are moved, resized and hidden, each scene
+ * [TouchConfig.showNames]. "Toque Pro" ([TouchConfig.pro]) slides across every control and gives the fight a larger
+ * fixed D-pad with a wide touch area. In edit mode the controls of the scene shown are moved, resized and hidden, each scene
  * with its own layout, and the changed layout goes to [TouchListener.onConfigChanged]. The same view is the in-game
  * overlay and the launcher's editor and preview.
  */
@@ -162,13 +162,13 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             els += El(key, ctl, macro, kind, cx, cy, w, h, p.scale, p.visible, p.opacity)
         }
         val gestures = scene == PadScene.MENU && config.menuTouch
-        // (Toque Pro: the D-pad and the stick at their own size, smaller by default)
-        val padK = if (config.pro.on) config.pro.padSize / 100f else 1f
+        // (Toque Pro: the fight's D-pad at its own size, larger by default; the menus' D-pad and the stick as they are)
+        val padK = if (config.pro.on && scene == PadScene.FIGHT) config.pro.padSize / 100f else 1f
         for (c in Ctl.entries) {
             if (c == Ctl.SCENE || c == Ctl.OPTIONS) continue
             if (gestures && c != Ctl.MENU && c != Ctl.START) continue // (START: the title screen and the 2P join)
             val p = config.placeOf(scene, c) ?: continue
-            val size = if (c.kind == CtlKind.DPAD || c.kind == CtlKind.STICK) c.size * padK else c.size
+            val size = if (c.kind == CtlKind.DPAD) c.size * padK else c.size
             place("${scene.name}.${c.name}", c, null, c.kind, size, p)
         }
         if (scene != PadScene.MENU) {
@@ -452,7 +452,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     private fun find(x: Float, y: Float, slack: Float = touchSlack(), kinds: Set<CtlKind>? = null): El? =
-        els.filter { shown(it) && (kinds == null || it.kind in kinds) && it.hit(x, y, slack) }.minByOrNull { hypot(x - it.cx, y - it.cy) }
+        els.filter { shown(it) && (kinds == null || it.kind in kinds) && it.hit(x, y, if (it.kind == CtlKind.DPAD) dpadSlack(slack) else slack) }
+            .minByOrNull { hypot(x - it.cx, y - it.cy) }
 
     // ---- Toque Pro (TouchConfig.pro): null when it is off
 
@@ -464,33 +465,19 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     /** What a sliding finger presses: the action buttons; in Toque Pro the jutsu, specials, macros and L1/R1 too. */
     private fun slideKinds(): Set<CtlKind> = if (pro?.slideAll == true) SLIDE_ALL else SLIDE_FACE
 
-    /** The control that floats under the thumb in Toque Pro: the fight's D-pad or the campaign's stick. */
-    private fun floater(): El? {
-        val p = pro ?: return null
-        if (p.move == FloatMode.FIXED) return null
-        val kind = when (scene) {
-            PadScene.FIGHT -> CtlKind.DPAD
-            PadScene.CAMPAIGN -> CtlKind.STICK
-            PadScene.MENU -> return null // (the menus keep their D-pad where it is: a cursor wants fixed arrows)
-        }
-        return els.firstOrNull { it.kind == kind && it.visible }
-    }
+    /**
+     * How far around the D-pad a touch lands on it: in a Toque Pro fight a wide box ([ProTouch.PRO_DPAD_HIT] of its
+     * half-size each way), so a thumb that lands a little off the fixed D-pad still steers it.
+     */
+    private fun dpadSlack(slack: Float): Float =
+        if (pro != null && scene == PadScene.FIGHT) max(slack, ProTouch.PRO_DPAD_HIT) else slack
 
     private fun down(id: Int, x: Float, y: Float) {
         var e = find(x, y)
         val t = Track(e, x, y, e?.cx ?: x, e?.cy ?: y)
         val stick = els.firstOrNull { it.kind == CtlKind.STICK && it.visible }
-        val float = floater()
-        val p = pro
-        if (p != null) {
-            // the D-pad (or stick) starts where the thumb lands in the left zone; on the drawn one it is the plain one
-            // there (a tap on an arrow presses that arrow), and it still follows the thumb when DYNAMIC
-            if (float != null && e == null && tracks.values.none { it.el === float } &&
-                x < width * p.zone / 100f && y > height * 0.3f
-            ) {
-                e = float; t.el = float; t.originX = x; t.originY = y
-            }
-        } else if (e == null && stick != null && config.sticksFloat && x < width * 0.45f && y > height * 0.3f) {
+        // (the campaign's stick starts where the thumb lands, when it floats; the D-pad is always where it was placed)
+        if (e == null && stick != null && config.sticksFloat && x < width * 0.45f && y > height * 0.3f) {
             e = stick; t.el = stick; t.originX = x; t.originY = y
         }
         if (e != null && e.kind == CtlKind.BUTTON && scene == PadScene.CAMPAIGN &&
@@ -564,7 +551,6 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                 if (d != dpadBits) {
                     dpadBits = d; recompute()
                 }
-                invalidate() // (a floating D-pad follows the thumb)
             }
             CtlKind.STICK -> stick(e, t, x, y)
             in kinds -> if (!e.hit(x, y, max(1.25f, touchSlack() + 0.13f))) {
@@ -601,13 +587,12 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     /**
-     * The D-pad's direction for the thumb at ([x], [y]), read from the track's centre. In Toque Pro the dead zone is
-     * the player's, and a DYNAMIC D-pad is pulled along when the thumb goes past its edge.
+     * The D-pad's direction for the thumb at ([x], [y]), read from its centre: eight ways, from anywhere on the screen
+     * once the thumb went down on it. In Toque Pro the dead zone is the player's.
      */
     private fun dpadDir(e: El, t: Track, x: Float, y: Float): Int {
         val p = pro
         val r = e.w / 2
-        if (p != null && p.move == FloatMode.DYNAMIC) follow(t, x, y, r)
         val dx = x - t.originX
         val dy = y - t.originY
         val dead = if (p != null) r * p.dead / 100f else e.w * 0.12f
@@ -626,19 +611,9 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         }
     }
 
-    /** A DYNAMIC centre: past [r] from it, it is pulled along so the thumb stays on the edge. */
-    private fun follow(t: Track, x: Float, y: Float, r: Float) {
-        val d = hypot(x - t.originX, y - t.originY)
-        if (d <= r || d <= 0f) return
-        val k = (d - r) / d
-        t.originX += (x - t.originX) * k
-        t.originY += (y - t.originY) * k
-    }
-
     private fun stick(e: El, t: Track, x: Float, y: Float) {
         val r = e.w * 0.40f
         val p = pro
-        if (p != null && p.move == FloatMode.DYNAMIC) follow(t, x, y, r)
         var dx = (x - t.originX) / r
         var dy = (y - t.originY) / r
         val m = hypot(dx, dy)
@@ -916,10 +891,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
 
     /** The D-pad: a cross of dark glass with its four arrows, the pressed ones in Naruto's orange, a leaf in the middle. */
     private fun drawDpad(c: Canvas, e: El, k: Float) {
-        // (where the thumb holds it: its own place, or where it floats to in Toque Pro)
-        val t0 = tracks.values.firstOrNull { it.el === e }
-        val ox = t0?.originX ?: e.cx
-        val oy = t0?.originY ?: e.cy
+        val ox = e.cx
+        val oy = e.cy
         val s = e.w / 2
         val arm = s * 0.36f
         fill.color = a(Color.argb(60, 0, 0, 0), k)

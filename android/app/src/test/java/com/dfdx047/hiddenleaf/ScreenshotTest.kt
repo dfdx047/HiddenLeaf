@@ -87,12 +87,12 @@ class ScreenshotTest {
             v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
             v.layout(0, 0, w, h)
             if (cfg.pro.on) {
-                // a thumb landing in the left zone (not on the D-pad) and pushing right: the D-pad floats to it
+                // a thumb landing just off the fixed D-pad (inside its wide touch area) and pushing up-right: a diagonal
                 val t = android.os.SystemClock.uptimeMillis()
-                val x = w * 0.30f
-                val y = h * 0.55f
+                val x = w * 0.13f + h * 0.05f
+                val y = h * 0.68f
                 v.onTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, x, y, 0))
-                v.onTouchEvent(android.view.MotionEvent.obtain(t, t + 30, android.view.MotionEvent.ACTION_MOVE, x + h * 0.08f, y - h * 0.01f, 0))
+                v.onTouchEvent(android.view.MotionEvent.obtain(t, t + 30, android.view.MotionEvent.ACTION_MOVE, x + h * 0.10f, y - h * 0.10f, 0))
             }
             save(v, "pad_${tag}_fight_$name") { c ->
                 val p = Paint()

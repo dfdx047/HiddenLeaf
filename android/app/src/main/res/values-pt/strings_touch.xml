@@ -69,23 +69,14 @@
     <string name="tc_g_mstart">Começa na tela de título e faz o 2º jogador entrar.</string>
 
     <string name="tp_title">Toque Pro</string>
-    <string name="tp_intro">Para jogar rápido, contra outra pessoa ou online: o dedo desliza entre todos os botões, o direcional aparece sob o polegar, e você ajusta o tamanho, a zona morta e a área de toque. Desligado, o controle é o normal.</string>
+    <string name="tp_intro">Para jogar rápido, contra outra pessoa ou online: o dedo desliza entre todos os botões, o direcional da luta fica maior e fixo, com uma área de toque larga, e você ajusta o tamanho dele, a zona morta e a área de toque. Desligado, o controle é o normal.</string>
     <string name="tp_guide">Como funciona</string>
     <string name="tp_on">Ligar o Toque Pro</string>
     <string name="tp_on_text">Vale para o controle do jogo, em todas as cenas.</string>
     <string name="tp_slide">Deslizar entre todos os botões</string>
     <string name="tp_slide_text">Arraste o dedo de um botão para outro e o novo é apertado na hora, sem levantar o dedo: inclui Jutsu, Ougi, especiais, macros e L1/R1. Desligado: só entre Ataque, Pular, Chakra, Item e Defesa.</string>
-    <string name="tp_move">Direcional (luta) e analógico (campanha)</string>
-    <string name="tp_move_fixed">Fixo</string>
-    <string name="tp_move_floating">Flutuante</string>
-    <string name="tp_move_dynamic">Dinâmico</string>
-    <string name="tp_move_fixed_text">Ficam onde você os colocou no editor de layout.</string>
-    <string name="tp_move_floating_text">Aparecem onde o polegar encostar, na zona da esquerda. Tocar no próprio direcional também funciona.</string>
-    <string name="tp_move_dynamic_text">Como o flutuante, e o centro acompanha o polegar quando ele passa da borda: voltar para o outro lado responde na hora.</string>
-    <string name="tp_zone">Zona do polegar</string>
-    <string name="tp_zone_text">Até onde, a partir da borda esquerda, um toque faz o direcional aparecer.</string>
-    <string name="tp_pad_size">Tamanho do direcional e do analógico</string>
-    <string name="tp_pad_size_text">Menor ocupa menos tela e pede movimentos mais curtos do polegar.</string>
+    <string name="tp_pad_size">Tamanho do direcional (luta)</string>
+    <string name="tp_pad_size_text">O direcional fica onde você o colocou no editor de layout. Maior é mais fácil de acertar sem olhar; um toque bem em volta dele ainda conta.</string>
     <string name="tp_dead">Zona morta</string>
     <string name="tp_dead_text">O centro que não aperta direção nenhuma. Maior evita direção sem querer; menor responde mais cedo.</string>
     <string name="tp_hit">Área de toque dos botões</string>
@@ -96,8 +87,8 @@
     <string name="tpg_intro">Os gestos do controle na tela e o que o Toque Pro muda.</string>
     <string name="tpg_slide">Deslizar entre botões</string>
     <string name="tpg_slide_text">Com o dedo no Ataque, deslize até o Jutsu ou um especial: cada botão em que o dedo entra é apertado, e o anterior é solto. No Toque Pro, vale para todos os botões de ação, os especiais e as macros.</string>
-    <string name="tpg_float">Direcional flutuante e dinâmico</string>
-    <string name="tpg_float_text">Na luta, encoste o polegar em qualquer ponto da zona da esquerda: o direcional aparece ali. No modo dinâmico, se o polegar passar da borda, o direcional vem junto.</string>
+    <string name="tpg_dpad">Direcional fixo</string>
+    <string name="tpg_dpad_text">Na luta o direcional fica no lugar dele, maior que o normal, e um toque dentro da caixa larga em volta dele cai nele. Com o polegar nele, são oito direções, diagonais incluídas, mesmo se o polegar passar da borda.</string>
     <string name="tpg_dead">Zona morta</string>
     <string name="tpg_dead_text">O círculo do meio não aperta direção nenhuma. Maior para quem descansa o polegar, menor para quem quer resposta rápida.</string>
     <string name="tpg_hit">Área de toque</string>
