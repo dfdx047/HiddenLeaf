@@ -46,8 +46,8 @@ import org.json.JSONObject
 object Online {
     const val NET_VERSION = 1
     const val GAME = "un5"
-    /** Placeholder until the developer's Worker is up (online/worker/README.md, step 6): the player types the real one. */
-    const val DEFAULT_SERVER = "https://hiddenleaf-online.SEU-SUBDOMINIO.workers.dev"
+    /** The developer's Worker (online/worker, published 2026-11-13); the Online page can still point at another one. */
+    const val DEFAULT_SERVER = "https://hiddenleaf-online.hiddenleaf.workers.dev"
     const val MAX_NAME = 16
     /** The engine takes a session file this many seconds old at most (hl_online.cpp, kSessionMaxAge). */
     const val SESSION_MAX_AGE_S = 180L
