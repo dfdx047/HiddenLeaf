@@ -6,7 +6,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
 B="$here/build"
 NOMINUM_REPO="${NOMINUM_REPO:-$HOME/AndroidStudioProjects/Nominum-Render}"
-NOMINUM_COMMIT="${NOMINUM_COMMIT:-e27e16c}"
+NOMINUM_COMMIT="${NOMINUM_COMMIT:-758e4e7}"
 nominum="$B/nominum-$NOMINUM_COMMIT"
 if [ ! -e "$nominum/core/vif1.cpp" ]; then
     mkdir -p "$nominum"

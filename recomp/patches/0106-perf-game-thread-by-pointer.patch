@@ -1,0 +1,48 @@
+--- a/ps2xRuntime/src/lib/hl_perf.cpp
++++ b/ps2xRuntime/src/lib/hl_perf.cpp
+@@ -25,7 +25,18 @@
+ 
+     namespace
+     {
++#if defined(__aarch64__)
++        // (the game thread known by its thread pointer: a thread_local here went through the dynamic TLS resolver of a
++        // dlopen'ed library at every call, and the VU worker calls in at every packet only to be told no: 2.4% of its
++        // time on the Mi A3, 2026-11-13)
++        const void *s_gameTp = nullptr;
++        inline bool onGame() { return __builtin_thread_pointer() == s_gameTp; }
++        inline void markGame() { s_gameTp = __builtin_thread_pointer(); }
++#else
+         thread_local bool t_game = false;
++        inline bool onGame() { return t_game; }
++        inline void markGame() { t_game = true; }
++#endif
+         Cat s_current = kEe;
+         uint64_t s_last = 0;
+         uint64_t s_ticks[kCount] = {};
+@@ -330,7 +341,7 @@
+ 
+     Cat switchTo(Cat next)
+     {
+-        if (!t_game)
++        if (!onGame())
+             return next;
+         const uint64_t t = now();
+         s_ticks[s_current] += t - s_last;
+@@ -352,7 +363,7 @@
+         if (!std::getenv("HL_PERF") && !std::getenv("HL_METER"))
+             return;
+         s_quiet = !std::getenv("HL_PERF");
+-        t_game = true;
++        markGame();
+         s_last = s_secondStart = s_lastVsync = now();
+         if (const char *from = std::getenv("HL_PERF_FROM"))
+         {
+@@ -372,7 +383,7 @@
+     {
+         if ((tick & 63u) == 0u)
+             applyNice();
+-        if (!g_on || !t_game)
++        if (!g_on || !onGame())
+             return;
+         static const double tpm = ticksPerMs();
+         const Cat here = switchTo(s_current); // (brings the counters up to now)

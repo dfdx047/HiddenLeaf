@@ -59,6 +59,40 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 08:30, manhã: UNPACK do Nominum mais leve (`758e4e7`), tradução de endereço e medidor em linha
+
+- **Perfil** da janela que ainda cai no Ougi (v7518–7800 no roteiro do Mi A3: VU1 21–23 ms de CPU, o EE esperando 7–12 ms
+  por ela; simpleperf, `build/lab/prof/`): blocos recompilados 60%, UNPACK ~12%, `compactVertices` 4,8%, `memmove` 4,8%
+  (cópias para o anel: pacotes DIRECT 22%, o próprio `Vif1::transfer` 16%, o corte de tags 6%), `hl_perf` + resolvedor de
+  TLS 2,4%. Os núcleos grandes ficam em 2016 MHz a luta toda (sem limitação térmica); por núcleo: a VU, o GS Back, o EE e o
+  GS nos quatro A73; o IOP nos A55; o "CPU Thread" (lê o anel para o GS, 1,4 s em 5,9 s) solto nos oito.
+- **Nominum `758e4e7`:** os laços rápidos do UNPACK liam tudo da memória a cada vetor (capturas por referência e escritas
+  de bytes na VU); agora leem de variáveis locais. Replay: VIF1+VU1 19,68 → 18,91 ms por vsync; a parte do VIF −19%; bit a
+  bit igual (106/106 no PC, 130/130 em arm64). Detalhe no registro do Nominum.
+- **Patch `0105-translate-address-inline-low.patch`:** `PS2Memory::translateAddress` em linha para endereços abaixo de
+  `0x20000000` (RAM, registradores de I/O, endereços das tags de DMA: o próprio endereço, sem scratchpad, espelho ou KSEG),
+  e `isScratchpad` em linha; o resto continua em `translateAddressSlow`. Era 4% da thread do EE. Muda um cabeçalho: as
+  libs recompilam inteiras. No jogo: neutro a +0,3 fps na fase B (`mia3_0105a/b`).
+- **Patch `0106-perf-game-thread-by-pointer.patch`:** o `hl_perf` está sempre ligado (`g_on`; o `HL_PERF` só decide se
+  imprime) e cada pacote da VU passa por `switchTo`, que testava um `thread_local`; numa lib carregada por `dlopen` isso
+  chama o resolvedor de TLS dinâmico. Em arm64 a thread do jogo agora é reconhecida pelo ponteiro de thread
+  (`__builtin_thread_pointer`).
+- **Sem ganho, desfeito:** o EE a `-O3` (entrada de 07:00); hints de desempenho (as frequências já estão no máximo).
+- **Mi A3, luta a 1,5x, GS dividido, sem gravar** (fases A / B; VU1 em ms):
+
+  | Rodada | A fps | B fps | B min | VU1 A / B |
+  |---|---|---|---|---|
+  | `e27e16c` (`mia3_vuflags15n`) | 49,6 | 47,6 | 36,1 | 14,6 / 17,0 |
+  | + `0105` (`mia3_0105a/b`) | 49,3–49,4 | 47,9–48,0 | 35,8–38,4 | 14,6 / 17,0 |
+  | + `758e4e7` + `0106` (`mia3_758a/b`) | **49,7–50,0** | **47,9–48,4** | 35,3–35,6 | 13,7–14,0 / 15,7–15,8 |
+
+  Gravando (`mia3_758rec`): 49,5 / 47,7, imagens certas (combo, modo Vermillion, close-ups). **RG Cube** (`cube_758`, 2x):
+  49,4 / 50,0, VU1 9,2 / 10,7 ms, imagens certas.
+- **O que falta no Mi A3:** a fase A já está em 50; na B, duas janelas ainda caem para 35–45 fps: v6630–7030 (o EE em
+  21–23,5 ms e a VU1 em 16–19 ms, os dois juntos) e v7518–7800 (a VU1 em 19–21 ms, o EE esperando).
+- Os pacotes do A35 (`libun5_un6_a35*.so`) ainda precisam ser recompilados com este estado (o cabeçalho do `0105` mudou
+  durante a compilação deles).
+
 ### 2026-11-13 07:00, manhã: a VU1 do Nominum 12% mais leve no Mi A3 (`e27e16c`); o Ougi agora para também no EE
 
 - **Por quê:** com o GS dividido (entrada de 04:30), o Ougi pesado a 1,5x deixava a thread da VU1 em 24–25 ms por quadro.

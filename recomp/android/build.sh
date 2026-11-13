@@ -50,7 +50,7 @@ done
 # only; this tree never writes there), and its recompiled VU1 blocks in build/nominum-<commit>/build/vu1rec (made on the PC by
 # nominum-vurec from ~/Downloads/vifdumps; game code, so build/ only). Without them, its VU1 runs the fast path only.
 NOMINUM_REPO="${NOMINUM_REPO:-$HOME/AndroidStudioProjects/Nominum-Render}"
-NOMINUM_COMMIT="${NOMINUM_COMMIT:-e27e16c}"
+NOMINUM_COMMIT="${NOMINUM_COMMIT:-758e4e7}"
 nominum="$B/nominum-$NOMINUM_COMMIT"
 if [ ! -e "$nominum/core/vif1.cpp" ]; then
     mkdir -p "$nominum"

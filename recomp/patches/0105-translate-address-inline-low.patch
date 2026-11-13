@@ -1,0 +1,50 @@
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -298,7 +298,14 @@
+     void write128(uint32_t address, __m128i value);
+ 
+     // TLB handling
+-    uint32_t translateAddress(uint32_t virtualAddress);
++    // Hidden Leaf: below 0x20000000 (RAM, the I/O registers, the DMA tags' addresses) an address is its own physical one
++    // (not the scratchpad, not the uncached mirror, not KSEG): answered in line; the rest goes out of line as before. The
++    // call to it, and to isScratchpad inside it, was 4% of the EE's thread in the Ougi on the Mi A3.
++    uint32_t translateAddress(uint32_t virtualAddress)
++    {
++        return virtualAddress < 0x20000000u ? virtualAddress : translateAddressSlow(virtualAddress);
++    }
++    uint32_t translateAddressSlow(uint32_t virtualAddress);
+     bool tlbRead(uint32_t index, uint32_t &vpn, uint32_t &pfn, uint32_t &mask, bool &valid) const;
+     bool tlbWrite(uint32_t index, uint32_t vpn, uint32_t pfn, uint32_t mask, bool valid);
+     int32_t tlbProbe(uint32_t vpn) const;
+@@ -440,7 +447,7 @@
+     void markModified(uint32_t address, uint32_t size);
+     void markVU0CodeModified() { m_vu0CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
+     void markVU1CodeModified() { m_vu1CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
+-    bool isScratchpad(uint32_t address) const;
++    bool isScratchpad(uint32_t address) const { return ps2IsScratchpadAddress(address); } // (Hidden Leaf: in line)
+     uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit);
+     const uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit) const;
+     struct EeTimer
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -552,11 +552,6 @@
+     return nearest;
+ }
+ 
+-bool PS2Memory::isScratchpad(uint32_t address) const
+-{
+-    return ps2IsScratchpadAddress(address);
+-}
+-
+ uint8_t *PS2Memory::mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit)
+ {
+     return const_cast<uint8_t *>(static_cast<const PS2Memory *>(this)->mapVuMemory(physAddr, size, offset, limit));
+@@ -597,7 +592,7 @@
+     return mapRange(PS2_VU1_DATA_BASE, PS2_VU1_DATA_SIZE, m_vu1Data);
+ }
+ 
+-uint32_t PS2Memory::translateAddress(uint32_t virtualAddress)
++uint32_t PS2Memory::translateAddressSlow(uint32_t virtualAddress)
+ {
+     if (isScratchpad(virtualAddress))
+     {
