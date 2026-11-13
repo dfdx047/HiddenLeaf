@@ -1,0 +1,76 @@
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -416,6 +416,7 @@
+     uint8_t *m_vu1Data = nullptr;
+     bool m_path3Masked = false;
+     uint32_t m_vif1PendingPath2ImageQwc = 0u; // GIF: IMAGE data still owed by the next DIRECT payloads
++    uint32_t m_vif1PendingPath2DataQwc = 0u;  // GIF: PACKED/REGLIST data still owed by the next DIRECT payloads
+     bool m_vif1PendingPath2DirectHl = false;
+     uint32_t m_vif1PendingDirectQwc = 0u; // VIF: DIRECT payload that continues in the next transfer
+     std::vector<std::vector<uint8_t>> m_path3MaskedFifo;
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -357,6 +357,7 @@
+     m_path3Masked = false;
+     m_path3MaskedFifo.clear();
+     m_vif1PendingPath2ImageQwc = 0u;
++    m_vif1PendingPath2DataQwc = 0u;
+     m_vif1PendingPath2DirectHl = false;
+     m_vif1PendingDirectQwc = 0u;
+     resetEeTimers();
+@@ -1263,6 +1264,7 @@
+                 const bool wasPath3Masked = m_path3Masked;
+                 std::memset(&vif1_regs, 0, sizeof(vif1_regs));
+                 m_vif1PendingPath2ImageQwc = 0u;
++                m_vif1PendingPath2DataQwc = 0u;
+                 m_vif1PendingPath2DirectHl = false;
+                 m_vif1PendingDirectQwc = 0u;
+                 m_path3Masked = false;
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -42,12 +42,23 @@
+ {
+     constexpr uint8_t kGifFmtImage = 2u;
+ 
+-    uint32_t pendingGifImageQwc(const uint8_t *data, uint32_t sizeBytes)
++    // (dataOwed, in and out: PACKED/REGLIST qwords of a tag an earlier DIRECT began. The game sends long A+D lists in DIRECTs
++    // of 33 qwords; read as tags, their data turned into IMAGEs owed that took the next DIRECTs as pixels: Hinata's
++    // awakening, 2026-11-13. A tag wanting more than 64 KB is not followed, as the GIF arbiter does not hold it.)
++    uint32_t pendingGifImageQwc(const uint8_t *data, uint32_t sizeBytes, uint32_t &dataOwed)
+     {
+         if (!data || sizeBytes < 16u)
+             return 0u;
+ 
+         uint32_t offset = 0u;
++        if (dataOwed != 0u)
++        {
++            const uint32_t skip = std::min<uint32_t>(dataOwed, sizeBytes / 16u);
++            dataOwed -= skip;
++            offset = skip * 16u;
++            if (dataOwed != 0u)
++                return 0u;
++        }
+         while (offset + 16u <= sizeBytes)
+         {
+             uint64_t tagLo = 0u;
+@@ -85,7 +96,11 @@
+             }
+ 
+             if (payloadBytes > static_cast<uint64_t>(sizeBytes - offset))
++            {
++                if (payloadBytes <= (64u << 10))
++                    dataOwed = static_cast<uint32_t>((payloadBytes - (sizeBytes - offset)) / 16ull);
+                 return 0u;
++            }
+             offset += static_cast<uint32_t>(payloadBytes);
+         }
+ 
+@@ -381,7 +396,7 @@
+             return;
+ 
+         submitGifPacket(GifPathId::Path2, payload, qwCount * 16u, true, directHl);
+-        const uint32_t pendingImageQw = pendingGifImageQwc(payload, qwCount * 16u);
++        const uint32_t pendingImageQw = pendingGifImageQwc(payload, qwCount * 16u, m_vif1PendingPath2DataQwc);
+         if (pendingImageQw != 0u)
+         {
+             m_vif1PendingPath2ImageQwc = pendingImageQw;

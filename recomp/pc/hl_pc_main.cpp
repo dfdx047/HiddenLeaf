@@ -97,6 +97,11 @@ namespace
     }
 }
 
+namespace hl_nominum_vu1
+{
+    void setup(); // NOMINUM_VU1=1: Nominum's VIF1 and VU1 (hl_nominum_vu1.cpp), as on Android
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -115,6 +120,15 @@ int main(int argc, char *argv[])
     hl_game::g_specialOn = envInt("HL_SPECIAL_ONE", 0) != 0;
     hl_game::g_specialMask = static_cast<uint32_t>(envInt("HL_SPECIAL_BUTTON", 0));
     hl_game::g_mashPercent = envInt("HL_MASH_PERCENT", 100);
+    // HL_GS_DUMP / HL_VIF_DUMP (hl_game.cpp) write into gsdumps/ and vifdumps/ of the working folder (the disc's)
+    hl_game::g_gsDumpDir = "gsdumps";
+    hl_game::g_vifDumpDir = "vifdumps";
+    if (std::getenv("HL_GS_DUMP"))
+        mkdir(hl_game::g_gsDumpDir.c_str(), 0775);
+    if (std::getenv("HL_VIF_DUMP"))
+        mkdir(hl_game::g_vifDumpDir.c_str(), 0775);
+
+    hl_nominum_vu1::setup();
 
     void *gsx = dlopen(lib.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!gsx)

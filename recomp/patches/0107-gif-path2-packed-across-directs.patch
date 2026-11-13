@@ -1,0 +1,50 @@
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -45,8 +45,11 @@
+     // A GIF tag's data may come in the path's next transfer: sceGsExecLoadImage sends the setup and the IMAGE tag in one
+     // normal-mode DMA and the pixels in a second one, as the GIF keeps each path's tag across transfers. The GS walks each
+     // packet from a tag, so per path: an unfinished tag is held for the path's next packet, and IMAGE data still owed gets
+-    // a tag of its own (the GS keeps the transfer's position). PATH3 only: the runtime's PATH2 packets (VIF DIRECT) end
+-    // with stray qwords that read as unfinished tags, and holding them swallowed every later PATH2 packet.
++    // a tag of its own (the GS keeps the transfer's position). PATH2 (VIF DIRECT) too, for PACKED and REGLIST only: the
++    // game sends long A+D lists in DIRECTs of 33 qwords, the tag in the first and its data going on in the next ones (Hinata's
++    // awakening, 2026-11-13). Cut there, the rest read as tags and IMAGE data: textures in the wrong place, the HUD gone.
++    // (An IMAGE the DIRECT leaves owing gets its tag from the VIF1 interpreter.) The "stray qwords that read as unfinished
++    // tags" that once kept PATH2 out of here were those continuations; a tag wanting more than kHoldMax is not held.
+     struct PathCarry
+     {
+         std::vector<uint8_t> hold;
+@@ -56,6 +59,7 @@
+     PathCarry g_carry[4];
+     std::vector<uint8_t> g_join;
+     const bool g_carryLog = std::getenv("HL_GIFCARRY_LOG") != nullptr;
++    constexpr uint64_t kHoldMax = 64u << 10; // bytes of a PATH2 tag's data held for the next DIRECT
+ }
+ 
+ static void deliverCarried(const GifArbiter::ProcessPacketFn &processGs, GifPathId pathId, const uint8_t *data, uint32_t sizeBytes)
+@@ -68,11 +72,12 @@
+ #endif
+         processGs(d, n);
+     };
+-    if (pathId != GifPathId::Path3)
++    if (pathId == GifPathId::Path1)
+     {
+         process(data, sizeBytes);
+         return;
+     }
++    const bool path3 = pathId == GifPathId::Path3;
+     std::lock_guard<std::mutex> lock(g_carryMutex);
+     PathCarry &c = g_carry[static_cast<uint8_t>(pathId) & 3u];
+     if (c.imageLeft != 0u)
+@@ -119,6 +124,11 @@
+         if (g_carryLog)
+             std::fprintf(stderr, "[gifcarry] path %u size %u: tag at %u flg %u nloop %u, %u of %u bytes\n", static_cast<unsigned>(pathId),
+                          sizeBytes, off, flg, static_cast<unsigned>(nloop), have, static_cast<unsigned>(payload));
++        if (!path3 && (flg >= 2u || payload > kHoldMax))
++        {
++            process(data, sizeBytes);
++            return;
++        }
+         if (flg >= 2u && have >= 16u)
+         {
+             c.imageLeft = static_cast<uint32_t>(nloop - have / 16u);

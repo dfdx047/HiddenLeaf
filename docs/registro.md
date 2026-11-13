@@ -59,6 +59,32 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 12:40, meio-dia: Despertar da Hinata, lista PACKED partida entre DIRECTs (patches 0107, 0108, Nominum faa7af3)
+
+- **Reproduzido no PC** (`un5pc`, sem o nativo: `HL_NATIVE=0`), modo Practice (Mode Select ↓↓), Hinata 7× → a partir do
+  Naruto com tudo liberado (`HL_UNLOCK_ALL=1`), vida 0,2 (`HL_P1_HP`), ↑ segurado: no "Guardian Dance Mode" o HUD pisca,
+  some, fica com lixo amarelo/verde, tela vermelha e quadros brancos. O PCSX2 (bench, novos `HLB_UNLOCK=1` e `HLB_HP=0.2`;
+  `LC_ALL=C`, o `atof` leu "0.2" como 0 em pt_BR) desenha tudo limpo. Rota em `build/lab/pc/route_prac2.txt`.
+- **Causa** (dumps do GS dos dois lados, `build/lab/pc/uploads.py`): o jogo manda a lista A+D das partículas (tag PACKED,
+  NLOOP 6 a 108) em DIRECTs de 33 qwords, os dados continuando no DIRECT seguinte. Dois erros nossos: (1) o árbitro do GIF
+  só juntava pacote partido no PATH3, e o `hl_gs_live` cortava o tag no fim do DIRECT (NLOOP 32 com EOP); (2) o
+  interpretador da VIF1 (runtime e Nominum) lia cada DIRECT a partir de um tag, e a continuação (`8080803b200e6e3a`) virava
+  um IMAGE de 128 qwords devendo: os DIRECTs seguintes iam como pixels de uma subida 8×2 em `dbp 0x3c51` (até 943 KB por
+  quadro) e sujavam as texturas do HUD. Por isso acontecia com o modo leve ligado e desligado.
+- **Correção:** `0107-gif-path2-packed-across-directs.patch` (o árbitro segura e junta PACKED/REGLIST do PATH2 como já
+  fazia no PATH3; IMAGE fica com o interpretador; tag acima de 64 KB não é segurado: o motivo antigo de deixar o PATH2 de
+  fora eram justamente essas continuações). `0108-vif1-direct-packed-owed.patch` e Nominum `faa7af3`
+  (`Vif1Pending::dataQwc`): os qwords de PACKED/REGLIST devidos são pulados antes de procurar tag.
+- **PC:** o `un5pc` nunca chamava `hl_nominum_vu1::setup()` (compilava o Nominum mas rodava sempre a VU1 do runtime);
+  agora chama, e `NOMINUM_VU1=1` liga como no Android. Os dumps do GS/VIF no PC vão para `gsdumps/` e `vifdumps/` da pasta
+  do disco.
+- **Verificado no PC:** runtime (`NOMINUM_VU1=0`) e Nominum (`NOMINUM_VU1=1`), 150 vsyncs do Despertar: 0 subidas com
+  tamanho errado (antes 50), tags 42/54/108 iguais ao PCSX2, HUD estável nos quadros. Nominum: `ctest -R ^vif` 106/106.
+- **Falta:** Android (Mi A3 e Cube, modo leve ligado e desligado) com vídeo; ver as outras queixas (barras pretas na
+  vitória, ataques sem efeito), que podem ter a mesma causa.
+- A queda "corrupted double-linked list" no PC (no driver Vulkan da NVIDIA, ao criar pipeline) só apareceu com o
+  renderizador nativo ligado; não investigada.
+
 ### 2026-11-13 09:40, manhã: "Modo leve" no launcher; o padrão volta para a VU1 do runtime e o GS numa thread
 
 - **Pedido do desenvolvedor:** com as mudanças recentes o jogo buga: a Hinata Shippuden (entendi "Renata grande" como a
