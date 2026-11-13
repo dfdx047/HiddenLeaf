@@ -18,6 +18,7 @@
 #include "pcsx2/GS/GS.h"
 #include "pcsx2/GS/GSDump.h"
 #include "pcsx2/GS/Renderers/Common/GSRenderer.h"
+#include "pcsx2/GS/Renderers/HW/GSTextureCache.h"
 #include "pcsx2/GSDumpReplayer.h"
 #include "pcsx2/Host.h"
 #include "pcsx2/MTGS.h"
@@ -388,6 +389,23 @@ namespace
 			drop(iopMem->Main, sizeof(iopMem->Main), "IOP");
 	}
 
+	// HL_PERF: the texture cache's block hash cache every 250 vsyncs, from the GS thread's counters (read from here
+	// without a lock; a torn count only spoils one line): texture levels keyed through it, their blocks, and how many
+	// of those had to be read and hashed again (written since).
+	void hashStats()
+	{
+		static const bool s_on = std::getenv("HL_PERF") != nullptr;
+		static uint32_t s_vsyncs = 0;
+		static GSTextureCache::BlockHashStats s_last{};
+		if (!s_on || ++s_vsyncs % 250u != 0u)
+			return;
+		const GSTextureCache::BlockHashStats now = GSTextureCache::GetBlockHashStats();
+		const double n = 250.0;
+		std::fprintf(stderr, "[gsx] block hash per vsync: %.0f levels, %.0f blocks, %.0f hashed again\n", (now.levels - s_last.levels) / n,
+			(now.blocks - s_last.blocks) / n, (now.rehashed - s_last.rehashed) / n);
+		s_last = now;
+	}
+
 	bool live_next(GSDumpReplayer::LivePacket* out)
 	{
 		static LivePacketHeld s_held;
@@ -463,6 +481,7 @@ namespace
 					if (!s_dumps.empty())
 						dumpVsync(s_packet[0]);
 					hl_native::vsync();
+					hashStats();
 					dumpTakeAsked();
 					if (!skipPresent())
 						s_held = {true, type, 1};

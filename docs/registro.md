@@ -59,6 +59,44 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 03:00, madrugada: o GS do ARMSX2 no Mi A3: quatro tentativas, nenhuma ganha; a cópia própria do núcleo
+
+- **Pedido do desenvolvedor:** "otimiza o GS do ARMSX2 então" (depois de a entrada de 00:40 achar o GS como limite do
+  Mi A3).
+- **Infraestrutura nova (fica):**
+  - `recomp/android/build_gsx.sh` compila o núcleo de uma cópia própria em `build/armsx2-hl` (feita da árvore do Dragon
+    Rage, que só é lida; um repositório git com ela como primeiro commit) e aplica `recomp/android/gsx/patches/*.patch`
+    (hoje nenhum), refazendo quando os patches mudam. `build/gsx` foi refeito do zero (o antigo ficou em
+    `build/gsx-dr-20261112`, a `.so` em `build/libbt4gsx-20261112.so`); o primeiro build levou 2 min.
+  - `hl_gsx.cpp`: com `HL_PERF`, a cada 250 vsyncs `[gsx] block hash per vsync: níveis, blocos, hasheados de novo` (o
+    cache de hash por bloco do texture cache).
+- **Perfil novo, no trecho pesado** (`p5.data`, v7208–7500, `--call-graph dwarf`): o perfil antigo (`p4`, gravado aos
+  185 s) não era da luta pesada. Ali a thread `GS` é **custo por draw**: `GSRendererHW::Draw` 63% (inclusivo), dele o
+  Vulkan (`DoRenderHW`) 28% — `vkCmdPushDescriptorSetKHR` 11% e `vkCmdBindDescriptorSets` 3% dentro do driver da Adreno,
+  `vkCmdDrawIndexed` 5% (com `calloc`/`free` do driver) —, `LookupSource` 8%; o parser de vértices (`XYZ2`) 11%,
+  `memmove` 8% (a pilha não desce pela libc; deve ser a cópia de vértices/índices ao buffer do Vulkan). O hash de
+  textura cai para 3% e o `WriteImage` sai do topo. O jogo troca de textura a cada poucos triângulos e cada troca é um
+  draw. O caminho já foi otimizado pelo Dragon Rage (comentários com medidas no SD865 e no M2).
+- **Tentativas (Mi A3, luta 1x; antes 48,7 / 46,8):**
+  1. **Cache de hash por bloco também para texturas inteiras** (patch em `HashTextureLevel`/`HashCacheKey::Create`;
+     hoje só janelas paletizadas o usam): 46,4 / 46,4 e 47,0 / 45,6 (`mia3_gsh_a`, `mia3_gsh_b`). O log mostrou por quê:
+     ~3400 blocos por vsync, **todos** escritos desde a consulta anterior; o jogo reenvia de verdade ~0,87 MB de
+     textura por vsync (no dump `odin3_43_luta_inicio`: 0,9 MB/vsync de IMAGE, 1/3 igual ao envio anterior ao mesmo
+     lugar). Desfeito.
+  2. **Conjuntos de descritores em vez do push** (`m_use_push_descriptors = false`, teste por `HL_GSX_NO_PUSH`):
+     46,3 / 46,6 (`mia3_nopush_a/b`), GS igual. Desfeito.
+  3. **OpenGL em vez de Vulkan** (`HL_GS_API=gl`): 37,0 / 41,4 com travadas (`mia3_gl`). Fica o Vulkan.
+  4. **A divisão do GS do próprio ARMSX2** (`GSBackThreadMode=1`: uma thread lê o GIF, a "GS Back" desenha; nem o Dragon
+     Rage liga): a thread `GS` cai de 22–27 para 12–16 ms no trecho pesado, mas 44,3 de fps (`mia3_back_a`: cinco threads
+     pesadas em quatro núcleos grandes); com `HL_PIN_IOP=rest` volta a 48,6 / 46,9 (`mia3_back_iop`) e no Ougi o limite
+     passa a ser a VU1 (24–25 ms, o EE esperando 11–14). **Imagem errada:** no vídeo (`mia3_back_rec`, `REC=1`) a luta
+     sai certa até o Ougi (~158 s) e a tela congela num quadro borrado e listrado por mais de 20 s. Descartado.
+- **Conclusão:** no Mi A3 a luta comum já fica perto de 50; o Ougi e os combos pesados (~4,4 MB/f) pedem o GS **e** a
+  VU1 ~20% mais baratos ao mesmo tempo. Do lado do GS o que resta é estrutural: corrigir a divisão do GS para o fluxo ao
+  vivo (o efeito do Ougi), ou o renderizador nativo na luta (`hl_native`, hoje opção experimental).
+- Lib do GS limpa (mesmo fonte do Dragon Rage, mais o log) reinstalada no Mi A3 (`mia3_gsclean`, luta certa;
+  `build/HiddenLeaf-20261113-vu.apk`).
+
 ### 2026-11-13 00:40, madrugada: a VU1 do Nominum mais barata (`052f000`); o limite do Mi A3 é o GS do ARMSX2
 
 - **Pedido do desenvolvedor:** "o que da pra fazer na VU1 do Mi a3 faca, quero ele segurando a luta em pelo menos 1x ou
