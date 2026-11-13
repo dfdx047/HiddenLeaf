@@ -59,6 +59,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 17:00: ícone novo e D-pad fixo no Toque Pro (launcher)
+
+- **Ícone** (`722a1cc`, pedido do desenvolvedor: o antigo era cartunesco): ensō de pincel em branco pergaminho sobre
+  carvão, com uma folha laranja no meio (desenho original, sem personagem, logo nem símbolo oficial). Só os três
+  drawables mudaram; prévias e gerador em `build/lab/icon/` (`gen_icon.py`).
+- **Toque Pro** (`afdbb37`): o D-pad da luta deixa de ser flutuante/dinâmico: fica fixo onde o editor de layout o põe,
+  maior (175 dp no padrão, antes 119) e com área de toque de 1,5× o meio-tamanho para cada lado; 8 direções; o dedo que
+  pousa nele continua dirigindo mesmo passando da borda. Saíram o modo flutuante/dinâmico, a faixa do polegar e os
+  textos deles (pt/en/es), na tela de Controles e no menu do jogo; o guia ganhou um cartão "D-pad fixo". O tamanho
+  salvo passou a `dpadSize` (quem tinha 85% recebe 125%).
+- Testado: `assembleDebug`, `TouchConfigTest`, `ScreenshotTest` (capturas do Robolectric). **Falta** jogar no aparelho.
+
 ### 2026-11-13 16:30: barras da vitória no Mi A3 (19,5:9), modo leve ligado
 
 - Libs v8.0/v8.2 e A35 refeitas com `1d33084`. Rota de sempre até a vitória das duas lutas (`build/lab/env_victory.txt`,
