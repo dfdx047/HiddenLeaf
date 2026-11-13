@@ -70,6 +70,7 @@ namespace
     constexpr uint32_t kCameraXScale = 0x274u;     // (the same field the community's widescreen patch writes)
     constexpr uint32_t kCameraList = 0x617ACCu;    // *(gp-0x424), gp 0x617EF0: the first live camera
     constexpr uint32_t kCameraNext = 0x268u;       // the next one
+    constexpr uint32_t kRoundEndPanel = 0x617D3Cu; // gp-0x1B4: the round's end picture (the art panel after the KO), 0 otherwise
 
     uint8_t *g_rdram = nullptr;
     PS2Runtime::RecompiledFunction g_cameraOriginal = nullptr;
@@ -120,10 +121,16 @@ namespace
     // campaign. Everything else drawn through a camera (the result screen's picture, menus) is 2D made for 4:3: squeezed, it
     // leaves the sides of the screen with nothing drawn on them. The result screen builds its matrices once, in the vsyncs
     // right after the fight: hence the short wait (6 vsyncs, the fighters read their input every 2).
+    // The round's end picture (the art panel after the KO and the victory pose) is a full-screen plane drawn through the
+    // fight's camera while the fighters still read their input: made wide, it came out at 60% of the width with black
+    // bars on the sides in 16:9 and 20:9 (a few frames after the first round, ~80 after the last; docs/registro.md
+    // 2026-11-13 15:40). Its object at gp-0x1B4 is set 5 vsyncs before it shows and cleared when it ends.
     bool ougiOnScreen();
     bool wideCamera()
     {
         const int mode = hl_game::overlay();
+        if (mode == 1 && read32(kRoundEndPanel) != 0u)
+            return false;
         return mode == 2 || (mode == 1 && ((g_fighterTick != 0u && g_tick - g_fighterTick < 6u) || ougiOnScreen()));
     }
 

@@ -59,6 +59,25 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 15:40: barras pretas na tela de vitória (16:9 e 20:9): câmera larga desligada no quadro do fim do round
+
+- **Reproduzido no PC** (`un5pc`, 1080x486 = 20:9, GS do ARMSX2; Free Battle com a Hinata, `HL_CPU_HP=@1+450,@2+450`,
+  `build/lab/pc/runvic.sh`, quadros PNG com `HL_DUMP_FROM`): depois do KO o quadro de arte do fim do round (o painel com o
+  sol vermelho, as nuvens e o "WINNER") saía com 60% da largura e barras pretas dos lados: 4 quadros depois do round 1
+  (v6251–6254), ~80 depois do último (v10454–10531). Em 4:3 enche a tela.
+- **Causa:** o painel é um plano 3D de tela cheia (malha de faixas com ST) desenhado pela câmera da luta, e a câmera
+  continua larga (`wideCamera()`: os lutadores ainda leem a entrada na pose de vitória, até v10700). Não é o `widen2d`:
+  os dados do jogo já chegam com 0,6 da largura. (Tentei antes decidir as faixas do `widen2d` pela largura da corrida
+  inteira: quebrou o corredor da abertura e o texto do título, e não mexia no painel; descartado.)
+- **Achado na RAM** (dumps em 18 vsyncs dos dois rounds, `HL_WATCH`): `0x617D3C` (gp-0x1B4) fica 0 o tempo todo
+  (menus, luta, KO, pose) e guarda um ponteiro só enquanto o painel está na tela (v6246–6698, v10449–10901), 5 vsyncs
+  antes do primeiro quadro dele.
+- **Correção** (`recomp/android/host/hl_game.cpp`): `wideCamera()` é falsa enquanto `0x617D3C` não é 0; o código de
+  sempre devolve a escala de cada câmera.
+- **Verificado no PC:** 4454 quadros (v6200–v10620), 0 com barras laterais (antes 7 em 446 amostras); a câmera volta em
+  v6245 e v10448; fora do painel os quadros são iguais aos de referência.
+- **Falta:** Android (Mi A3) com vídeo; mods (o A35 tem o mesmo endereço? conferir com o `HL_WATCH`).
+
 ### 2026-11-13 14:00: despertar da Hinata no Mi A3, modo leve desligado com vídeo
 
 - Completa a entrada de 13:40: com o Mi A3 de volta na rede, os vídeos da luta (`build/lab/mia3/hin_normal/rec_5..8`)
