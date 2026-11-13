@@ -51,4 +51,26 @@
     <string name="online_game_desync_end">Os dois jogos se separaram: a partida acabou.</string>
     <string name="online_game_lost">A conexão com %1$s caiu.</string>
     <string name="online_game_failed">A partida não pôde começar (rede).</string>
+
+    <!-- Rede local (data/Lan.kt) -->
+    <string name="online_mode_internet">Online (internet)</string>
+    <string name="online_mode_lan">Rede local (Wi-Fi)</string>
+    <string name="lan_play_title">Jogar na mesma rede</string>
+    <string name="lan_create">Criar partida</string>
+    <string name="lan_search">Procurar partidas</string>
+    <string name="lan_waiting">Esperando outro jogador na mesma rede…</string>
+    <string name="lan_this_phone">Este celular: %1$s</string>
+    <string name="lan_searching">Procurando partidas nesta rede…</string>
+    <string name="lan_none_yet">Nenhuma ainda. No outro celular, toque em Criar partida.</string>
+    <string name="lan_different">Outra versão do app ou outros mods: vocês não podem jogar juntos.</string>
+    <string name="lan_step_join">Entrando na partida…</string>
+    <string name="lan_hint">Os dois celulares no mesmo Wi-Fi (ou um conectado ao hotspot do outro), com a mesma versão do Hidden Leaf e os mesmos mods ligados. Não precisa de internet nem de servidor.</string>
+    <string name="lan_guide">Um celular toca em Criar partida; o outro toca em Procurar partidas e escolhe na lista. O jogo abre nos dois celulares: quem criou a partida é o jogador 1 e mexe nos menus, o outro é o jogador 2. Escolham a luta de dois jogadores (Free Battle, 1P vs 2P) e lutem. A partida vai direto de um celular para o outro pelo Wi-Fi, sem internet.\n\nOs dois celulares precisam da mesma versão do Hidden Leaf e dos mesmos mods ligados. A partida usa um cartão de memória próprio (os seus saves não são mexidos) e todos os personagens ficam liberados. As ajudas do toque (especial com um toque, valor do toque) ficam desligadas: os dois jogam pelas regras do próprio jogo. Abrir o menu do jogo não pausa a partida.\n\nSe um celular não acha o outro: confira se os dois estão na mesma rede (não na rede de visitantes) e tente o hotspot de um dos celulares. Alguns roteadores separam os aparelhos do Wi-Fi (\"isolamento de AP\" ou \"isolamento de clientes\").</string>
+    <string name="lan_err_no_network">Este celular não está numa rede. Ligue o Wi-Fi (ou conecte no hotspot do outro celular).</string>
+    <string name="lan_err_listen">Não deu para escutar a rede. Feche outros jogos que procuram partidas e tente de novo.</string>
+    <string name="lan_err_network">A rede parou de responder. Confira o Wi-Fi e tente de novo.</string>
+    <string name="lan_err_no_answer">O outro celular não respondeu. Confira se os dois estão no mesmo Wi-Fi; alguns roteadores separam os aparelhos (rede de visitantes, isolamento de AP).</string>
+    <string name="lan_err_refused">O outro celular recusou a partida.</string>
+    <string name="lan_err_host_timeout">Ninguém entrou em 10 minutos: a partida foi fechada.</string>
+    <string name="lan_err_search_timeout">A busca parou depois de 5 minutos.</string>
 </resources>

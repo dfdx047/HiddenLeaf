@@ -5,8 +5,10 @@ import android.graphics.Canvas
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.ViewModelProvider
 import com.dfdx047.hiddenleaf.data.Online
 import com.dfdx047.hiddenleaf.data.GamePaths
+import com.dfdx047.hiddenleaf.data.OnlineLobby
 import com.dfdx047.hiddenleaf.engine.OnlineBridge
 import com.dfdx047.hiddenleaf.ui.screens.OnlineScreen
 import com.dfdx047.hiddenleaf.ui.theme.HiddenLeafTheme
@@ -27,9 +29,12 @@ import org.robolectric.annotation.GraphicsMode
 class OnlineScreenshotTest {
     private val out = File(System.getProperty("hl.shots") ?: "build/shots").also { it.mkdirs() }
 
-    private fun shoot(name: String) {
+    private fun shoot(name: String, lan: Boolean = false) {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
+        // (the page's choice through its own model: Robolectric keeps the preferences of an earlier test in a cache)
+        val lobby = ViewModelProvider(activity)[OnlineLobby::class.java]
+        lobby.update(lobby.prefs.state.value.copy(lan = lan))
         activity.setContent { HiddenLeafTheme { OnlineScreen(AppViewModel(activity.application)) } }
         repeat(20) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50)) }
         val v = activity.window.decorView
@@ -45,6 +50,10 @@ class OnlineScreenshotTest {
     @Test
     @Config(qualifiers = "en-w880dp-h400dp-land-xhdpi")
     fun onlineLandscape() = shoot("online_landscape")
+
+    @Test
+    @Config(qualifiers = "pt-w400dp-h880dp-port-xhdpi")
+    fun lanPortrait() = shoot("online_lan_portrait", lan = true)
 
     @Test
     fun sessionFile() {

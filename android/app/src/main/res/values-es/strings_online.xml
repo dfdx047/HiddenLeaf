@@ -51,4 +51,26 @@
     <string name="online_game_desync_end">Los dos juegos se separaron: la partida terminó.</string>
     <string name="online_game_lost">Se perdió la conexión con %1$s.</string>
     <string name="online_game_failed">La partida no pudo empezar (red).</string>
+
+    <!-- Red local (data/Lan.kt) -->
+    <string name="online_mode_internet">Online (internet)</string>
+    <string name="online_mode_lan">Red local (Wi-Fi)</string>
+    <string name="lan_play_title">Jugar en la misma red</string>
+    <string name="lan_create">Crear partida</string>
+    <string name="lan_search">Buscar partidas</string>
+    <string name="lan_waiting">Esperando a otro jugador en la misma red…</string>
+    <string name="lan_this_phone">Este teléfono: %1$s</string>
+    <string name="lan_searching">Buscando partidas en esta red…</string>
+    <string name="lan_none_yet">Ninguna todavía. En el otro teléfono, toca Crear partida.</string>
+    <string name="lan_different">Otra versión de la app u otros mods: no pueden jugar juntos.</string>
+    <string name="lan_step_join">Entrando en la partida…</string>
+    <string name="lan_hint">Los dos teléfonos en el mismo Wi-Fi (o uno en el punto de acceso del otro), con la misma versión de Hidden Leaf y los mismos mods activados. No hace falta internet ni servidor.</string>
+    <string name="lan_guide">Un teléfono toca Crear partida; el otro toca Buscar partidas y la elige en la lista. El juego se abre en los dos teléfonos: quien creó la partida es el jugador 1 y maneja los menús, el otro es el jugador 2. Elijan la pelea de dos jugadores (Free Battle, 1P vs 2P) y peleen. La partida va directo de un teléfono al otro por el Wi-Fi, sin internet.\n\nLos dos teléfonos necesitan la misma versión de Hidden Leaf y los mismos mods activados. La partida usa una tarjeta de memoria propia (tus partidas guardadas no se tocan) y todos los personajes quedan disponibles. Las ayudas táctiles (especial con un toque, valor del toque) quedan desactivadas: los dos juegan con las reglas del propio juego. Abrir el menú del juego no pausa la partida.\n\nSi los teléfonos no se ven: comprueba que los dos estén en la misma red (no en la red de invitados) y prueba el punto de acceso de uno de ellos. Algunos routers separan los dispositivos del Wi-Fi (\"aislamiento de AP\" o \"aislamiento de clientes\").</string>
+    <string name="lan_err_no_network">Este teléfono no está en una red. Conéctalo al Wi-Fi (o al punto de acceso del otro teléfono).</string>
+    <string name="lan_err_listen">No se pudo escuchar la red. Cierra otros juegos que buscan partidas y vuelve a intentarlo.</string>
+    <string name="lan_err_network">La red dejó de responder. Comprueba el Wi-Fi y vuelve a intentarlo.</string>
+    <string name="lan_err_no_answer">El otro teléfono no respondió. Comprueba que los dos estén en el mismo Wi-Fi; algunos routers separan los dispositivos (red de invitados, aislamiento de AP).</string>
+    <string name="lan_err_refused">El otro teléfono rechazó la partida.</string>
+    <string name="lan_err_host_timeout">Nadie entró en 10 minutos: la partida se cerró.</string>
+    <string name="lan_err_search_timeout">La búsqueda se detuvo después de 5 minutos.</string>
 </resources>

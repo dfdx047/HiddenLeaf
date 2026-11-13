@@ -300,7 +300,8 @@ object Online {
 class OnlinePrefs(context: Context) {
     private val p = context.getSharedPreferences("online", Context.MODE_PRIVATE)
 
-    data class State(val server: String, val name: String, val delay: Int, val relay: Boolean)
+    /** [lan]: the page's choice between the internet (rooms service) and the local network (data/Lan.kt). */
+    data class State(val server: String, val name: String, val delay: Int, val relay: Boolean, val lan: Boolean = false)
 
     private val _state = MutableStateFlow(read())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -310,11 +311,12 @@ class OnlinePrefs(context: Context) {
         p.getString("name", null) ?: "Ninja${(10..99).random()}",
         p.getInt("delay", 0).coerceIn(0, 4),
         p.getBoolean("relay", true),
+        p.getBoolean("lan", false),
     )
 
     fun set(s: State) {
         _state.value = s
-        p.edit().putString("server", s.server).putString("name", s.name).putInt("delay", s.delay).putBoolean("relay", s.relay).apply()
+        p.edit().putString("server", s.server).putString("name", s.name).putInt("delay", s.delay).putBoolean("relay", s.relay).putBoolean("lan", s.lan).apply()
     }
 }
 
@@ -327,6 +329,10 @@ sealed interface LobbyState {
     /** The other player is there: the game is starting. */
     data class Starting(val peer: String, val code: String) : LobbyState
     data class Failed(val message: Int) : LobbyState
+    /** A local match is open (data/Lan.kt): this phone's LAN addresses, for the other player to check they are on the same network. */
+    data class LanHosting(val ips: List<String>) : LobbyState
+    /** Listening for local matches: what was found is in OnlineLobby.lanHosts. */
+    data object LanSearching : LobbyState
 }
 
 sealed interface ServerTest {
@@ -339,7 +345,8 @@ sealed interface ServerTest {
 /**
  * The lobby: creating or joining a room, and starting the match. A room's UDP socket is opened first, so the addresses given to the
  * service are that socket's (its port goes to the engine, which opens the same port again); it stays open while the room waits, and a
- * STUN request every 20 s keeps the router's mapping alive.
+ * STUN request every 20 s keeps the router's mapping alive. A local network match (data/Lan.kt) opens the same kind of socket and
+ * meets on it without the service; both end in launchMatch.
  */
 class OnlineLobby(app: Application) : AndroidViewModel(app) {
     val prefs = OnlinePrefs(app)
@@ -401,7 +408,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                     }
                     if (guest != null) {
                         ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
-                        launchMatch(true, s, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key), start)
+                        launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key)), start)
                         room = null // (the room stays on the service for the relay's connection; it goes by itself)
                         return@launch
                     }
@@ -439,7 +446,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 _state.value = LobbyState.Working(R.string.online_step_join)
                 val j = Online.join(server, digits, p.name, fp, addrs)
                 ActivityLog.info("online", "joined room $digits of ${j.host.name} (${j.host.seen}), addresses ${j.host.addrs.joinToString()}")
-                launchMatch(false, s, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key), start)
+                launchMatch(Online.Session(false, s.localPort, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key)), start)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "join failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))
@@ -451,14 +458,228 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun launchMatch(
-        host: Boolean, s: DatagramSocket, code: String, me: String, peer: String, addrs: List<String>,
-        delay: Int, relay: Boolean, relayUrl: String, start: () -> Unit,
-    ) {
-        val port = s.localPort
-        closeSocket() // (the engine opens this port again: the other side's router knows it)
-        Online.writeSession(paths, Online.Session(host, port, code, me, peer, addrs, delay, relay, relayUrl))
-        _state.value = LobbyState.Starting(peer, code)
+    // ---- the local network (data/Lan.kt): no service, the two phones find each other by broadcast
+
+    private val _lanHosts = MutableStateFlow<List<Lan.Found>>(emptyList())
+    /** The local matches heard while searching, newest name order; empty when not searching. */
+    val lanHosts: StateFlow<List<Lan.Found>> = _lanHosts.asStateFlow()
+    @Volatile private var scanSocket: DatagramSocket? = null
+
+    /**
+     * Opens a local match: the game socket says so by broadcast every second and takes the first guest with the same fingerprint;
+     * [start] runs on the main thread once the session file is written.
+     */
+    fun hostLan(fp: String, start: () -> Unit) {
+        if (job?.isActive == true) return
+        val p = prefs.state.value
+        job = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = openSocket().apply { broadcast = true; soTimeout = 200 }
+                val addrs = Online.localAddresses(s.localPort)
+                if (addrs.isEmpty()) {
+                    _state.value = LobbyState.Failed(R.string.lan_err_no_network)
+                    closeSocket()
+                    return@launch
+                }
+                val room = Lan.newRoom()
+                val beacon = Lan.encode(Lan.Beacon(Online.NET_VERSION, Online.GAME, room, p.name, fp, s.localPort, addrs))
+                _state.value = LobbyState.LanHosting(addrs.map { it.substringBeforeLast(':') })
+                ActivityLog.info("online", "local match $room open on port ${s.localPort}, addresses ${addrs.joinToString()}")
+                val began = System.currentTimeMillis()
+                var lastBeacon = 0L
+                var targets = Lan.broadcastTargets()
+                var guest: Lan.Join? = null
+                var guestFrom = ""
+                var acceptedAt = 0L
+                val buf = ByteArray(1500)
+                while (isActive) {
+                    val now = System.currentTimeMillis()
+                    if (guest != null && now - acceptedAt >= Lan.ACCEPT_LINGER_MS) {
+                        ActivityLog.info("online", "local match $room: ${guest.name} joined from $guestFrom, addresses ${guest.addrs.joinToString()}")
+                        val peerAddrs = listOf(guestFrom) + guest.addrs
+                        launchMatch(Lan.session(true, s.localPort, room, p.name, guest.name, peerAddrs, p.delay), start)
+                        return@launch
+                    }
+                    if (now - began > Lan.HOST_MAX_MS) {
+                        _state.value = LobbyState.Failed(R.string.lan_err_host_timeout)
+                        closeSocket()
+                        return@launch
+                    }
+                    if (guest == null && now - lastBeacon >= Lan.BEACON_EVERY_MS) {
+                        if (lastBeacon != 0L && (now / 1000) % 10 == 0L) targets = Lan.broadcastTargets() // (the Wi-Fi may have changed)
+                        lastBeacon = now
+                        for (t in targets) runCatching { s.send(DatagramPacket(beacon, beacon.size, t, Lan.PORT)) }
+                    }
+                    val packet = DatagramPacket(buf, buf.size)
+                    try {
+                        s.receive(packet)
+                    } catch (e: SocketTimeoutException) {
+                        continue
+                    }
+                    val join = Lan.decode(buf, packet.length) as? Lan.Join ?: continue
+                    if (join.room != room) continue
+                    val answer: Lan.Msg = when {
+                        join.v != Online.NET_VERSION || join.game != Online.GAME || join.fp != fp -> Lan.Reject(room, "different", join.nonce)
+                        guest != null && join.nonce != guest.nonce -> Lan.Reject(room, "full", join.nonce)
+                        else -> {
+                            if (guest == null) {
+                                guest = join
+                                guestFrom = "${packet.address.hostAddress}:${packet.port}"
+                                acceptedAt = System.currentTimeMillis()
+                                _state.value = LobbyState.Starting(join.name, Lan.code(room))
+                            }
+                            Lan.Accept(room, p.name, p.delay, join.nonce)
+                        }
+                    }
+                    if (answer is Lan.Reject) ActivityLog.info("online", "local match $room: refused ${join.name} (${answer.why}, their fp ${join.fp})")
+                    val bytes = Lan.encode(answer)
+                    runCatching { s.send(DatagramPacket(bytes, bytes.size, packet.socketAddress)) }
+                }
+            } catch (e: java.io.IOException) {
+                if (!isActive) return@launch // (cancelled: the socket was closed under the receive)
+                ActivityLog.info("online", "local match failed: ${e.message}")
+                _state.value = LobbyState.Failed(R.string.lan_err_network)
+                closeSocket()
+            }
+        }
+    }
+
+    /** Listens for local matches ([lanHosts]) until one is picked, the screen is left or [Lan.SEARCH_MAX_MS] goes by. */
+    fun searchLan() {
+        if (job?.isActive == true) return
+        _lanHosts.value = emptyList()
+        job = viewModelScope.launch(Dispatchers.IO) {
+            val lock = Lan.multicastLock(getApplication<Application>())
+            var listen: DatagramSocket? = null
+            try {
+                if (Online.localAddresses(0).isEmpty()) {
+                    _state.value = LobbyState.Failed(R.string.lan_err_no_network)
+                    return@launch
+                }
+                _state.value = LobbyState.LanSearching
+                listen = DatagramSocket(null).apply {
+                    reuseAddress = true // (a second phone app, or this one a moment ago, may still hold it)
+                    broadcast = true
+                    soTimeout = 300
+                    bind(InetSocketAddress(Lan.PORT))
+                }
+                scanSocket = listen
+                val found = LinkedHashMap<String, Lan.Found>()
+                val began = System.currentTimeMillis()
+                val buf = ByteArray(1500)
+                while (isActive) {
+                    val now = System.currentTimeMillis()
+                    if (now - began > Lan.SEARCH_MAX_MS) {
+                        _state.value = LobbyState.Failed(R.string.lan_err_search_timeout)
+                        return@launch
+                    }
+                    val packet = DatagramPacket(buf, buf.size)
+                    val beacon = try {
+                        listen.receive(packet)
+                        Lan.decode(buf, packet.length) as? Lan.Beacon
+                    } catch (e: SocketTimeoutException) {
+                        null
+                    }
+                    if (beacon != null) {
+                        val first = beacon.room !in found
+                        found[beacon.room] = Lan.Found(beacon, packet.address.hostAddress ?: "", now)
+                        if (first) ActivityLog.info("online", "local match ${beacon.room} of ${beacon.name} at ${packet.address.hostAddress}, fp ${beacon.fp}")
+                    }
+                    found.values.removeAll { now - it.seen > Lan.HOST_GONE_MS }
+                    val list = found.values.sortedBy { it.beacon.name.lowercase() }
+                    if (list != _lanHosts.value) _lanHosts.value = list
+                }
+            } catch (e: java.io.IOException) {
+                if (!isActive) return@launch
+                ActivityLog.info("online", "local search failed: ${e.message}")
+                _state.value = LobbyState.Failed(R.string.lan_err_listen)
+            } finally {
+                runCatching { listen?.close() }
+                scanSocket = null
+                runCatching { lock?.release() }
+                _lanHosts.value = emptyList()
+            }
+        }
+    }
+
+    /** Joins the local match [host] (from [lanHosts]); [start] runs on the main thread once the session file is written. */
+    fun joinLan(host: Lan.Found, fp: String, start: () -> Unit) {
+        val p = prefs.state.value
+        val before = job
+        before?.cancel()
+        closeScan()
+        job = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                before?.join() // (the search's own cleanup first: its socket and its lock)
+                _state.value = LobbyState.Working(R.string.lan_step_join)
+                val s = openSocket().apply { soTimeout = 200 }
+                val nonce = Lan.newNonce()
+                val request = Lan.encode(Lan.Join(Online.NET_VERSION, Online.GAME, host.beacon.room, p.name, fp, s.localPort, Online.localAddresses(s.localPort), nonce))
+                val targets = host.candidates().mapNotNull { a ->
+                    runCatching { InetSocketAddress(InetAddress.getByName(a.substringBeforeLast(':')), a.substringAfterLast(':').toInt()) }.getOrNull()
+                }
+                val began = System.currentTimeMillis()
+                var lastAsk = 0L
+                val buf = ByteArray(1500)
+                while (isActive) {
+                    val now = System.currentTimeMillis()
+                    if (now - began > Lan.JOIN_TIMEOUT_MS) {
+                        ActivityLog.info("online", "local match ${host.beacon.room}: no answer from ${targets.joinToString()}")
+                        _state.value = LobbyState.Failed(R.string.lan_err_no_answer)
+                        closeSocket()
+                        return@launch
+                    }
+                    if (now - lastAsk >= Lan.JOIN_EVERY_MS) {
+                        lastAsk = now
+                        for (t in targets) runCatching { s.send(DatagramPacket(request, request.size, t)) }
+                    }
+                    val packet = DatagramPacket(buf, buf.size)
+                    try {
+                        s.receive(packet)
+                    } catch (e: SocketTimeoutException) {
+                        continue
+                    }
+                    when (val m = Lan.decode(buf, packet.length)) {
+                        is Lan.Accept -> if (m.room == host.beacon.room && m.nonce == nonce) {
+                            val from = "${packet.address.hostAddress}:${packet.port}"
+                            ActivityLog.info("online", "joined local match ${m.room} of ${m.name} at $from")
+                            launchMatch(Lan.session(false, s.localPort, m.room, p.name, m.name.ifEmpty { host.beacon.name }, listOf(from) + host.candidates(), m.delay), start)
+                            return@launch
+                        }
+                        is Lan.Reject -> if (m.room == host.beacon.room && m.nonce == nonce) {
+                            ActivityLog.info("online", "local match ${m.room} refused: ${m.why}")
+                            _state.value = LobbyState.Failed(Lan.explain(m.why))
+                            closeSocket()
+                            return@launch
+                        }
+                        else -> {}
+                    }
+                }
+            } catch (e: java.io.IOException) {
+                if (!isActive) return@launch
+                ActivityLog.info("online", "local join failed: ${e.message}")
+                _state.value = LobbyState.Failed(R.string.lan_err_network)
+                closeSocket()
+            }
+        }
+    }
+
+    /** The Online page was left: a local match or search stops (nobody would see a guest arrive), a match already starting goes on. */
+    fun leaveScreen() {
+        val s = _state.value
+        if (s is LobbyState.LanHosting || s is LobbyState.LanSearching || (s is LobbyState.Working && s.step == R.string.lan_step_join)) cancel()
+    }
+
+    private fun closeScan() {
+        runCatching { scanSocket?.close() }
+        scanSocket = null
+    }
+
+    /** The match is agreed (a room on the service, or a local one): the session file for the engine, then the game, as [start] does. */
+    private suspend fun launchMatch(session: Online.Session, start: () -> Unit) {
+        closeSocket() // (the engine opens this port again, session.port: the other side's router knows it)
+        Online.writeSession(paths, session)
+        _state.value = LobbyState.Starting(session.peer, session.code)
         withContext(Dispatchers.Main) { start() }
         delay(4000)
         _state.value = LobbyState.Idle
@@ -467,6 +688,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
     fun cancel() {
         job?.cancel()
         job = null
+        closeScan()
         closeRoom()
         _state.value = LobbyState.Idle
     }
@@ -499,6 +721,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         job?.cancel()
         closeSocket()
+        closeScan()
         room?.let { r -> Thread { Online.leave(roomServer, r) }.start() }
     }
 }

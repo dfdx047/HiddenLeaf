@@ -15,10 +15,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,6 +41,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dfdx047.hiddenleaf.AppViewModel
 import com.dfdx047.hiddenleaf.R
 import com.dfdx047.hiddenleaf.data.InstallState
+import com.dfdx047.hiddenleaf.data.Lan
 import com.dfdx047.hiddenleaf.data.LobbyState
 import com.dfdx047.hiddenleaf.data.Online
 import com.dfdx047.hiddenleaf.data.OnlineLobby
@@ -50,6 +55,9 @@ import com.dfdx047.hiddenleaf.ui.theme.Konoha
  * Online: two players, each on their phone. One creates a room and tells the other its six-digit code; the other joins with it. The
  * game then starts on both phones as one match: the room's creator is player 1, the other player 2 (data/Online.kt, the engine's
  * recomp/android/host/online).
+ *
+ * At the top the player picks how the two phones meet: through the rooms service on the internet, or on the same Wi-Fi (data/Lan.kt),
+ * where one creates a match and the other picks it from the list of matches heard on the network. The match itself is the same.
  */
 @Composable
 fun OnlineScreen(vm: AppViewModel) {
@@ -65,13 +73,28 @@ fun OnlineScreen(vm: AppViewModel) {
     var code by rememberSaveable { mutableStateOf("") }
     val fp = { Online.fingerprint(context, vm.paths) }
 
+    // (a local match or search stops with the page: nobody would see the other player arrive)
+    DisposableEffect(lobby) { onDispose { lobby.leaveScreen() } }
+
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         ScreenTitle(stringResource(R.string.nav_online), stringResource(R.string.online_subtitle))
 
-        SectionCard(stringResource(R.string.online_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            listOf(false to R.string.online_mode_internet, true to R.string.online_mode_lan).forEachIndexed { i, (lan, label) ->
+                SegmentedButton(
+                    selected = prefs.lan == lan,
+                    onClick = { lobby.update(prefs.copy(lan = lan)) },
+                    enabled = idle,
+                    shape = SegmentedButtonDefaults.itemShape(i, 2),
+                ) { Text(stringResource(label)) }
+            }
+        }
+
+        if (prefs.lan) LanPlay(lobby, ready, fp) { vm.play() }
+        else SectionCard(stringResource(R.string.online_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
             when {
                 !ready -> Text(stringResource(R.string.online_need_game), style = MaterialTheme.typography.bodyMedium)
                 !serverSet -> Text(stringResource(R.string.online_need_server), style = MaterialTheme.typography.bodyMedium)
@@ -120,7 +143,7 @@ fun OnlineScreen(vm: AppViewModel) {
         }
 
         SectionCard(stringResource(R.string.online_guide_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
-            Text(stringResource(R.string.online_guide), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(if (prefs.lan) R.string.lan_guide else R.string.online_guide), style = MaterialTheme.typography.bodyMedium)
         }
 
         SectionCard(stringResource(R.string.online_options_title), NinjaIcons.Tools, accent = Konoha.SasukeBlueLight) {
@@ -136,7 +159,8 @@ fun OnlineScreen(vm: AppViewModel) {
                 }
             }
             Text(stringResource(R.string.online_delay_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // (no relay on the local network: there is no room on the service to go through)
+            if (!prefs.lan) Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.online_relay), style = MaterialTheme.typography.titleSmall)
                     Text(stringResource(R.string.online_relay_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -145,7 +169,7 @@ fun OnlineScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(stringResource(R.string.online_server_card), NinjaIcons.Gate, accent = Konoha.ChakraAmber) {
+        if (!prefs.lan) SectionCard(stringResource(R.string.online_server_card), NinjaIcons.Gate, accent = Konoha.ChakraAmber) {
             OutlinedTextField(
                 value = prefs.server,
                 onValueChange = { lobby.update(prefs.copy(server = it.trim())) },
@@ -171,6 +195,86 @@ fun OnlineScreen(vm: AppViewModel) {
                 }
             }
         }
+    }
+}
+
+/** The local network's card: the name, then creating a match or searching for one (the list of matches heard, tap to join). */
+@Composable
+private fun LanPlay(lobby: OnlineLobby, ready: Boolean, fp: () -> String, start: () -> Unit) {
+    val prefs by lobby.prefs.state.collectAsStateWithLifecycle()
+    val state by lobby.state.collectAsStateWithLifecycle()
+    val hosts by lobby.lanHosts.collectAsStateWithLifecycle()
+    val idle = state is LobbyState.Idle || state is LobbyState.Failed
+    // (this phone's fingerprint, taken when the search starts: the list says which matches it can join)
+    var myFp by rememberSaveable { mutableStateOf("") }
+
+    SectionCard(stringResource(R.string.lan_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
+        if (!ready) Text(stringResource(R.string.online_need_game), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(
+            value = prefs.name,
+            onValueChange = { lobby.update(prefs.copy(name = Online.cleanName(it))) },
+            label = { Text(stringResource(R.string.online_name)) },
+            singleLine = true,
+            enabled = idle,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        when (val s = state) {
+            is LobbyState.LanHosting -> LanWaiting(s.ips) { lobby.cancel() }
+            is LobbyState.LanSearching -> {
+                Busy(stringResource(R.string.lan_searching)) { lobby.cancel() }
+                if (hosts.isEmpty()) Text(stringResource(R.string.lan_none_yet), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (h in hosts) LanHostRow(h, h.compatible(myFp), ready && prefs.name.isNotBlank()) { lobby.joinLan(h, myFp, start) }
+            }
+            is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
+            is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
+            else -> {
+                val can = ready && prefs.name.isNotBlank()
+                Button(onClick = { lobby.hostLan(fp(), start) }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.lan_create))
+                }
+                OutlinedButton(onClick = { myFp = fp(); lobby.searchLan() }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.lan_search))
+                }
+                if (s is LobbyState.Failed) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(s.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { lobby.dismiss() }) { Text(stringResource(R.string.online_dismiss)) }
+                    }
+                }
+            }
+        }
+        Text(stringResource(R.string.lan_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The open local match: waiting, with this phone's address (the other phone's should start the same way: same network), and a way out. */
+@Composable
+private fun LanWaiting(ips: List<String>, onCancel: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text(stringResource(R.string.lan_waiting), style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(
+            stringResource(R.string.lan_this_phone, ips.joinToString("  ·  ")),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+        )
+        TextButton(onClick = onCancel) { Text(stringResource(R.string.online_cancel)) }
+    }
+}
+
+/** A match heard on the network: who, where, and whether this phone can play it (same app build and mods). */
+@Composable
+private fun LanHostRow(h: Lan.Found, compatible: Boolean, enabled: Boolean, onJoin: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(h.beacon.name.ifEmpty { "?" }, style = MaterialTheme.typography.titleSmall)
+            Text(h.from, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (!compatible) Text(stringResource(R.string.lan_different), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        Button(onClick = onJoin, enabled = enabled && compatible) { Text(stringResource(R.string.online_join)) }
     }
 }
 

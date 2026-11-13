@@ -51,4 +51,26 @@
     <string name="online_game_desync_end">The two games went apart: the match ended.</string>
     <string name="online_game_lost">The connection to %1$s was lost.</string>
     <string name="online_game_failed">The match could not start (network).</string>
+
+    <!-- Local network play (data/Lan.kt) -->
+    <string name="online_mode_internet">Online (internet)</string>
+    <string name="online_mode_lan">Local network (Wi-Fi)</string>
+    <string name="lan_play_title">Play on the same network</string>
+    <string name="lan_create">Create match</string>
+    <string name="lan_search">Find matches</string>
+    <string name="lan_waiting">Waiting for another player on the same network…</string>
+    <string name="lan_this_phone">This phone: %1$s</string>
+    <string name="lan_searching">Looking for matches on this network…</string>
+    <string name="lan_none_yet">None yet. On the other phone, tap Create match.</string>
+    <string name="lan_different">Different app version or mods: you cannot play together.</string>
+    <string name="lan_step_join">Joining the match…</string>
+    <string name="lan_hint">Both phones on the same Wi-Fi (or one on the other\'s hotspot), with the same Hidden Leaf version and the same mods switched on. No internet or server needed.</string>
+    <string name="lan_guide">One phone taps Create match; the other taps Find matches and picks it from the list. The game then starts on both phones: whoever created the match is player 1 and moves the menus, the other is player 2. Pick the two-player fight (Free Battle, 1P vs 2P) and fight. The match goes straight between the two phones over the Wi-Fi, without the internet.\n\nBoth phones need the same version of Hidden Leaf and the same mods switched on. The match uses a memory card of its own (your saves are not touched) and every character is open. The touch helpers (one-tap special, tap value) are off: both phones play by the game\'s own rules. Opening the game menu does not pause the match.\n\nIf the phones do not see each other: check that both are on the same network (not a guest network) and try one phone\'s hotspot. Some routers keep devices on the Wi-Fi apart (\"AP isolation\" or \"client isolation\").</string>
+    <string name="lan_err_no_network">This phone is not on a network. Connect it to the Wi-Fi (or the other phone\'s hotspot).</string>
+    <string name="lan_err_listen">Could not listen on the network. Close other games that look for matches and try again.</string>
+    <string name="lan_err_network">The network stopped answering. Check the Wi-Fi and try again.</string>
+    <string name="lan_err_no_answer">The other phone did not answer. Check that both are on the same Wi-Fi; some routers keep devices apart (guest network, AP isolation).</string>
+    <string name="lan_err_refused">The other phone refused the match.</string>
+    <string name="lan_err_host_timeout">Nobody joined in 10 minutes: the match was closed.</string>
+    <string name="lan_err_search_timeout">The search stopped after 5 minutes.</string>
 </resources>

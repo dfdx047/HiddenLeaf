@@ -41,6 +41,7 @@ arquivo); "rota fixa" = a rota antiga de medida (`build/lab/hl_env.txt`, Naruto 
 | Dumps do GS por cena (`HL_GS_DUMP`) | funciona | APK de 11-03 21:26 | RP5, Cube, Odin 3 (16:9 e 20:9) | 52 dumps, `tools/gsdump.py info` e capturas do cabeçalho | ferramenta de teste; o jogo cai a 4–9 fps enquanto grava (zstd na thread de replay). Não abertos no PCSX2 ainda |
 | Dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`) | funciona | `libun5` de 11-04 07:47 (patch `0058`) | Odin 3 (16:9) | 13 pares em `~/Downloads/vifdumps/`, `tools/vifdump.py info` sem erro | ferramenta de teste, para a Fase 3 do Nominum; formato em `docs/vifdump.md`. Só no 16:9 (a câmera larga muda o que vai à VU1) |
 | Online de dois jogadores (lockstep, salas na Cloudflare) | não testado | branch do agente (`af052ef`, `a3555f7` e o commit do launcher) | nenhum | testes de unidade no PC (`host/online/tests/run.sh`: lockstep 892, sessão 2042, partida 76 checagens, 0 falhas; `node online/worker/test.mjs`), `assembleDebug` e foto da tela Online (Robolectric) | nada rodou em aparelho nem na Cloudflare de verdade; o servidor precisa ser publicado (`online/worker/README.md`) |
+| Online em rede local (Wi-Fi, sem servidor; escolha na página Online) | não testado | branch do agente de 2026-11-13 23:20 | nenhum | `LanCodecTest`, `LanSessionTest`, foto `online_lan_portrait`, `assembleDebug` | descoberta por broadcast na porta 47655, entrada pelo socket do jogo; mesmo motor e mesmo arquivo de sessão do online (`relay=0`); falta testar em dois aparelhos na mesma rede |
 
 ### Lutas contra o PCSX2 (bancada no PC, desde 2026-11-08)
 
@@ -58,6 +59,36 @@ Imagem (desde 2026-11-09): capturas lado a lado a cada 25 quadros na `route_v3`,
 imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campanha, a CPU nos dois lados.
 
 ## Histórico (mais novo primeiro)
+
+### 2026-11-13 23:20: multijogador em rede local (Wi-Fi) no launcher; não testado em aparelho
+
+Pedido do desenvolvedor: além do online pela internet, jogar na mesma rede, escolhendo na página Online. Feito numa branch
+de agente, só no launcher (o motor e o servidor não mudaram), sem dois aparelhos.
+
+- **Escolha no alto da página Online:** "Online (internet)" ou "Rede local (Wi-Fi)" (`OnlinePrefs.lan`, guardado). Na
+  rede local somem o cartão do servidor e o "Permitir o relay"; o nome e o atraso são os mesmos do online.
+- **Descoberta** (`data/Lan.kt`): quem toca em "Criar partida" abre o socket UDP do jogo como numa sala online (porta
+  livre qualquer, que o motor reabre) e manda dele, a cada segundo, um anúncio por broadcast (`255.255.255.255` e o
+  broadcast de cada rede) para a porta fixa **47655**: linhas `chave=valor` depois de `HLLAN` (versão da rede, `un5`,
+  `fp`, nome, porta do jogo, endereços locais, sala de 6 hexadecimais). Quem toca em "Procurar partidas" escuta a 47655
+  com o `MulticastLock` do Wi-Fi (permissão `CHANGE_WIFI_MULTICAST_STATE` nova no manifesto) e lista as partidas; `fp`
+  diferente (outra versão do app ou outros mods) aparece com aviso e o Entrar fica desligado. Uma partida some da lista
+  depois de 4 s sem anúncio.
+- **Entrada:** o convidado manda `join` (nome, `fp`, porta e endereços) do seu socket do jogo para o socket do jogo do
+  anfitrião, a cada 400 ms por até 6 s; o anfitrião responde `accept` (com o atraso dele) ou `reject` (`different`,
+  `full`), repete o accept por 0,8 s e os dois seguem pelo mesmo caminho do online (`OnlineLobby.launchMatch`, agora
+  recebe a `Online.Session` pronta): fecha o socket, grava `online/session.txt` com `relay=0`, `code=LAN<sala>`, os
+  endereços locais do outro (primeiro o de onde o pacote veio) e abre o jogo pelo `vm.play()`.
+- **Robustez:** tudo em `Dispatchers.IO` com `soTimeout`; Cancelar e sair da página (`DisposableEffect` →
+  `leaveScreen`) fecham os sockets e soltam o lock; partida aberta fecha sozinha em 10 min, busca em 5 min.
+- **Testes:** `LanCodecTest` (7: ida e volta dos quatro tipos de mensagem, limpeza de nome e `fp`, pacotes estranhos,
+  candidatos e compatibilidade, join e accept por dois sockets de verdade no loopback), `LanSessionTest` (arquivo de
+  sessão da rede local) e uma foto nova (`online_lan_portrait`). Todos os testes do launcher passam (40);
+  `assembleDebug` compila.
+- **Não testado em aparelho** (precisa de dois celulares na mesma rede). Riscos: roteadores com isolamento de AP ou
+  rede de visitantes (o anúncio não chega; o texto da página manda tentar o hotspot de um dos celulares); alguns
+  aparelhos filtram broadcast mesmo com o lock; o motor reabre a mesma porta logo depois que o launcher a fecha (igual
+  ao online; se ela estiver presa o motor usa outra e o outro lado aprende o endereço pelo primeiro pacote).
 
 ### 2026-11-13 18:40: instalação limpa no RG Cube (APK final)
 
