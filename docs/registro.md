@@ -59,6 +59,22 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 18:00: testes finais no Mi A3 (mods, clones, modo leve desligado)
+
+- **Alpha 1.1X** (`build/lab/mia3/a11x_final`, modo leve ligado, Nominum): luta inteira, tela de vitória ocupando a
+  tela toda (sem faixas pretas), volta à seleção de personagem. Lista de mods restaurada depois (`0|un6-a35`,
+  `0|un6-a11x`).
+- **Alpha 3.5** (`build/lab/mia3/a35_final`): luta, carregamento e seleção funcionam. Problema aberto: o ponteiro do
+  painel de fim de round (`0x617D3C` no SLES) nunca muda no executável do A35 (`HL_WATCH=617d3c` parado), então a
+  correção das faixas pretas (`1d33084`) pode não pegar a vitória do A35. O código que usa `gp-0x1B4` está nos
+  mesmos endereços (`0x1ef038...`) nos dois ELFs; falta achar o endereço real no A35. Fica para depois do lançamento.
+- **Clones do Naruto** (PC, `build/lab/pc/runnar.sh`): somem na nuvem de fumaça branca. A rota do PCSX2 diverge (IA
+  diferente), então não houve comparação quadro a quadro.
+- **Modo leve desligado**, rota da vitória no Mi A3: mediana 50,0 fps, p10 31,4 (ligado: 50,0 / 47,6). `light_mode`
+  voltou para 1.
+- Toque Pro no Mi A3: com a config antiga (`DYNAMIC`, 85%) o launcher novo já mostra o D-pad fixo e maior.
+- Falta: instalação limpa no RG Cube (quando o desenvolvedor liberar).
+
 ### 2026-11-13 17:00: ícone novo e D-pad fixo no Toque Pro (launcher)
 
 - **Ícone** (`722a1cc`, pedido do desenvolvedor: o antigo era cartunesco): ensō de pincel em branco pergaminho sobre
