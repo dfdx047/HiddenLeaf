@@ -120,10 +120,12 @@ data class Placement(val x: Float, val y: Float, val scale: Float = 1f, val visi
 
 /** Which controls each scene has, and where they start. A control missing from a scene is not on screen in it. */
 object PadDefaults {
-    // (the scene and the controller's options are in the game menu's Layout tab now: only the menu and START up here)
+    // (the controller's options are in the game menu's Layout tab; the scene's button is back up here (2026-11-13): in the
+    // Versão Brasileira's campaign the controls stayed the conversation's after it ended, with no way to change them)
     private val top = listOf(
         Ctl.MENU to Placement(0.44f, 0.075f),
         Ctl.START to Placement(0.56f, 0.075f),
+        Ctl.SCENE to Placement(0.68f, 0.075f),
     )
 
     val FIGHT: Map<Ctl, Placement> = linkedMapOf(

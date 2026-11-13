@@ -165,8 +165,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         // (Toque Pro: the fight's D-pad at its own size, larger by default; the menus' D-pad and the stick as they are)
         val padK = if (config.pro.on && scene == PadScene.FIGHT) config.pro.padSize / 100f else 1f
         for (c in Ctl.entries) {
-            if (c == Ctl.SCENE || c == Ctl.OPTIONS) continue
-            if (gestures && c != Ctl.MENU && c != Ctl.START) continue // (START: the title screen and the 2P join)
+            if (c == Ctl.OPTIONS) continue
+            if (gestures && c != Ctl.MENU && c != Ctl.START && c != Ctl.SCENE) continue // (START: the title screen and the 2P join)
             val p = config.placeOf(scene, c) ?: continue
             val size = if (c.kind == CtlKind.DPAD) c.size * padK else c.size
             place("${scene.name}.${c.name}", c, null, c.kind, size, p)
