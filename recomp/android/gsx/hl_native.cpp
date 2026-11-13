@@ -2944,23 +2944,29 @@ void vsync()
 	// The GS alone: SCANMSK back to 0 at every vsync. The game writes SCANMSK 2 in some Ougi (Sakura's linked one, rec
 	// sak_scan 2026-11-12) and never 0 again, and that write reaches the GS past dropScanmsk: the screen then kept every
 	// other line of an old picture for a minute. With this, at most the frame of the write is drawn on half the lines.
+	// (on the parse object: with the GS split in two threads, GSBackThreadMode, that is the front one, g_gs_front. The back
+	// one, g_gs_renderer, takes each draw's registers from the draw's record and may be drawing on its own thread right now:
+	// writing its SCANMSK changed nothing, the front kept 2 and the picture froze striped, rec mia3_back_rec 2026-11-13)
 	if (!s_on && !s_scanKeep)
 		MTGS::RunOnGSThread([]() {
-			if (g_gs_renderer && (g_gs_renderer->m_env.SCANMSK.U64 & 3u))
+			GSState* const parse = g_gs_front ? static_cast<GSState*>(g_gs_front.get()) : static_cast<GSState*>(g_gs_renderer.get());
+			if (parse && (parse->m_env.SCANMSK.U64 & 3u))
 			{
 				static int s_told = 0;
 				if (s_told++ < 8)
-					std::fprintf(stderr, "hl_native: GS SCANMSK %llu at a vsync, back to 0\n", static_cast<unsigned long long>(g_gs_renderer->m_env.SCANMSK.U64 & 3u));
-				g_gs_renderer->Flush(GSState::VSYNC);
-				g_gs_renderer->m_env.SCANMSK.U64 = 0;
+					std::fprintf(stderr, "hl_native: GS SCANMSK %llu at a vsync, back to 0%s\n", static_cast<unsigned long long>(parse->m_env.SCANMSK.U64 & 3u),
+						g_gs_front ? " (front object)" : "");
+				parse->Flush(GSState::VSYNC);
+				parse->m_env.SCANMSK.U64 = 0;
 			}
 		});
 	if (s_scanLog)
 		MTGS::RunOnGSThread([]() {
 			static uint64_t s_last = ~0ull;
-			if (!g_gs_renderer)
+			GSState* const parse = g_gs_front ? static_cast<GSState*>(g_gs_front.get()) : static_cast<GSState*>(g_gs_renderer.get());
+			if (!parse)
 				return;
-			const uint64_t now = (g_gs_renderer->m_env.SCANMSK.U64 & 3u) | (static_cast<uint64_t>(g_gs_renderer->m_scanmask_used) << 8);
+			const uint64_t now = (parse->m_env.SCANMSK.U64 & 3u) | (static_cast<uint64_t>(parse->m_scanmask_used) << 8);
 			if (now != s_last)
 				std::fprintf(stderr, "hl_native: v%llu GS SCANMSK %llu used %llu\n", static_cast<unsigned long long>(s_vsync), static_cast<unsigned long long>(now & 3u), static_cast<unsigned long long>(now >> 8));
 			s_last = now;

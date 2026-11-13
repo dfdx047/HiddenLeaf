@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -289,6 +290,26 @@ namespace
                      "DumpReplaceableTextures = false\n",
                      static_cast<double>(upscale), g_settings.filter == 2 ? "true" : "false", g_settings.filter == 3 ? 1 : 0, g_settings.filter == 1 ? 2 : 1,
                      std::getenv("HL_PERF") ? "true" : "false");
+        // PCSX2's GS in two threads (GSBackThreadMode: one parses the GIF, "GS Back" draws) where the GS is the limit of a
+        // device with four fast cores: on the Mi A3 (Snapdragon 665, "trinket") the GS thread of a heavy fight went from 22-27
+        // to 12-16 ms (docs/registro.md, 2026-11-13). Only with the GS on Vulkan and the native renderer off (hl_native's
+        // fight path works on the renderer object from the MTGS thread). The IOP then goes to the slow cores: five busy
+        // threads on four fast ones cost 2-3 fps. HL_GS_SPLIT=0/1 decides on any device.
+        {
+            const char *split = std::getenv("HL_GS_SPLIT");
+            const char *nat = std::getenv("HL_NATIVE");
+            const char *api = std::getenv("HL_GS_API");
+            char platform[PROP_VALUE_MAX] = {};
+            __system_property_get("ro.board.platform", platform);
+            const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
+            const bool on = split != nullptr ? split[0] == '1' : gsOnly && std::strcmp(platform, "trinket") == 0;
+            if (on)
+            {
+                std::fprintf(f, "GSBackThreadMode = 1\n");
+                setenv("HL_PIN_IOP", "rest", 0);
+            }
+            std::fprintf(stderr, "un5: GS in %s (platform %s)\n", on ? "two threads" : "one thread", platform);
+        }
         // HL_GS_EXTRA="key=value;key=value": GS settings to try (bench only)
         if (const char *extra = std::getenv("HL_GS_EXTRA"))
         {

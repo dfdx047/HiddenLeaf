@@ -59,6 +59,46 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 04:30, madrugada: GS em duas threads no Mi A3, corrigido e ligado só no Snapdragon 665
+
+- **Pedido do desenvolvedor** (antes de dormir): corrigir a divisão do GS (`GSBackThreadMode`) até ficar usável, só no
+  Mi A3, sem quebrar os outros aparelhos; meta: a luta a toda velocidade a 1,5x.
+- **O defeito** (entrada de 03:00: a tela congelava listrada até o fim da luta) aparecia em 4 de 5 rodadas com a divisão,
+  sempre no close-up do combo do Naruto. Caminho até a causa:
+  - rastreio temporário no `Merge` (`HL_GSX_TRACE`, fora do repositório: `build/lab/0001-lab-display-trace.patch`): a
+    saída é simples (progressiva, os dois circuitos no mesmo buffer `0x00e00` a 50%), e os draws continuam chegando;
+    o defeito está no que o jogo desenha, não na composição;
+  - ThreadSanitizer no replay do PC feito da cópia do ARMSX2 (`build/linux-armsx2-tsan`, Vulkan na iGPU AMD; na NVIDIA o
+    TSan cai): nenhuma corrida no GS dividido;
+  - um dump do GS de 600 vsyncs gravado no Mi A3 **sem** a divisão (`build/lab/mia3/mia3_dump_scene/mi_a3_ko.gs.zst`),
+    no PC, congela igual com e sem a divisão, e até no renderizador por software: o fluxo como o jogo manda já congela.
+    O que o aparelho faz a mais é a correção de SCANMSK do `hl_native` (2026-11-12: o jogo escreve `SCANMSK 2` em
+    certos cortes e nunca volta a 0; o GS passa a desenhar linha sim, linha não).
+  - **Causa:** essa correção zerava o SCANMSK em `g_gs_renderer`. Com a divisão ele é o objeto de trás, que recebe os
+    registradores de cada draw pelo registro do draw (e pode estar desenhando na outra thread naquele momento); o
+    objeto da frente, que faz o parse, continuava com 2.
+- **Correção** (`recomp/android/gsx/hl_native.cpp`): o SCANMSK volta a 0 no objeto do parse (`g_gs_front` com a
+  divisão, `g_gs_renderer` sem ela). Sem a divisão o código é o mesmo de antes. Duas rodadas com a divisão
+  (`mia3_split_fix_a/b`) passam pelo mesmo corte sem congelar; o log diz `SCANMSK 2 at a vsync, back to 0 (front object)`.
+- **Regra** (`un5_main.cpp`, `writeIni`): `GSBackThreadMode = 1` só com o GS em Vulkan, o renderizador nativo desligado e
+  `ro.board.platform` = `trinket` (Snapdragon 665); então `HL_PIN_IOP=rest` (cinco threads pesadas em quatro núcleos
+  rápidos). `HL_GS_SPLIT=0/1` força. O log diz `un5: GS in two threads (platform trinket)`.
+- **Medidas no Mi A3** (fases A / B):
+
+  | Rodada | 1x | 1,5x |
+  |---|---|---|
+  | uma thread | 48,7 / 46,8 | 48,1 / 46,2 |
+  | duas threads (com a correção) | 48,3 / 45,6 e 48,4 / 45,9 | 48,6 / 46,5, 48,7 / 46,5, 48,5 / 46,4 (regra automática) |
+
+  A 1,5x as duas threads ganham ~0,4 fps e a 1x nada: no trecho pesado o GS cai para 12–17 ms e **o limite passa a ser a
+  VU1** (24–25 ms por quadro no Ougi, o EE esperando 11–14 ms por ela). Imagens certas (`mia3_auto15`: o Ougi no
+  telhado, um clarão de transição).
+- **RG Cube** (`cube_auto_s2`): `GS in one thread (platform ums9620)`, `back thread off`; 49,4 / 45,1 (a fase B pegou
+  um Ougi, VU1 16,5 ms; a rodada de antes não pegou: 49,4 / 50,0). Os pacotes de mod (A35) ainda têm o host de antes:
+  não ligam a divisão até serem refeitos.
+- APK `build/HiddenLeaf-20261113-split.apk` instalado no Mi A3 e no Cube.
+- **Próximo:** a VU1 no Ougi ~20% mais barata (de 24–25 para ~20 ms por quadro).
+
 ### 2026-11-13 03:00, madrugada: o GS do ARMSX2 no Mi A3: quatro tentativas, nenhuma ganha; a cópia própria do núcleo
 
 - **Pedido do desenvolvedor:** "otimiza o GS do ARMSX2 então" (depois de a entrada de 00:40 achar o GS como limite do
