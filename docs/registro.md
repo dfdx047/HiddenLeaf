@@ -59,6 +59,13 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 14:00: despertar da Hinata no Mi A3, modo leve desligado com vídeo
+
+- Completa a entrada de 13:40: com o Mi A3 de volta na rede, os vídeos da luta (`build/lab/mia3/hin_normal/rec_5..8`)
+  vieram do aparelho. Modo leve desligado: "Guardian Dance Mode" e "Grd", 0 piscadas de um quadro no HUD, sem lixo.
+  O despertar está certo nos dois modos no Mi A3. O `light_mode=1` e o resto das configurações dele voltaram ao
+  original; `hl_env.txt` e `/sdcard/hlrec` apagados.
+
 ### 2026-11-13 13:40: despertar da Hinata no Mi A3 (patches 0107/0108, Nominum faa7af3)
 
 - **Cena:** Practice, Hinata contra Naruto, vida 0.2 no início, ↑ segurado (`build/lab/env_hin_prac.txt`, rota do
