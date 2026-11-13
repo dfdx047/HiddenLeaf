@@ -1,0 +1,13 @@
+--- a/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
++++ b/ps2xRuntime/src/lib/gs/hl_gs_live.cpp
+@@ -232,7 +232,9 @@
+         const uint32_t have = (size - tagOffset - 16u) / 16u;
+         const uint32_t nloop = flg == 0u ? have / nreg : (flg == 1u ? have * 2u / nreg : have);
+         static uint32_t s_count = 0;
+-        if (std::getenv("HL_GSLIVE_LOG") && (++s_count <= 8u || (s_count & 1023u) == 0u))
++        // (read once: a getenv here, for every packet the VU1 ends inside a tag, was 0.7% of the VU1 thread on the Mi A3)
++        static const bool s_log = std::getenv("HL_GSLIVE_LOG") != nullptr;
++        if (s_log && (++s_count <= 8u || (s_count & 1023u) == 0u))
+             std::fprintf(stderr, "[gslive] path %d packet of %u bytes ends inside a tag at %u (flg %u nreg %u nloop %u, has %u): #%u\n", path, size,
+                          tagOffset, flg, nreg, static_cast<uint32_t>(lo & 0x7FFFu), nloop, s_count);
+         const uint32_t qwords = flg == 0u ? nloop * nreg : (flg == 1u ? (nloop * nreg + 1u) / 2u : nloop);

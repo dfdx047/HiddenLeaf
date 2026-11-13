@@ -59,6 +59,42 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 07:00, manhã: a VU1 do Nominum 12% mais leve no Mi A3 (`e27e16c`); o Ougi agora para também no EE
+
+- **Por quê:** com o GS dividido (entrada de 04:30), o Ougi pesado a 1,5x deixava a thread da VU1 em 24–25 ms por quadro.
+  Perfil da `VuWorker` no jogo (simpleperf no Mi A3, janela do Ougi): blocos recompilados 58%, UNPACK ~12%, saída para o GS
+  ~12%, despacho ~6%. Detalhe por operação e as mudanças no `docs/registro.md` do Nominum (entrada de 05:50).
+- **Nominum `e27e16c`** (commits locais `8d30dc7`, `e7a3f5d`, `8f6ee1a`, `e27e16c`): anel de flags com a soma acumulada
+  (o commit não aplica entrada por entrada), `statusOfMac` sem desvios, blocos encadeados por chamada de cauda,
+  `preserve_none` nos blocos, a soma das flags em variáveis. Replay `mi_a3_ko` no Mi A3: VU1 18,22 → 15,70 ms por vsync
+  (−14%), bit a bit igual (ctest `^vif` 106/106 no PC, `arm64_qemu.sh` 130/130).
+- **Pino** `NOMINUM_COMMIT=e27e16c` (`recomp/android/build.sh`, `recomp/pc/build.sh`); catálogo em
+  `build/nominum-e27e16c/build/vu1rec` (o mesmo de antes: as chaves não mudaram).
+- **Build:** o include do Nominum era `PUBLIC` no `nominum_vu1` e ia para a linha de comando das 739 unidades do `un5`; como
+  a pasta leva o commit no nome, cada pino novo recompilava o jogo inteiro (~30 min por lib). Agora é `PRIVATE` e só o
+  `host/hl_nominum_vu1.cpp` o recebe: trocar o pino recompila 15 unidades.
+- **Patch `0104-gslive-log-flag-once.patch`:** o `trimLastTag` (`hl_gs_live.cpp`) chamava `getenv("HL_GSLIVE_LOG")` a cada
+  pacote cortado no meio de uma tag (~2 milhões numa luta: pacotes de 96 bytes do PATH2, IMAGE que continua no DIRECT
+  seguinte); `getenv` + `strncmp` eram 0,7% da thread da VU1. Lido uma vez.
+- **Mi A3, luta a 1,5x, GS dividido** (fases A / B, fps e ms da VU1):
+
+  | Rodada | A fps | B fps | B min | VU1 A / B | EE B |
+  |---|---|---|---|---|---|
+  | antes (`mia3_auto15b`, sem gravar) | 48,5 | 46,4 | 36,1 | 17,0 / 19,3 | 15,9 |
+  | `e27e16c`, sem gravar (`mia3_vuflags15n`) | **49,6** | **47,6** | 36,1 | 14,6 / 17,0 | 16,3 |
+  | `e27e16c`, gravando (3 rodadas) | 48,9–49,1 | 46,9–47,0 | 37,6–37,9 | 14,9–15,1 / 17,7 | 18,0–18,1 |
+
+  Imagens certas no vídeo (menus, luta, close-ups e clarão do Ougi). **A gravação do aparelho (screenrecord) custa ~0,6
+  fps:** comparar sempre rodadas com e sem `REC` entre si.
+- **O limite agora:** nas janelas lentas do Ougi (39–45 fps) o EE fica em 20–23,5 ms com waitVU ~0 e a VU1 em 16–20 ms: os
+  dois juntos. O EE é o código do jogo espalhado (`dispatchGuestBranch` 5%, `translateAddress` 4%, um produto de matriz da
+  VU0 em modo macro 3,5%, `memmove` 3,6%); nada concentrado.
+- **Sem ganho, desfeito:** o código do jogo a `-O3` (`UN5_RUNNER_OPT`, só a lib v8.0): com gravação 48,9 / 46,8, igual ao
+  `-O2` (a primeira rodada, sem gravar, parecia melhor; era a gravação).
+- **RG Cube (luta 2x, sem o GS dividido):** 49,5 / 50,0 fps, VU1 9,9 / 11,5 ms; imagens certas.
+- **`build/lab/mia3run.sh`:** `RECLIM=<s>` corta o vídeo em pedaços menores (com 50 s os quatro chegam inteiros pelo Wi-Fi;
+  o de 170 s chegava truncado); `RECSIZE`/`RECLIM` agora valem (dentro de aspas simples o shell do aparelho os via vazios).
+
 ### 2026-11-13 04:30, madrugada: GS em duas threads no Mi A3, corrigido e ligado só no Snapdragon 665
 
 - **Pedido do desenvolvedor** (antes de dormir): corrigir a divisão do GS (`GSBackThreadMode`) até ficar usável, só no
