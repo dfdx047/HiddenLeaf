@@ -108,6 +108,9 @@
     <string name="skip_intro_text">Los logos y los vídeos de apertura se saltan y el juego va directo al título. La elección de idioma se mantiene.</string>
     <string name="native_render">Renderizador nativo (experimental)</string>
     <string name="native_render_text">Dibuja las peleas con el renderizador propio de Hidden Leaf: un poco más rápido, pero algunos efectos y texturas pueden faltar o salir mal. Apagado, el renderizador de PCSX2 dibuja todo.</string>
+    <string name="light_mode">Modo ligero</string>
+    <string name="light_mode_text">Más rápido en móviles más débiles (clase Snapdragon 665): otra VU1 (el procesador de geometría de la PS2) y, donde ayuda, el GS en dos hilos. Algunos efectos pueden faltar o parpadear. Apagado, el juego se dibuja como en la PS2.</string>
+    <string name="light_mode_short">modo ligero</string>
     <string name="unlock_all">Desbloquear todo</string>
     <string name="unlock_all_text">Todos los personajes y enlaces abiertos en combate libre. Guardar en el juego lo escribe en la memory card y permanece aunque se apague esta opción.</string>
     <string name="unlock_pending">Se aplicará la próxima vez que se inicie el juego</string>

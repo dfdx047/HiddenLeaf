@@ -68,6 +68,9 @@ class EngineSettings(private val file: File) {
         const val MASH_PERCENT = "mash_percent"   // what a tap is worth where the game asks to press repeatedly: 100..200
         const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60, 90 or 120 (interpolated)
         const val SKIP_INTRO = "skip_intro"       // 1 (default): the logos and opening movies skipped, START pressed for the player
+        const val LIGHT_MODE = "light_mode"       // 1: light mode, for weaker phones (Snapdragon 665 class): Nominum's VIF1 and VU1 (its recompiled
+                                                  // microprograms) and, on the Snapdragon 665, the GS in two threads; faster, some effects may fail.
+                                                  // 0 (default): the runtime's VU1 and the GS in one thread, as the game draws everything
         const val NATIVE_RENDER = "native_render" // 1: the fight drawn by Hidden Leaf's own renderer (experimental); 0 (default) PCSX2's GS draws all
 
         // the launcher's own, read by the Android glue of the engine at start

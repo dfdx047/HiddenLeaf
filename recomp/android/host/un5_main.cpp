@@ -178,6 +178,11 @@ namespace
         int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
     };
     Settings g_settings;
+    // The launcher's "Modo leve" (light_mode=1): Nominum's VIF1 and VU1 and, on the Snapdragon 665, the GS in two threads.
+    // Off (the default) the runtime's VU1 and the GS in one thread: the developer saw effects missing and the screen
+    // breaking with them (Hinata's awakening, the victory screen) and kept them for the phones that need the speed
+    // (docs/registro.md, 2026-11-13). NOMINUM_VU1 and HL_GS_SPLIT in hl_env.txt still decide over it.
+    bool g_lightMode = false;
 
     void loadSettings(const std::string &path)
     {
@@ -214,6 +219,8 @@ namespace
                 skipIntro = v != 0;
             else if (!std::strcmp(line, "native_render"))
                 nativeRender = v != 0;
+            else if (!std::strcmp(line, "light_mode"))
+                g_lightMode = v != 0;
             else if (!std::strcmp(line, "gpu_api"))
                 gpuApi = v;
         }
@@ -302,7 +309,7 @@ namespace
             char platform[PROP_VALUE_MAX] = {};
             __system_property_get("ro.board.platform", platform);
             const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
-            const bool on = split != nullptr ? split[0] == '1' : gsOnly && std::strcmp(platform, "trinket") == 0;
+            const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && std::strcmp(platform, "trinket") == 0;
             if (on)
             {
                 std::fprintf(f, "GSBackThreadMode = 1\n");
@@ -501,7 +508,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     // Nominum's VIF1 and VU1 (its recompiled microprograms) by default: every route of the week ran with them; the
     // runtime's VU1 gave on the Mi A3 35 fps in the fight's start (48.9 with Nominum) and 25.5 in the campaign (35.2),
     // with the same picture (2026-11-12). NOMINUM_VU1=0 in hl_env.txt for the runtime's.
-    setenv("NOMINUM_VU1", "1", 0);
+    // (since 2026-11-13 only in the light mode, g_lightMode above)
+    setenv("NOMINUM_VU1", g_lightMode ? "1" : "0", 0);
+    std::fprintf(stderr, "un5: light mode %s\n", g_lightMode ? "on" : "off");
     hl_nominum_vu1::setup();
     setenv("HL_METER", "1", 0);
     if (iso.empty())

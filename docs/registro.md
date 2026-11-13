@@ -59,6 +59,38 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-13 09:40, manhã: "Modo leve" no launcher; o padrão volta para a VU1 do runtime e o GS numa thread
+
+- **Pedido do desenvolvedor:** com as mudanças recentes o jogo buga: a Hinata Shippuden (entendi "Renata grande" como a
+  Hinata adulta) no Despertar deixa a tela toda bugada (HUD e vida piscando, coisas sumindo); às vezes a tela de vitória
+  fica com barras pretas e volta; vários ataques ficam sem efeito. Itachi e outros no Despertar não mostraram o problema.
+  Em vez de corrigir tudo agora: o que deixa o jogo mais leve vira um **modo leve**, na aba de desempenho, para quem tem
+  celular da classe do Snapdragon 665; o padrão fica com o GS normal, para os aparelhos mais fortes. A Hinata ainda precisa
+  ser corrigida no modo leve.
+- **`light_mode`** (`EngineSettings.LIGHT_MODE`; "Modo leve" no card Desempenho das configurações e na aba Gráficos do menu do
+  jogo, com reinício; textos em pt, en, es; "· modo leve" junto do renderizador em uso):
+  - ligado: VIF1 e VU1 do Nominum (`NOMINUM_VU1=1`) e, no Snapdragon 665 (`trinket`) com Vulkan e sem o nativo, o GS em
+    duas threads (regra de 04:30);
+  - desligado (padrão): a VU1 do runtime e o GS numa thread, como antes de 2026-11-12. `NOMINUM_VU1` e `HL_GS_SPLIT` no
+    `hl_env.txt` continuam valendo acima do modo. O log diz `un5: light mode on/off`.
+- **Medidas** (sem forçar nada no `hl_env`; a rota até v7600 no Mi A3, até v9000 no Cube; fases A / B):
+
+  | Aparelho | Modo leve desligado | Modo leve ligado |
+  |---|---|---|
+  | Mi A3, 1,5x | 35,2 / 35,3 fps (VU1 25 ms) | 50,0 / 49,1 fps (VU1 13,5 ms), GS em duas threads |
+  | RG Cube, 2x | 47,8 / 46,6 fps (VU1 17–20 ms) | 49,4 / 50,0 (`cube_758`, entrada de 08:30) |
+
+- **Comparação na rota do Naruto** (Mi A3, `normal15` com a VU1 do runtime contra `mia3_758rec` com a do Nominum): a
+  transição "Start Battle", os golpes, o "Vermillion Mode" e o clarão do Ougi aparecem iguais nos dois; a diferença do
+  desenvolvedor não aparece nesta rota.
+- **Rota não chega na Hinata:** na seleção de personagem as direções da rota (`DOWN`, `LEFT`, `LDOWN`, `LLEFT`, e mesmo
+  segurando 25 vsyncs) não movem o cursor, nem do 1P nem do COM (o log mostra os passos enfileirados; só o CROSS passa).
+  Quatro tentativas (`build/lab/mia3/hinata_def*`); falta entender por quê antes de testar o Despertar dela por rota.
+- **`fx_off`** (48 no Mi A3, vindo do perfil de GPU herdado do Dragon Rage) não é lido pelo motor do Hidden Leaf: não explica
+  os efeitos que faltam.
+- **Resolução 1,5x:** é a escala interna do GS do PCSX2 (`upscale` 1,5 no `un5.ini`: 960×672 a partir de 640×448); numa tela
+  de 720 linhas fica perto da nativa e ainda serrilha (não há anti-aliasing).
+
 ### 2026-11-13 08:30, manhã: UNPACK do Nominum mais leve (`758e4e7`), tradução de endereço e medidor em linha
 
 - **Perfil** da janela que ainda cai no Ougi (v7518–7800 no roteiro do Mi A3: VU1 21–23 ms de CPU, o EE esperando 7–12 ms

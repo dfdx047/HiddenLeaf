@@ -160,6 +160,9 @@ fun SettingsScreen(vm: AppViewModel) {
                 stringResource(R.string.ln_renderer_text),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            ToggleRow(stringResource(R.string.light_mode), stringResource(R.string.light_mode_text), get(EngineSettings.LIGHT_MODE, 0) == 1) {
+                vm.setting(EngineSettings.LIGHT_MODE, if (it) 1 else 0)
+            }
         }
 
 

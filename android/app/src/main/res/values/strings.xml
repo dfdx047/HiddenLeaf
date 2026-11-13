@@ -109,6 +109,9 @@
     <string name="skip_intro_text">The logos and the opening movies are skipped and the game goes straight to the title. The language choice stays.</string>
     <string name="native_render">Native renderer (experimental)</string>
     <string name="native_render_text">Draws the fights with Hidden Leaf\'s own renderer: a little faster, but some effects and textures may be missing or wrong. Off, PCSX2\'s renderer draws everything.</string>
+    <string name="light_mode">Light mode</string>
+    <string name="light_mode_text">Faster on weaker phones (Snapdragon 665 class): another VU1 (the PS2\'s geometry processor) and, where it helps, the GS in two threads. Some effects may be missing or flicker. Off, the game is drawn as on the PS2.</string>
+    <string name="light_mode_short">light mode</string>
     <string name="unlock_all">Unlock everything</string>
     <string name="unlock_all_text">All characters and links open in Free Battle. Saving in the game writes this to the memory card, and it stays even after switching this off.</string>
     <string name="unlock_pending">Will be applied the next time the game starts</string>
