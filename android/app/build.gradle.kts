@@ -15,8 +15,12 @@ android {
         // CI passes the tag (android-v0.1.0 -> 0.1.0) and the run number; a local build is named after the line below
         val vName = System.getenv("HL_VERSION_NAME") ?: "0.1.0-beta"
         val vParts = vName.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        // 0.1.0-beta -> 10001, 0.1.0-beta.2 -> 10002, 0.1.0 -> 10099: a later beta and the final release install over
+        // the earlier one (the app's updater compares the names the same way, data/AppUpdates.kt)
+        val vSuffix = vName.substringAfter('-', "")
+        val vPre = if (vSuffix.isEmpty()) 99 else (Regex("""(\d+)$""").find(vSuffix)?.value?.toIntOrNull() ?: 1).coerceIn(1, 98)
         versionCode = System.getenv("HL_VERSION_CODE")?.toInt()
-            ?: maxOf(1, vParts.getOrElse(0) { 0 } * 10000 + vParts.getOrElse(1) { 0 } * 100 + vParts.getOrElse(2) { 0 })
+            ?: maxOf(1, (vParts.getOrElse(0) { 0 } * 10000 + vParts.getOrElse(1) { 0 } * 100 + vParts.getOrElse(2) { 0 }) * 100 + vPre)
         versionName = vName
 
         // The recompiled engine is arm64 only.

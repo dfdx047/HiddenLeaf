@@ -86,6 +86,8 @@ for this game, mods, and **online play**: rooms, quick match and local Wi-Fi, ch
   **Versão Brasileira**.
 - **Launcher:** ISO check by SHA-256, memory card manager (`.ps2` import and export with backup), cheats (unlocks
   written to the save), skip intro, home screen shortcut, Portuguese, English and Spanish.
+- **Automatic updates:** a new release is found when the app opens, downloaded (by itself on Wi-Fi) and handed to the
+  installer, keeping your data.
 
 ## Install and play
 

@@ -95,6 +95,9 @@ nativo para Android, con launcher, controles táctiles, mods y juego en línea. 
 - Gestor de tarjeta de memoria: importar y exportar `.ps2` con copia de seguridad; importar carpeta.
 - Trucos: desbloqueos escritos en la partida guardada del juego.
 - Saltar la intro (con START), acceso directo en la pantalla de inicio, diseños en vertical y horizontal.
+- **Actualización automática:** la app busca una versión nueva en GitHub al abrirse, muestra qué cambió, la descarga
+  (sola en Wi-Fi, tras preguntar con datos móviles) y abre el instalador; los datos del juego, ajustes y partidas se
+  mantienen.
 - Icono nuevo: un ensō de tinta con una hoja escondida.
 - Portugués, inglés y español.
 

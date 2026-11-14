@@ -89,6 +89,8 @@ el propio menú del juego.
 - **Launcher:** comprobación de la ISO por SHA-256, gestor de tarjeta de memoria (importar y exportar `.ps2` con copia
   de seguridad), trucos (desbloqueos escritos en la partida guardada), saltar la intro, acceso directo en la pantalla de
   inicio, portugués, inglés y español.
+- **Actualización automática:** una versión nueva se detecta al abrir la app, se descarga (sola en Wi-Fi) y se pasa al
+  instalador, conservando tus datos.
 
 ## Instalar y jugar
 

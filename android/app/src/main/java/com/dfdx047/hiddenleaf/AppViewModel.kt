@@ -491,8 +491,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (info != null) ActivityLog.info("update", "available: ${info}")
             _update.value = if (info != null) UpdateState.Available(info) else UpdateState.Idle
             if (manual && info == null) say(str(if (r.isSuccess) R.string.update_none else R.string.update_check_failed))
+            // On Wi-Fi (a network without data charges) the new version comes down by itself and the system installer
+            // opens when it is done; on mobile data the dialog asks first (the APK is big).
+            if (info != null && !info.nightly && unmetered()) {
+                ActivityLog.info("update", "unmetered network: downloading by itself")
+                startUpdate()
+            }
         }
     }
+
+    private fun unmetered(): Boolean = runCatching {
+        val cm = getApplication<Application>().getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }.getOrDefault(false)
 
     fun dismissUpdate() {
         if (_update.value is UpdateState.Available || _update.value is UpdateState.NeedPermission) _update.value = UpdateState.Idle

@@ -61,6 +61,23 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 12:10: atualização automática; o APK da v0.1.0-beta substituído
+
+- O desenvolvedor pediu atualização automática: quando sair versão nova, o app baixa e instala. O fluxo já existia (do
+  Dragon Rage: busca ao abrir, diálogo com as novidades, download, permissão de instalar apps, instalador), mas
+  `AppUpdates.check` só aceitava tags `android-vX.Y.Z` fora de pré-lançamento, e nunca acharia a `v0.1.0-beta`.
+- `data/AppUpdates.kt`: aceita `vX.Y.Z[-beta.N]` e `android-vX.Y.Z`, pré-lançamentos incluídos; `compareVersions`
+  (`0.1.0-beta` < `0.1.0-beta.2` < `0.1.0`); as novidades são a primeira seção `## ` do `CHANGELOG.pt-BR.md`,
+  `CHANGELOG.es.md` ou `CHANGELOG.md` na tag. Teste `AppUpdatesTest` (3 de 3).
+- `AppViewModel.checkForUpdate`: em rede sem cobrança (Wi-Fi) baixa sozinho ao abrir o app e abre o instalador; nos
+  dados móveis o diálogo pergunta antes. Permissão `ACCESS_NETWORK_STATE` no manifesto.
+- `build.gradle.kts`: o versionCode conta a beta (`0.1.0-beta` = 10001, `-beta.2` = 10002, `0.1.0` = 10099).
+- Android não deixa um app comum instalar sem o toque do usuário: o instalador do sistema sempre pede "Atualizar".
+- Com o repositório privado a busca falha calada (a API do GitHub responde 404); funciona quando ficar público.
+- APK `HiddenLeaf-v0.1.0-beta.apk` novo (180426122 bytes, SHA-256
+  `02167a2454ad7ba5ad8c71860a8c044f7375defa86b1bd5b4f04949f8f46a4c3`), no lugar do anterior no mesmo release; a tag
+  `v0.1.0-beta` foi movida para este commit. Não testado em aparelho.
+
 ### 2026-11-14 11:50: v0.1.0-beta publicada como pré-lançamento (repositório ainda privado)
 
 - `main` avançada até `89f40f5` (fast-forward da `lab/bench-pcsx2`; antes de mandar, o histórico foi conferido sem

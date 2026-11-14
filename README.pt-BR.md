@@ -86,6 +86,8 @@ próprio menu do jogo.
   **Versão Brasileira**.
 - **Launcher:** conferência da ISO por SHA-256, gerenciador de cartão de memória (importar e exportar `.ps2` com
   backup), cheats (desbloqueios gravados no save), pular a abertura, atalho na tela inicial, português, inglês e espanhol.
+- **Atualização automática:** uma versão nova é achada ao abrir o app, baixada (sozinha no Wi-Fi) e entregue ao
+  instalador, mantendo seus dados.
 
 ## Instalar e jogar
 

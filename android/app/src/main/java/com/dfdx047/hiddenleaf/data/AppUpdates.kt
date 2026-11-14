@@ -20,15 +20,16 @@ sealed interface UpdateState {
 
 /**
  * Looks at the repository's GitHub releases. A test build (0.0.0-dev.N, version code N = the CI run) follows the
- * "android-nightly" pre-release, whose text carries the run number; a normal build follows the highest
- * `android-vX.Y.Z` release.
+ * "android-nightly" pre-release, whose text carries the run number; a normal build follows the highest version among
+ * the `vX.Y.Z[-beta.N]` (and the older `android-vX.Y.Z`) releases, pre-releases included while the app is in beta:
+ * 0.1.0-beta < 0.1.0-beta.2 < 0.1.0.
  */
 object AppUpdates {
     suspend fun check(currentName: String, currentCode: Int): UpdateInfo? {
         val releases = JSONArray(Net.getText("https://api.github.com/repos/$REPO/releases?per_page=30"))
         val dev = currentName.contains("-dev")
         var best: UpdateInfo? = null
-        var bestV: List<Int>? = null
+        var bestTag = ""
         for (i in 0 until releases.length()) {
             val r = releases.getJSONObject(i)
             if (r.optBoolean("draft")) continue
@@ -39,24 +40,58 @@ object AppUpdates {
                 val run = Regex("""dev\.(\d+)""").find(r.optString("body"))?.groupValues?.get(1)?.toIntOrNull() ?: return null
                 return if (run > currentCode) UpdateInfo("0.0.0-dev.$run", "", apkUrl, size, true) else null
             }
-            if (!tag.startsWith("android-v") || r.optBoolean("prerelease")) continue
-            val v = parse(tag.removePrefix("android-v")) ?: continue
-            if (bestV == null || compare(v, bestV) > 0) {
-                bestV = v
-                best = UpdateInfo(tag.removePrefix("android-v"), r.optString("body").trim().take(8000), apkUrl, size, false)
+            val name = versionOf(tag) ?: continue
+            if (best == null || compareVersions(name, best.version) > 0) {
+                best = UpdateInfo(name, r.optString("body").trim().take(8000), apkUrl, size, false)
+                bestTag = tag
             }
         }
-        val mine = parse(currentName) ?: listOf(0)
-        val found = best?.takeIf { compare(bestV!!, mine) > 0 } ?: return null
-        // The notes: the changelog in the repository as it is at that version's tag (CHANGELOG.md / .pt.md / .es.md
-        // since 0.7.3, which hold the latest version's notes; CHANGELOG-vX.Y.Z.md before), else the release's own text.
+        val found = best?.takeIf { compareVersions(it.version, currentName) > 0 } ?: return null
+        // The notes: that version's section of the changelog in the repository at its tag (CHANGELOG.pt-BR.md,
+        // CHANGELOG.es.md or CHANGELOG.md), else the release's own text.
         val lang = java.util.Locale.getDefault().language
-        val tag = "https://raw.githubusercontent.com/$REPO/android-v${found.version}"
-        suspend fun fetch(url: String) = runCatching { Net.getText(url).trim().take(8000) }.getOrDefault("")
-        suspend fun notes(base: String) = (if (lang == "pt" || lang == "es") fetch("$base.$lang.md") else "").ifBlank { fetch("$base.md") }
-        val file = notes("$tag/CHANGELOG").ifBlank { notes("$tag/CHANGELOG-v${found.version}") }
-        if (file.isNotBlank()) return found.copy(notes = file)
-        return found
+        val raw = "https://raw.githubusercontent.com/$REPO/$bestTag"
+        suspend fun fetch(url: String) = runCatching { Net.getText(url) }.getOrDefault("")
+        val file = when (lang) {
+            "pt" -> fetch("$raw/CHANGELOG.pt-BR.md")
+            "es" -> fetch("$raw/CHANGELOG.es.md")
+            else -> ""
+        }.ifBlank { fetch("$raw/CHANGELOG.md") }
+        val notes = section(file)
+        return if (notes.isNotBlank()) found.copy(notes = notes) else found
+    }
+
+    /** "v0.1.0-beta" or "android-v0.2.0" -> "0.1.0-beta" / "0.2.0"; anything else (the nightly) -> null. */
+    internal fun versionOf(tag: String): String? {
+        val v = tag.removePrefix("android-").removePrefix("v")
+        return v.takeIf { parse(it) != null && v != tag }
+    }
+
+    /** The newest version's part of a changelog: from its first "## " heading to the next one, without the heading. */
+    internal fun section(changelog: String): String {
+        val lines = changelog.lines()
+        val from = lines.indexOfFirst { it.startsWith("## ") }
+        if (from < 0) return ""
+        val to = (from + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
+        return lines.subList(from + 1, to).joinToString("\n").trim().take(8000)
+    }
+
+    /**
+     * Compares "1.2.3", "1.2.3-beta", "1.2.3-beta.2": numbers first; for the same numbers a release without a suffix
+     * is newer than one with it, and suffixes compare piece by piece (numbers as numbers, a longer one is newer).
+     */
+    internal fun compareVersions(a: String, b: String): Int {
+        val c = compare(parse(a) ?: listOf(0), parse(b) ?: listOf(0))
+        if (c != 0) return c
+        val sa = a.substringAfter('-', ""); val sb = b.substringAfter('-', "")
+        if (sa.isEmpty() || sb.isEmpty()) return (if (sa.isEmpty()) 1 else 0) - (if (sb.isEmpty()) 1 else 0)
+        val pa = sa.split('.'); val pb = sb.split('.')
+        for (i in 0 until minOf(pa.size, pb.size)) {
+            val na = pa[i].toIntOrNull(); val nb = pb[i].toIntOrNull()
+            val d = if (na != null && nb != null) na.compareTo(nb) else pa[i].compareTo(pb[i])
+            if (d != 0) return d
+        }
+        return pa.size - pb.size
     }
 
     private fun apkAsset(r: JSONObject): Pair<String, Long>? {

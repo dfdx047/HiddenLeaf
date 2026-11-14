@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- texture pack downloads and the update check -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- to tell Wi-Fi from mobile data: updates download by themselves only on a network without data charges -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- (the online match holds the Wi-Fi awake: OnlineGame.kt) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />

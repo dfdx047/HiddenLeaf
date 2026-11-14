@@ -91,6 +91,8 @@ nativo no Android, com launcher, controles por toque, mods e jogo online. Você 
 - Gerenciador de cartão de memória: importar e exportar `.ps2` com backup; importar pasta.
 - Cheats: desbloqueios gravados no save do jogo.
 - Pular a abertura (pelo START), atalho na tela inicial, layouts em retrato e paisagem.
+- **Atualização automática:** o app procura uma versão nova no GitHub ao abrir, mostra o que mudou, baixa (sozinho no
+  Wi-Fi, depois de perguntar nos dados móveis) e abre o instalador; os dados do jogo, ajustes e saves ficam.
 - Ícone novo: um ensō de tinta com uma folha escondida.
 - Português, inglês e espanhol.
 

@@ -88,6 +88,8 @@ code for Android, with a launcher, touch controls, mods and online play. You nee
 - Memory card manager: `.ps2` import and export with a backup; folder import.
 - Cheats: unlocks written to the game's save.
 - Skip intro (by START), home screen shortcut, portrait and landscape layouts.
+- **Automatic updates:** the app looks for a new version on GitHub when it opens, shows what changed, downloads it
+  (by itself on Wi-Fi, after asking on mobile data) and opens the installer; the game data, settings and saves stay.
 - New icon: an ink ensō with a hidden leaf.
 - Portuguese, English and Spanish.
 
