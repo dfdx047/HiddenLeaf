@@ -201,6 +201,34 @@ namespace
         log("online: the game's memory at field " + std::to_string(field) + " in " + name);
     }
 
+    // The way into the match (the developer, 2026-11-13: both players must land on the character select, not on the language screen):
+    // the first vsyncs of the match press the menus' buttons by themselves, the same on both phones because they go through the
+    // lockstep like any other input. Player 1 (the host) presses the European disc's route from boot to Free Battle's character
+    // select, the one the victory route of build/lab (env_victory.txt) took on every phone: English, the films and the title by
+    // START, New Game, Free Battle, its first choices. Player 2 presses START on the select to come in as 2P. Each press is held
+    // 6 vsyncs, as the test routes of Pad.cpp do. Until kEntryEnd the phones' own controllers are not read.
+    struct EntryStep
+    {
+        uint32_t at;
+        uint16_t buttons;
+        bool player1;
+    };
+    constexpr uint16_t kStart = 1u << 3, kUp = 1u << 4, kDown = 1u << 6, kCross = 1u << 14;
+    constexpr EntryStep kEntry[] = {
+        {650u, kCross, true},  {2866u, kStart, true}, {3116u, kStart, true}, {3306u, kUp, true},     {3436u, kCross, true},
+        {3965u, kDown, true},  {4001u, kCross, true}, {4373u, kCross, true}, {4409u, kCross, true}, {4700u, kStart, false},
+    };
+    constexpr uint32_t kEntryEnd = 4760u, kEntryHold = 6u;
+    bool g_entry = true; // (HL_ONLINE_ENTRY=0: the match starts at boot with the players' own controllers, as before)
+
+    uint16_t entryButtons(uint32_t field, bool player1)
+    {
+        for (const EntryStep &e : kEntry)
+            if (e.player1 == player1 && field >= e.at && field < e.at + kEntryHold)
+                return e.buttons;
+        return 0u;
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_prevVsync)
@@ -212,8 +240,13 @@ namespace
         static const long long s_dumpAt = std::getenv("HL_ONLINE_DUMP") ? std::atoll(std::getenv("HL_ONLINE_DUMP")) : -1;
         if (s_dumpAt >= 0 && g_match.running() && g_match.field() == static_cast<uint32_t>(s_dumpAt))
             dumpRam(runtime, g_match.field());
-        const unsigned buttons = g_hlPadButtons.load(std::memory_order_relaxed);
-        const unsigned axes = g_hlPadAxes.load(std::memory_order_relaxed); // lx | ly << 8 | rx << 16 | ry << 24
+        unsigned buttons = g_hlPadButtons.load(std::memory_order_relaxed);
+        unsigned axes = g_hlPadAxes.load(std::memory_order_relaxed); // lx | ly << 8 | rx << 16 | ry << 24
+        if (g_entry && g_match.running() && g_match.field() < kEntryEnd)
+        {
+            buttons = entryButtons(g_match.field(), g_match.iAmPlayer1());
+            axes = 0x80808080u;
+        }
         const uint8_t local[6] = {static_cast<uint8_t>(buttons), static_cast<uint8_t>(buttons >> 8), static_cast<uint8_t>(axes),
                                   static_cast<uint8_t>(axes >> 8), static_cast<uint8_t>(axes >> 16), static_cast<uint8_t>(axes >> 24)};
         uint8_t p1[6], p2[6];
@@ -268,6 +301,8 @@ bool hl_online::setup(const std::string &root)
     g_root = root;
     g_file = file;
     g_active = true;
+    if (const char *e = std::getenv("HL_ONLINE_ENTRY"))
+        g_entry = std::atoi(e) != 0;
 
     // a memory card of the match's own, empty: what the game finds at boot must be the same on both phones
     const std::string saves = dir + "/saves";
