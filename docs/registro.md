@@ -61,6 +61,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 11:50: v0.1.0-beta publicada como pré-lançamento (repositório ainda privado)
+
+- `main` avançada até `89f40f5` (fast-forward da `lab/bench-pcsx2`; antes de mandar, o histórico foi conferido sem
+  nenhum arquivo do jogo).
+- Release `v0.1.0-beta` (pré-lançamento) com `HiddenLeaf-v0.1.0-beta.apk` (180425122 bytes, o SHA-256 da entrada abaixo):
+  https://github.com/dfdx047/HiddenLeaf/releases/tag/v0.1.0-beta
+- O repositório continua **privado**: o desenvolvedor deixa público pelas configurações depois de postar o vídeo. Os
+  botões do shields.io e o contador de downloads só funcionam com o repositório público.
+
 ### 2026-11-14 11:40: v0.1.0-beta, APK de release, READMEs e changelogs em três línguas
 
 - O desenvolvedor já tinha testado e gravado o vídeo; pediu o release sem testar nenhum aparelho de novo.
