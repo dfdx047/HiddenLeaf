@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
+import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -340,9 +341,12 @@ class GameActivity : SDLActivity() {
         super.onResume()
         pad?.let { it.config = store.load() }
         handler.post(watchMenu)
+        runCatching { getSystemService(InputManager::class.java)?.registerInputDeviceListener(deviceListener, handler) }
+        controllerGone() // (one may have been taken away while the game was in the background)
     }
 
     override fun onPause() {
+        runCatching { getSystemService(InputManager::class.java)?.unregisterInputDeviceListener(deviceListener) }
         handler.removeCallbacks(watchMenu)
         stopNav()
         releaseInputs()
@@ -373,6 +377,38 @@ class GameActivity : SDLActivity() {
     }
 
     private fun pushPhysical() = TouchBridge.setPhysical(translator.buttons(), translator.lx, translator.ly, translator.rx, translator.ry)
+
+    /**
+     * The developer (2026-11-14): a controller that goes away in the middle of a game (out of battery, Bluetooth gone, the
+     * cable pulled) must bring the on-screen controls back at once, the player has nothing else to play with; online too,
+     * where the other phone does not wait. Its buttons are let go (a button held when it went would stay held).
+     */
+    private val deviceListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = Unit
+
+        override fun onInputDeviceRemoved(deviceId: Int) {
+            dpadKeyDevices.remove(deviceId)
+            val gone = sdlDown.filterValues { it == deviceId }.keys
+            for (code in gone) runCatching { SDLControllerManager.onNativePadUp(deviceId, code, 0) }
+            sdlDown.keys.removeAll(gone)
+            controllerGone()
+        }
+
+        override fun onInputDeviceChanged(deviceId: Int) = controllerGone()
+    }
+
+    /** No controller left: what it held is let go and the on-screen controls come back. */
+    private fun controllerGone() {
+        if (connectedControllers().isNotEmpty()) return
+        translator.reset()
+        pushPhysical()
+        held.clear()
+        val v = pad ?: return
+        if (v.hiddenForPad) {
+            v.hiddenForPad = false
+            v.view.invalidate()
+        }
+    }
 
     /** A physical controller in use: the on-screen one hides (automatic mode) until the screen is touched again. */
     private fun padUsed() {

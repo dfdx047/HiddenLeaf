@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +21,11 @@
 // a check value of the game's state at a field (`digest`): two sides that differ at the same field have diverged.
 class Lockstep {
 public:
+    // (for the log while a game waits: what each side holds and has acknowledged)
+    std::string stateText() const {
+        return "remote next " + std::to_string(remoteNext_) + ", floor " + std::to_string(floor_) + ", pushed to " + std::to_string(pushedEnd_) +
+               ", they hold to " + std::to_string(ackFromPeer_) + ", refused " + std::to_string(refused_);
+    }
     // The controller as the game's pad port gives it: the buttons (2 bytes, libpad's bits, 1 = pressed), then the sticks lx, ly, rx, ry
     using Sample = std::array<std::uint8_t, 6>;
     struct Pair {Sample p1, p2;};
@@ -63,6 +69,8 @@ public:
     bool desync() const {return desync_;}
     std::uint32_t desyncField() const {return desyncField_;}
     unsigned compared() const {return compared_;}          // check values of the two sides compared so far
+    unsigned mismatches() const {return mismatches_;}      // of those, the ones that were not the same
+    std::uint32_t lastMismatch() const {return lastMismatch_;}
 
     // What the meter shows, and what keeps the two clocks together: how far beyond the other's input each side is (BT3's `ahead`; on an
     // even line the two numbers are equal, and the side whose clock runs ahead has the larger one).
@@ -85,7 +93,8 @@ private:
     unsigned delay_ = 0;
     std::uint32_t pushedEnd_ = 0;     // one past the last field a local sample is held for (fields before `delay_` are neutral)
     std::uint32_t remoteNext_ = 0;    // the first field the other's sample is missing for
-    std::uint32_t ackFromPeer_ = 0;   // the other side holds this side's samples below this field
+    std::uint32_t ackFromPeer_ = 0;
+    std::uint32_t refused_ = 0;       // packets of the other side refused (bad sum, out of the window...)   // the other side holds this side's samples below this field
     std::uint32_t floor_ = 0;         // the game is past these fields: the other's samples below are dropped
     std::uint32_t localFloor_ = 0;    // this side's own samples below are dropped: only when the game is past them AND the other holds them
     std::int32_t peerAhead_ = 0;
@@ -94,6 +103,8 @@ private:
     bool desync_ = false;
     std::uint32_t desyncField_ = none;
     unsigned compared_ = 0;
+    unsigned mismatches_ = 0;
+    std::uint32_t lastMismatch_ = none;
     std::uint32_t lastCompared_ = none;
 
     Slot& L(std::uint32_t f) {return local_[f % ring];}

@@ -3,7 +3,8 @@
 //   - reads the session file once (and renames it, so the next start is an ordinary one);
 //   - makes the two games start alike: a fresh memory card of their own (<root>/online/saves), the same clock (HL_FIXED_CLOCK in the
 //     runtime's sceCdReadClock, patch 0097, and TZ=UTC for the system's time zone), every character open, the one-button special
-//     and the tap assist off (they change the game's pad in memory: both phones must do the same), the game's own 4:3 camera;
+//     and the tap assist off (they change the game's pad in memory: both phones must do the same); the camera is each phone's own
+//     (only the projection reads it: un5_main.cpp applyVideo);
 //   - from the first vsync runs the match (match_session.h) once per vsync, with this phone's pad, and hands the two players' pads to
 //     the game's two pad ports (the pad hook in the runtime's Pad.cpp, patch 0097): player 1, the room's creator, on the first port,
 //     player 2 on the second. Before the other game is there the first vsync waits (the screen stays black);
@@ -148,7 +149,16 @@ namespace
         // docs/online.md: between two phones (and between two speeds of one) these differ with the game still the same: the clock
         // (0x632241), two lists whose blocks change order (0x406000, 0x40D000) and the video structure that follows the picture's
         // settings (0x938000)
-        env.skip = {{0x406000u, 0x407000u}, {0x40D000u, 0x40E000u}, {0x632000u, 0x633000u}, {0x938000u, 0x939000u}};
+        env.skip = {{0x406000u, 0x407000u}, {0x40D000u, 0x40E000u}, {0x632000u, 0x633000u}, {0x938000u, 0x939000u},
+                    // ... and between two phones (Cube × Honor, RAM at fields 64 and 9000 of a fight, 2026-11-14), with the same fight on
+                    // both screens: the kernel's area (threads' stacks, two buffers each phone is on the other one of), the sound's samples,
+                    // 64-bit timestamps and counters that go by the phone's speed, blocks of a list in another order
+                    {0x0u, 0x100000u}, {0x633000u, 0x638000u}, {0x650000u, 0x656000u},
+                    {0x3E9F00u, 0x3EA100u}, {0x3EDEC0u, 0x3EDF00u}, {0x3F0F40u, 0x3F0FC0u}, {0x3F6180u, 0x3F6400u}, {0x3F7C00u, 0x3F7CC0u},
+                    {0x3FD640u, 0x3FD880u}, {0x3FDE80u, 0x3FDF40u}, {0x409440u, 0x409480u}, {0x4099C0u, 0x409CC0u}, {0x40EAC0u, 0x40EB00u},
+                    {0x40F300u, 0x40F380u}, {0x410E00u, 0x410E40u}, {0x61A100u, 0x61A140u}, {0x623A80u, 0x623AC0u}, {0x625A80u, 0x625AC0u},
+                    {0x62DDC0u, 0x62DE00u}, {0xC67600u, 0xC67640u}, {0xDE8E40u, 0xDE8E80u}, {0xDED180u, 0xDED1C0u}, {0xE973C0u, 0xE97400u},
+                    {0xE97BC0u, 0xE97C80u}, {0xE98240u, 0xE98280u}};
         readRanges(std::getenv("HL_ONLINE_SKIP"), env.skip);
         env.strictDesync = std::getenv("HL_ONLINE_STRICT") != nullptr;
         env.onWait = publishNow;
@@ -254,6 +264,14 @@ namespace
         {
             g_pads[0].store(pack(p1), std::memory_order_release);
             g_pads[1].store(pack(p2), std::memory_order_release);
+            g_padsOn.store(true, std::memory_order_release);
+        }
+        else if (g_match.ended())
+        {   // (the developer, 2026-11-14: after a drop each phone went on alone, both choosing 1P vs 2P. A match that is over stands
+            // still, both pads let go, until the player goes back to the menu from the app's notice)
+            const uint8_t still[6] = {0u, 0u, 0x80u, 0x80u, 0x80u, 0x80u};
+            g_pads[0].store(pack(still), std::memory_order_release);
+            g_pads[1].store(pack(still), std::memory_order_release);
             g_padsOn.store(true, std::memory_order_release);
         }
         else

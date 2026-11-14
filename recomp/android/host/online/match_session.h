@@ -50,7 +50,7 @@ public:
         Link::Channel channel;                  // the room's relay, when the app keeps one
         bool strictDesync = false;              // a difference of the state checks ends the match (else it is only said)
         unsigned meetTimeoutMs = 90000;         // how long the first game waits for the other's engine
-        unsigned silentRunningMs = 15000;       // how long the other game may say nothing during the match (a long load on its side)
+        unsigned silentRunningMs = 30000;       // how long the other game may say nothing during the match (a long load on its side)
     };
     enum class Phase {Meeting, Running, Ended};
 
@@ -104,6 +104,7 @@ private:
     std::atomic<Phase> phase_{Phase::Meeting};
     std::string reason_;
     std::uint32_t field_ = 0;
-    std::uint32_t upSince_ = 0, lastSend_ = 0, lastWaitCall_ = 0;
-    unsigned waits_ = 0, desyncs_ = 0;
+    std::uint32_t upSince_ = 0, lastSend_ = 0, lastWaitCall_ = 0, lastField_ = 0;
+    unsigned waits_ = 0, desyncs_ = 0, mismatchesSaid_ = 0;
+    std::uint32_t mismatchSaidAt_ = 0;
 };

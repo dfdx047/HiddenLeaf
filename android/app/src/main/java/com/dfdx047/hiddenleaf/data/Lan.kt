@@ -30,8 +30,13 @@ object Lan {
     /** The guest's join is said again every [JOIN_EVERY_MS] until an answer or [JOIN_TIMEOUT_MS]. */
     const val JOIN_EVERY_MS = 400L
     const val JOIN_TIMEOUT_MS = 6000L
-    /** After its accept the host keeps answering the guest's repeats this long before it hands the port to the engine. */
-    const val ACCEPT_LINGER_MS = 800L
+    /**
+     * After its accept the host keeps saying it, on its own every [ACCEPT_EVERY_MS] and to each of the guest's repeats, this long
+     * before it hands the port to the engine (2026-11-14: with 800 ms and answers only to repeats, a Honor's accept never reached an
+     * RG Cube on the same Wi-Fi: the host played alone for 90 s while the guest still asked to come in).
+     */
+    const val ACCEPT_LINGER_MS = 2500L
+    const val ACCEPT_EVERY_MS = 150L
     /** An open match or a search ends by itself after this long (nobody is left broadcasting all night). */
     const val HOST_MAX_MS = 10 * 60_000L
     const val SEARCH_MAX_MS = 5 * 60_000L
@@ -158,6 +163,31 @@ object Lan {
         }
         return out.toList()
     }
+
+    /**
+     * Every other address of this phone's Wi-Fi (or cable, or hotspot) network, its /24, for the beacon said to each one directly
+     * (2026-11-14: a Honor's broadcast beacon stopped reaching a Mi A3 on the router's other 5 GHz network, while packets sent to
+     * its address went through; a router does not always carry broadcasts from one of its networks to the other).
+     */
+    fun sweepTargets(): List<InetAddress> {
+        val out = ArrayList<InetAddress>()
+        runCatching {
+            for (i in NetworkInterface.getNetworkInterfaces().toList()) {
+                if (!i.isUp || i.isLoopback || !SWEEP_IFACE.containsMatchIn(i.name)) continue
+                for (a in i.interfaceAddresses) {
+                    val ip = a.address as? Inet4Address ?: continue
+                    if (!ip.isSiteLocalAddress || a.networkPrefixLength < 16) continue
+                    val b = ip.address
+                    for (last in 1..254) if (last != (b[3].toInt() and 0xFF)) out += InetAddress.getByAddress(byteArrayOf(b[0], b[1], b[2], last.toByte()))
+                }
+            }
+        }
+        return out
+    }
+    private val SWEEP_IFACE = Regex("^(wlan|swlan|eth|ap|rndis|usb)")
+
+    /** How often the host says its beacon to each address of its network (254 small packets a turn) while nobody has come. */
+    const val SWEEP_EVERY_MS = 3000L
 
     /**
      * Wi-Fi drivers drop broadcast and multicast packets for apps that did not ask (to save battery): the guest holds this lock

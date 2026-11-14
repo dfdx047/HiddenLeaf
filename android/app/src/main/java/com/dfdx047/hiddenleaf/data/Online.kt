@@ -71,7 +71,9 @@ object Online {
 
     /** What must be the same on both phones for the two games to stay the same: the app's build, the engine and the mods switched on. */
     fun fingerprint(context: Context, paths: GamePaths): String {
-        val lib = runCatching { EngineBridge.libraryFor(context, paths.activeMods) }.getOrDefault("un5")
+        // (the older processors' build, libun5_v80.so on the Mi A3, is the same game code compiled for ARMv8.0: it plays with the
+        // others, so its suffix is not part of the name; the match's memory checks say if the two ever differ)
+        val lib = runCatching { EngineBridge.libraryFor(context, paths.activeMods) }.getOrDefault("un5").removeSuffix("_v80")
         // (the engine's list of mods switched on: "modlib/<id>/disc" a line)
         val enabled = runCatching { paths.activeMods.readLines() }.getOrDefault(emptyList())
             .map { it.trim().removePrefix("modlib/").substringBefore('/') }.filter { it.isNotEmpty() }
@@ -593,7 +595,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
         val p = prefs.state.value
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val s = openSocket().apply { broadcast = true; soTimeout = 200 }
+                val s = openSocket().apply { broadcast = true; soTimeout = 100 }
                 val addrs = Online.localAddresses(s.localPort)
                 if (addrs.isEmpty()) {
                     _state.value = LobbyState.Failed(R.string.lan_err_no_network)
@@ -606,13 +608,22 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 ActivityLog.info("online", "local match $room open on port ${s.localPort}, addresses ${addrs.joinToString()}")
                 val began = System.currentTimeMillis()
                 var lastBeacon = 0L
+                var lastSweep = 0L
                 var targets = Lan.broadcastTargets()
                 var guest: Lan.Join? = null
                 var guestFrom = ""
                 var acceptedAt = 0L
+                var acceptTo: java.net.SocketAddress? = null
+                var acceptBytes: ByteArray? = null
+                var lastAccept = 0L
                 val buf = ByteArray(1500)
                 while (isActive) {
                     val now = System.currentTimeMillis()
+                    // (the accept said again without waiting for the guest's repeat: a lost one costs 150 ms, not the match)
+                    if (acceptTo != null && acceptBytes != null && now - lastAccept >= Lan.ACCEPT_EVERY_MS) {
+                        lastAccept = now
+                        runCatching { s.send(DatagramPacket(acceptBytes, acceptBytes.size, acceptTo)) }
+                    }
                     if (guest != null && now - acceptedAt >= Lan.ACCEPT_LINGER_MS) {
                         ActivityLog.info("online", "local match $room: ${guest.name} joined from $guestFrom, addresses ${guest.addrs.joinToString()}")
                         val peerAddrs = listOf(guestFrom) + guest.addrs
@@ -628,6 +639,11 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                         if (lastBeacon != 0L && (now / 1000) % 10 == 0L) targets = Lan.broadcastTargets() // (the Wi-Fi may have changed)
                         lastBeacon = now
                         for (t in targets) runCatching { s.send(DatagramPacket(beacon, beacon.size, t, Lan.PORT)) }
+                    }
+                    // (and to each address of the network directly, where the router keeps broadcasts from the guest)
+                    if (guest == null && now - lastSweep >= Lan.SWEEP_EVERY_MS) {
+                        lastSweep = now
+                        for (t in Lan.sweepTargets()) runCatching { s.send(DatagramPacket(beacon, beacon.size, t, Lan.PORT)) }
                     }
                     val packet = DatagramPacket(buf, buf.size)
                     try {
@@ -652,6 +668,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                     }
                     if (answer is Lan.Reject) ActivityLog.info("online", "local match $room: refused ${join.name} (${answer.why}, their fp ${join.fp})")
                     val bytes = Lan.encode(answer)
+                    if (answer is Lan.Accept && acceptTo == null) {acceptTo = packet.socketAddress; acceptBytes = bytes; lastAccept = System.currentTimeMillis()}
                     runCatching { s.send(DatagramPacket(bytes, bytes.size, packet.socketAddress)) }
                 }
             } catch (e: java.io.IOException) {

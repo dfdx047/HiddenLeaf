@@ -50,6 +50,8 @@
     <string name="online_game_no_meet">O jogo de %1$s não abriu. Saia e crie outra sala.</string>
     <string name="online_game_desync_end">Os dois jogos se separaram: a partida acabou.</string>
     <string name="online_game_lost">A conexão com %1$s caiu.</string>
+    <string name="online_game_end_title">Fim da partida</string>
+    <string name="online_game_back">Voltar ao menu</string>
     <string name="online_game_failed">A partida não pôde começar (rede).</string>
 
     <!-- Rede local (data/Lan.kt) -->

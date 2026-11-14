@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- texture pack downloads and the update check -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- (the online match holds the Wi-Fi awake: OnlineGame.kt) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- local network play (data/Lan.kt): the Wi-Fi driver passes the matches' broadcasts on only while the app holds a multicast lock -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- installing an update that was downloaded in the app -->

@@ -97,11 +97,11 @@ std::size_t Lockstep::makePacket(std::uint8_t* out, std::size_t cap, std::uint32
 bool Lockstep::receive(const std::uint8_t* in, std::size_t size) {
     if (!active_ || size < head) return false;
     const std::size_t count = in[12];
-    if (count > max_samples || size != head + count * 6 || (in[14] | in[15] << 8) != mark || get32(in + 28) != check(in, size)) return false;
+    if (count > max_samples || size != head + count * 6 || (in[14] | in[15] << 8) != mark || get32(in + 28) != check(in, size)) {++refused_; return false;}
     const std::uint32_t first = get32(in), ack = get32(in + 4);
     // Whatever field the sample is for must fit in what is kept: from this side's floor to half the ring beyond what it already holds.
-    if (first > remoteNext_ + ring / 2 || first + count > floor_ + ring) return false;
-    if (ack > pushedEnd_) return false;                 // (it cannot hold samples this side has not made)
+    if (first > remoteNext_ + ring / 2 || first + count > floor_ + ring) {++refused_; return false;}
+    if (ack > pushedEnd_) {++refused_; return false;}                 // (it cannot hold samples this side has not made)
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint32_t f = first + std::uint32_t(i);
         if (f < remoteNext_ || f < delay_) continue;
@@ -145,5 +145,8 @@ void Lockstep::compare(std::uint32_t field, std::uint64_t theirValue) {
     if (m.field != field || field == lastCompared_) return;   // (the check value is in every packet: each field counts once)
     lastCompared_ = field;
     ++compared_;
-    if (m.value != theirValue && !desync_) {desync_ = true; desyncField_ = field;}
+    if (m.value == theirValue) return;
+    ++mismatches_;
+    lastMismatch_ = field;
+    if (!desync_) {desync_ = true; desyncField_ = field;}
 }

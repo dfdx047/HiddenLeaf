@@ -77,3 +77,12 @@ if [ ! -e "$assets/version.txt" ] || ! cmp -s "$assets/version.txt" "$DR/android
     cp -r "$DR/android/app/src/main/assets/bt4gsx" "$assets"
 fi
 ls -la "$jni" | sed 's/^/  /'
+# (2026-11-14: the APK carried a libun5_v80.so a day older than libun5.so, and the Mi A3, which loads it, could not play online
+# with the others: every build of one wants the other built again)
+for f in "$jni"/libun5*.so; do
+    case "$f" in *_v80.so) other="${f%_v80.so}.so" ;; *) other="${f%.so}_v80.so" ;; esac
+    if [ -e "$other" ] && [ $(( $(stat -c %Y "$f") - $(stat -c %Y "$other") )) -gt 600 ]; then
+        echo "WARNING: $(basename "$other") is older than $(basename "$f"): build it again" >&2
+    fi
+done
+exit 0

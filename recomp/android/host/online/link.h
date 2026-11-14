@@ -24,6 +24,10 @@
 // room's code), a number, and the sender's clock in milliseconds (echoed back by a PONG); then the message, if any.
 class Link {
 public:
+    std::uint32_t packetsIn() const {return got_;}   // (for the log while a game waits)
+    std::uint32_t packetsOut() const {return sent_;}
+    std::uint32_t sendsFailed() const {return sendFailed_;}   // (sendto refused them: the phone could not send)
+    int lastSendErrno() const {return lastSendErrno_;}
     enum State {Closed, Open, Linking, Up, Failed};
 
     // The relay's channel: `send` hands one packet to the relay (false: it is not connected), `receive` gives the next packet that came
@@ -87,7 +91,8 @@ private:
     bool testNoDirect_ = false;
     std::uint32_t giveUp_ = 15000;
     std::uint32_t lossState_ = 2463534242u;
-    std::uint32_t sent_ = 0, got_ = 0, foreign_ = 0, lastNote_ = 0;
+    std::uint32_t sent_ = 0, got_ = 0, foreign_ = 0, lastNote_ = 0, sendFailed_ = 0;
+    int lastSendErrno_ = 0;
     Candidate lastForeign_;
     State state_ = Closed;
     std::uint16_t port_ = 0;

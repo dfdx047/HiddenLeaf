@@ -103,7 +103,7 @@ void MatchSession::end(const std::string& why, bool said) {
     reason_ = why;
     phase_ = Phase::Ended;
     log("online: the match ends: " + why + " (" + std::to_string(field_) + " fields played, " + std::to_string(waits_) + " waited for, " +
-        std::to_string(desyncs_) + " state differences)");
+        std::to_string(lock_.mismatches()) + " of " + std::to_string(lock_.compared()) + " check values differed)");
     link_.close();
     if (env_.onEnded) env_.onEnded(why);
 }
@@ -145,6 +145,15 @@ std::uint64_t MatchSession::digestOf(const std::uint8_t* ram, std::size_t size, 
 int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std::uint8_t p2[6]) {
     if (!active_ || phase_ == Phase::Ended) return 0;      // (a match that is over: the game goes on with the phone's own pad)
     if (leaveRequested_.load(std::memory_order_acquire)) {end("the player left", false); return 0;}
+    // (2026-11-14: a match died after 15 s of silence near the character select; the line only says something when the game comes
+    // here, so a game busy elsewhere for long is mute: say how long it was away)
+    if (phase_ == Phase::Running) {
+        const std::uint32_t t0 = now();
+        if (lastField_ && t0 - lastField_ > 1000)
+            log("online: this game was away " + std::to_string(t0 - lastField_) + " ms before field " + std::to_string(field_) + " (link silent " +
+                std::to_string(link_.silentMs()) + " ms)");
+        lastField_ = t0;
+    }
     pump();
     if (const char* bad = lineBad()) {end(bad, link_.peerLeft()); return 0;}
     if (phase_ == Phase::Meeting) {
@@ -175,7 +184,16 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
     sendInputs();
     if (!lock_.ready(field_)) {
         ++waits_;
+        const std::uint32_t waitFrom = now();
+        std::uint32_t nextNote = waitFrom + 2000;
         while (!lock_.ready(field_)) {
+            if (now() >= nextNote) {
+                nextNote += 2000;
+                log("online: waiting " + std::to_string(now() - waitFrom) + " ms for the other's field " + std::to_string(field_) + "; link silent " +
+                    std::to_string(link_.silentMs()) + " ms, packets in " + std::to_string(link_.packetsIn()) + ", out " + std::to_string(link_.packetsOut()) +
+                    (link_.sendsFailed() ? " (" + std::to_string(link_.sendsFailed()) + " refused by the phone, errno " + std::to_string(link_.lastSendErrno()) + ")" : "") +
+                    "; " + lock_.stateText());
+            }
             pump();
             if (const char* bad = lineBad()) {end(bad, link_.peerLeft()); return 0;}
             if (leaveRequested_.load(std::memory_order_acquire)) {end("the player left", false); return 0;}
@@ -183,6 +201,7 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
             waited();
             sleep(1);
         }
+        lastField_ = now();
     }
     if (field_ % Lockstep::digest_every == 0) lock_.noteDigest(field_, digestOf(env_.ram, env_.ramSize, env_.skip, field_));
     if (lock_.desync() && !desyncSaid_) {
@@ -190,6 +209,13 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
         ++desyncs_;
         log("online: the two games differ at field " + std::to_string(lock_.desyncField()) + " (the check values of the memory are not the same)");
         if (env_.strictDesync) {end("the two games are no longer the same", false); return 0;}
+    }
+    // (every later difference too, at most one line each 2 s: which fields still differ tells a counter of the boot from a match gone apart)
+    if (lock_.mismatches() > mismatchesSaid_ && now() - mismatchSaidAt_ >= 2000) {
+        log("online: the check values differ at field " + std::to_string(lock_.lastMismatch()) + " (" + std::to_string(lock_.mismatches()) +
+            " of " + std::to_string(lock_.compared()) + " compared so far)");
+        mismatchesSaid_ = lock_.mismatches();
+        mismatchSaidAt_ = now();
     }
     const Lockstep::Pair pair = lock_.pair(field_);
     std::memcpy(p1, pair.p1.data(), 6);

@@ -61,6 +61,41 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 08:00: rede local segura a luta inteira (Cube × Honor, Cube × Poco, Poco × Honor); tela cheia no online; controle que some
+
+Pedidos do desenvolvedor: testar o Cube no Wi-Fi com o Honor ou o Poco; depois, "a tela comece inteira e preenchida em
+ambos" (rede local e online), toque × controle externo em qualquer combinação, e os controles na tela voltando se o
+controle externo sumir no meio do jogo.
+
+- **Rede local, partidas de prova** (Cube 5 GHz Wi-Fi 7, Honor 5 GHz Wi-Fi 7, Poco 2,4 GHz Wi-Fi 7, mesma rede `/24`;
+  botões apertados ao acaso nos dois): Cube × Honor 6 min de luta, Cube × Poco 5 min, Poco × Honor 4 min, **0 esperas e
+  nenhuma queda**, a mesma imagem nos dois no mesmo instante (cronômetro igual). Ligação em 2 a 14 ms, ida e volta 4 a 9 ms.
+  A falha das noites anteriores era o Honor fora do Wi-Fi (o Wi-Fi+ dele, `hn_wifipro_enable`, o tira da rede).
+- **APK antigo no Poco e no Cube** (13/11): instalado o atual. O Poco tinha a Versão Brasileira ligada (o online só
+  aceita o jogo base): desliguei em Mais → Mods para o teste; volta a ligar ali.
+- **Verificação da memória:** agora conta toda diferença (não só a primeira) e loga no máximo uma linha a cada 2 s
+  (`the check values differ at field N (x of y compared so far)`); o fim da partida diz quantas diferiram. Com dumps
+  (`HL_ONLINE_DUMP`) nas quadras 64 e 9000 de uma luta Cube × Honor: o que difere são a área do kernel (pilhas, dois
+  buffers que cada aparelho usa ao contrário), amostras de som (`0x633000`, `0x650000`), carimbos de tempo de 64 bits
+  e contadores do boot que andam com a velocidade do aparelho, blocos de lista em outra ordem. Entraram na lista de
+  exclusão (`hl_online.cpp`). Ainda sobram diferenças em outros pares (~40% das comparações no Poco × Honor): falta
+  mapear; não muda a luta.
+- **O gerador aleatório do jogo** é o `rand` da newlib em `0x17C558`, estado de 64 bits em `*(0x412DD8)+0xA8`. Igual nos
+  dois aparelhos na quadra 9000 (Cube × Honor e Poco × Honor).
+- **Tela cheia no online:** a partida forçava a câmera 4:3 nos dois (barras pretas no Honor e no Poco). A escala da
+  câmera (`camera+0x274`) só é lida pela projeção (`0x10DD00`, `0x10F420`, copiada por `0x1C01B0`). Prova: Poco forçado
+  em 4:3 × Honor em 20:9 (`x 0.610`), luta com botões ao acaso, dump na quadra 9000: o estado do `rand` **igual**,
+  as diferenças são de desenho (pacotes, coordenadas de tela, ordem do heap) e 90 s depois as duas telas mostravam o
+  mesmo (cronômetro 6, mesmas posições, o mesmo kunai). Agora cada aparelho usa a câmera da própria tela no online
+  (`un5_main.cpp applyVideo`): do logo da Bandai Namco à seleção de personagem a imagem enche os 20:9 do Honor e do Poco.
+- **Controles:** o motor já junta toque, controle traduzido e o controle do SDL no pad do jogador de cada aparelho, então
+  toque × controle e qualquer combinação passam pelo mesmo caminho. Novo: (1) o controle do SDL que desconecta é fechado
+  e o próximo conectado é aberto (antes ficava o primeiro para sempre); (2) `GameActivity` escuta o `InputManager`: sem
+  nenhum controle ligado, os botões presos são soltos e os controles na tela voltam na hora (antes só voltavam ao tocar
+  na tela). **Não testado com controle de verdade** (nenhum controle Bluetooth aqui).
+- Achado: com o app em segundo plano o Android recusa os envios (`sendto` errno 1, EPERM); o outro aparelho espera e a
+  partida cai por silêncio, como deve.
+
 ### 2026-11-14: "Naruto Online" no Mode Select do jogo (protótipo no PC, desligado por padrão); não testado em aparelho
 
 Pedido do desenvolvedor: uma entrada "Naruto Online" no próprio Mode Select, logo abaixo do Free Battle, que leve ao lobby

@@ -49,6 +49,11 @@ bool Link::open(std::uint16_t wanted) {
     socket_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_ < 0) return false;
     ::fcntl(socket_, F_SETFL, ::fcntl(socket_, F_GETFL, 0) | O_NONBLOCK);
+    // (2026-11-14: on a home Wi-Fi the packets of a LAN match went missing for whole seconds; marked as voice (DSCP EF), the
+    // phone's Wi-Fi and the router put them in their first queue (WMM voice), as games and calls do)
+    const int tos = 0xB8, priority = 6;
+    ::setsockopt(socket_, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
+    ::setsockopt(socket_, SOL_SOCKET, SO_PRIORITY, &priority, sizeof priority);
     sockaddr_in any{};
     any.sin_family = AF_INET;
     any.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -172,7 +177,7 @@ void Link::send(std::uint8_t type, std::uint32_t number, std::uint32_t echo, con
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = to.ip;
     a.sin_port = htons(to.port);
-    ::sendto(socket_, p, total, 0, reinterpret_cast<sockaddr*>(&a), sizeof a);
+    if (::sendto(socket_, p, total, 0, reinterpret_cast<sockaddr*>(&a), sizeof a) < 0) {++sendFailed_; lastSendErrno_ = errno;}
 }
 
 bool Link::peerAddress(std::string& out) const {

@@ -260,8 +260,10 @@ namespace
         if (shape > screen) // (the screen's width is all there is)
             shape = screen;
         const float game = 4.0f / 3.0f;
-        // (an online match keeps the game's own camera: what it sees must be the same on both phones, whatever their screens)
-        const float x = shape > game + 0.01f && !hl_online::active() ? game / shape : 1.0f;
+        // (online too, each phone with its own screen's camera: the developer, 2026-11-14, wants the picture whole and filling the
+        // screen on both phones. The scale at camera+0x274 is read by the projection only (0x10DD00, 0x10F420, copied by
+        // 0x1C01B0); a fight with one phone at 20:9 and the other at 4:3 kept the same memory, docs/registro.md 2026-11-14)
+        const float x = shape > game + 0.01f ? game / shape : 1.0f;
         hl_game::g_cameraXScale.store(x, std::memory_order_relaxed);
         if (g_gsxSetVideo)
         {
@@ -342,6 +344,12 @@ namespace
     {
         unsigned buttons = g_touchButtons.load(std::memory_order_relaxed);
         unsigned axes = g_touchAxes.load(std::memory_order_relaxed);
+        // (a controller gone in the middle of a game: let go, and the next one connected is opened; the developer, 2026-11-14)
+        if (g_pad && !SDL_GamepadConnected(g_pad))
+        {
+            SDL_CloseGamepad(g_pad);
+            g_pad = nullptr;
+        }
         if (!g_pad)
         {
             int count = 0;

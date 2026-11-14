@@ -50,6 +50,8 @@
     <string name="online_game_no_meet">%1$s\'s game did not start. Quit and create a new room.</string>
     <string name="online_game_desync_end">The two games went apart: the match ended.</string>
     <string name="online_game_lost">The connection to %1$s was lost.</string>
+    <string name="online_game_end_title">Match over</string>
+    <string name="online_game_back">Back to the menu</string>
     <string name="online_game_failed">The match could not start (network).</string>
 
     <!-- Local network play (data/Lan.kt) -->
