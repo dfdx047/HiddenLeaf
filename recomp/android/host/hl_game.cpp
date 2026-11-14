@@ -1029,6 +1029,16 @@ namespace
         {
             std::fprintf(stderr, "[online] menu chosen (v%llu)\n", static_cast<unsigned long long>(g_tick));
             hl_game::g_onlineMenu.fetch_add(1, std::memory_order_relaxed);
+            if (hl_game::g_menuOnline.load(std::memory_order_relaxed))
+            {   // (the developer, 2026-11-14: on Android the app's online panel opens over the Mode Select, and the game's message
+                // box showed through it. No box there: the Mode Select stays as it is behind the panel, with the game's "chosen"
+                // sound, the one argument of 0x1DD470; the EE's registers as they were for the caller)
+                const R5900Context saved = *ctx;
+                SET_GPR_U32(ctx, 4, kSoundChosen);
+                g_playSoundOriginal(rdram, ctx, runtime);
+                *ctx = saved;
+                return;
+            }
             g_onlineSound = true; // the game's "chosen" sound instead of its "refused" one
             g_onlineSoundTick = g_tick;
         }

@@ -61,6 +61,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 08:58: sem a caixa do jogo atrás do painel online
+
+- O desenvolvedor achou estranha a caixa de mensagem do jogo ("Naruto Online / Quick Match, Create Room or Join Room")
+  aparecendo por baixo do painel. No Android (`g_menuOnline`), o gancho de `0x395F20` não chama mais a função do jogo
+  quando o Online é escolhido: a Mode Select fica como está e toca só o som de "escolhido" (`0x1DD470` com `a0 = 0x58`,
+  registradores do EE guardados e restaurados em volta). No PC (`HL_MENU_ONLINE=1`, sem painel), a caixa continua.
+- Honor e Poco: o painel abre só com o Naruto à direita; fechando (○/Voltar) a Mode Select responde normal e o Online
+  abre de novo.
+
 ### 2026-11-14 08:50: menu online dentro do jogo e ida rápida até a seleção de personagem
 
 - **Pedido:** o "Online" da Mode Select abre um menu próprio dentro do jogo, sem voltar ao launcher (partida rápida, criar
