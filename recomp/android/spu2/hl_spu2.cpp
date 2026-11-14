@@ -2,6 +2,7 @@
 // is the part of pcsx2/SPU2/spu2.cpp that is not about PCSX2's output stream and settings, and the ties to the IOP: its
 // registers, DMA channels 4 and 7, its interrupts, its clock. Everything runs on the thread of the IOP.
 // HL_SPU2=0 leaves the IOP's old stand-in (no sound).
+#include <atomic>
 #include "SPU2/defs.h"
 #include "SPU2/spu2.h"
 #include "SPU2/Dma.h"
@@ -51,6 +52,7 @@ namespace
     // ---- the output: 48 kHz stereo to SDL. The samples come in bursts (the IOP advances with the game's work inside each
     // vsync), so the stream holds some back before it starts, and again after running dry.
     SDL_AudioStream *s_stream = nullptr;
+    std::atomic<bool> s_muted{false};
     constexpr uint32_t kChunkFrames = 256u;
     constexpr int kBytesPerFrame = 2 * static_cast<int>(sizeof(float));
     constexpr int kStartBytes = 48000 * kBytesPerFrame * 70 / 1000;
@@ -144,6 +146,8 @@ namespace
         }
         if (queued > kMaxBytes)
             return; // (the game ran ahead of real time: HL_FAST_UNTIL)
+        if (s_muted.load(std::memory_order_relaxed))
+            return; // (the online match's way to the character select, run fast and unheard)
         if (s_playing && queued == 0)
         {
             SDL_PauseAudioStreamDevice(s_stream);
@@ -473,6 +477,14 @@ void hl_spu2_install()
     s_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (!s_stream)
         std::fprintf(stderr, "[spu2] no audio stream: %s\n", SDL_GetError());
+}
+
+// The online match's way into the character select (hl_online.cpp): the game runs there fast, its menus unheard.
+void hl_spu2_mute(bool muted)
+{
+    s_muted.store(muted, std::memory_order_relaxed);
+    if (muted && s_stream)
+        SDL_ClearAudioStream(s_stream);
 }
 
 // The panel's pause: the queued sound stays where it is.

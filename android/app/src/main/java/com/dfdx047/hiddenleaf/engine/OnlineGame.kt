@@ -120,6 +120,7 @@ class OnlineGame private constructor(private val activity: Activity, private val
         })
         root = layout
         text = t
+        addCover(layout)
         t.post(object : Runnable {
             override fun run() {
                 if (!running) return
@@ -130,12 +131,92 @@ class OnlineGame private constructor(private val activity: Activity, private val
         if (relayUrl != null) startRelay(relayUrl)
     }
 
+    // ---- the loading cover (the developer, 2026-11-14: from the game's online menu the match must open on the character select).
+    // The engine presses the way from the boot to Free Battle's 1P vs 2P select by itself, the same on both phones (hl_online.cpp,
+    // kEntry, until vsync 4760): this cover hides it, with how far it is, and goes when the select is on screen.
+    private var cover: View? = null
+    private var coverLine: TextView? = null
+    private var coverBar: View? = null
+    private var coverTrack: FrameLayout? = null
+
+    private fun addCover(layout: ViewGroup) {
+        val r = activity.resources
+        val c = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF2A160A.toInt(), 0xFF120A05.toInt(), 0xFF2A160A.toInt()))
+            isClickable = true // (nothing reaches the game or the controls while it is up)
+        }
+        c.addView(TextView(activity).apply {
+            gravity = Gravity.CENTER
+            text = "Naruto Online"
+            typeface = font(R.font.shojumaru_regular, Typeface.DEFAULT_BOLD)
+            textSize = 34f
+            setTextColor(GOLD)
+            setShadowLayer(4f, 3f, 3f, 0xFF000000.toInt())
+        })
+        c.addView(TextView(activity).apply {
+            gravity = Gravity.CENTER
+            text = r.getString(R.string.ingame_cover_vs, peer)
+            typeface = font(R.font.kanit_semibold, Typeface.DEFAULT_BOLD)
+            textSize = 18f
+            setTextColor(CREAM)
+            setPadding(0, dp(4f).toInt(), 0, dp(14f).toInt())
+        })
+        val track = FrameLayout(activity).apply {
+            background = GradientDrawable().apply { setColor(0xFF4A2A12.toInt()); cornerRadius = dp(6f); setStroke(dp(2f).toInt(), 0xFF000000.toInt()) }
+        }
+        val bar = View(activity).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(ORANGE_DEEP, ORANGE)).apply { cornerRadius = dp(6f) }
+        }
+        track.addView(bar, FrameLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT))
+        c.addView(track, LinearLayout.LayoutParams(dp(320f).toInt(), dp(14f).toInt()))
+        val line = TextView(activity).apply {
+            gravity = Gravity.CENTER
+            text = r.getString(R.string.ingame_cover_linking, peer)
+            typeface = font(R.font.kanit_semibold, Typeface.DEFAULT_BOLD)
+            textSize = 14f
+            setTextColor(CREAM)
+            setPadding(0, dp(10f).toInt(), 0, 0)
+        }
+        c.addView(line)
+        layout.addView(c, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        cover = c
+        coverLine = line
+        coverBar = bar
+        coverTrack = track
+    }
+
+    private fun updateCover(phase: String, field: Int) {
+        val c = cover ?: return
+        // (each phone runs the way in alone and at its own speed (hl_online.cpp): the faster one then waits at its end for the other,
+        // the cover still up, until the lockstep moves)
+        if (phase == "over" || phase == "failed" || field >= ENTRY_END + 8) {
+            cover = null
+            c.animate().alpha(0f).setDuration(400).withEndAction { (c.parent as? ViewGroup)?.removeView(c) }.start()
+            return
+        }
+        val r = activity.resources
+        coverLine?.text = when {
+            phase != "playing" -> r.getString(R.string.ingame_cover_linking, peer)
+            field >= ENTRY_END -> r.getString(R.string.online_waiting_peer, peer)
+            else -> r.getString(R.string.ingame_cover_entering)
+        }
+        val w = coverTrack?.width ?: 0
+        coverBar?.let { b ->
+            val lp = b.layoutParams
+            lp.width = (w * (field.coerceIn(0, ENTRY_END).toFloat() / ENTRY_END)).toInt()
+            b.layoutParams = lp
+        }
+    }
+
     private var shownSince = 0L
     private var lastPhase = ""
     private var endShown = false
 
     private fun show(t: TextView, s: Map<String, String>) {
         val phase = s["phase"] ?: "starting"
+        updateCover(phase, s["field"]?.toIntOrNull() ?: 0)
         if (phase != lastPhase) {
             lastPhase = phase
             shownSince = System.currentTimeMillis()
@@ -147,7 +228,9 @@ class OnlineGame private constructor(private val activity: Activity, private val
                 val rtt = s["rtt"]?.toIntOrNull() ?: -1
                 val side = if (s["p1"] == "1") "P1" else "P2"
                 val via = if (s["relay"] == "1") r.getString(R.string.online_game_via_relay) else ""
-                val desync = if ((s["desyncs"]?.toIntOrNull() ?: 0) > 0) r.getString(R.string.online_game_desync) else ""
+                // (the memory check still differs in places outside the fight (2026-11-14, not mapped yet) while both screens
+                // stay the same: the line no longer says "the games differ" from it; the log keeps every difference)
+                val desync = ""
                 // (once it is going the line keeps to a corner and says little: the ping and the side)
                 r.getString(R.string.online_game_playing, side, peer, if (rtt >= 0) "$rtt ms" else "?",
                     // (the delay is in vsyncs of 20 ms)
@@ -174,7 +257,7 @@ class OnlineGame private constructor(private val activity: Activity, private val
             showEnd(line)
         }
         // the line fades when the match is going well, so it is not in the way
-        t.alpha = if (phase == "playing" && System.currentTimeMillis() - shownSince > 6000 && (s["desyncs"]?.toIntOrNull() ?: 0) == 0) 0.55f else 1f
+        t.alpha = if (phase == "playing" && System.currentTimeMillis() - shownSince > 6000) 0.55f else 1f
     }
 
     private fun startRelay(url: String) {
@@ -213,6 +296,9 @@ class OnlineGame private constructor(private val activity: Activity, private val
     companion object {
         // (ui/theme/Color.kt's Konoha.NarutoOrange, NarutoOrangeDeep and the launcher's text colour)
         private const val ORANGE = 0xFFFF7A1A.toInt()
+        private const val GOLD = 0xFFFFE6A0.toInt()
+        /** The vsync the engine's way into the match ends at (hl_online.cpp, kEntryEnd): the character select is there. */
+        private const val ENTRY_END = 4760
         private const val ORANGE_DEEP = 0xFFE2560B.toInt()
         private const val CREAM = 0xFFEDE6DE.toInt()
 

@@ -61,6 +61,31 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 08:50: menu online dentro do jogo e ida rápida até a seleção de personagem
+
+- **Pedido:** o "Online" da Mode Select abre um menu próprio dentro do jogo, sem voltar ao launcher (partida rápida, criar
+  sala, entrar com código, Wi-Fi local), e quem acha um jogador cai direto na seleção de personagem, sem ver os menus
+  passando nem ouvir a música deles.
+- **Menu (`engine/OnlineMenu.kt`):** painel à esquerda, por cima das placas da Mode Select, com tábuas de madeira, letras
+  Shojumaru douradas e laranja no foco. O jogo **não pausa**: o Naruto da direita segue animado e a música continua; só os
+  botões são segurados (`TouchBridge.setPadHeld`, `g_padHeld` em `un5_main.cpp`). Controle: D-pad/analógico movem, ✕
+  escolhe, ○/△/Voltar voltam (sai da busca/sala, depois da página, depois do menu). Teclado de 6 dígitos próprio para o
+  código; Cancelar também na busca da rede local (toque não tem ○ ali). O lobby é o do launcher (`OnlineLobby`).
+- **Entrada na partida:** com a sessão gravada, o processo `:game` sai e `OnlineRestartActivity` (processo do launcher,
+  tela preta) espera ele sumir e abre o jogo de novo.
+- **Ida rápida:** os primeiros 4760 campos da partida (a rota `kEntry` do boot até o 1P × 2P) são iguais nos dois
+  celulares, então cada um corre sozinho (`MatchSession::Env::localUntil/localPads`, sem esperar o outro, o link segue
+  com pings) com `HL_FAST_UNTIL=4760` (vblank contado em ciclos do EE: o jogo é o mesmo, só mais cedo) e o som mudo
+  (`hl_spu2_mute`). O lockstep começa no campo 4760 com campos relativos (`lockField()`). Uma tela "Naruto Online —
+  Você contra X" com barra cobre o trecho e sai quando o lockstep anda (`OnlineGame.kt`, `ENTRY_END + 8`); quem chega
+  primeiro vê "Esperando X…".
+- **Medido (Honor × Poco):** Honor 12–14 s, Poco 28 s até a seleção (antes ~95 s). Sala por código (721389) e partida
+  rápida pela internet, conexão direta 11–21 ms; Wi-Fi local (criar/procurar) pelo menu também. Luta Naruto × Zabuza
+  depois da ida rápida igual quadro a quadro nos dois.
+- A linha de status não mostra mais "os jogos diferem" pela conferência de memória (ainda há trechos fora da luta que
+  diferem, sem mapear; as telas seguem iguais); o log continua contando.
+- Falta: Cube/Mi A3 com o menu novo; controle físico no painel testado só por código.
+
 ### 2026-11-14 08:00: rede local segura a luta inteira (Cube × Honor, Cube × Poco, Poco × Honor); tela cheia no online; controle que some
 
 Pedidos do desenvolvedor: testar o Cube no Wi-Fi com o Honor ou o Poco; depois, "a tela comece inteira e preenchida em

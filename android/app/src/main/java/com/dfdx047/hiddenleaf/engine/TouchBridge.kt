@@ -46,6 +46,13 @@ object TouchBridge {
 
     fun presentRate(): Int = runCatching { nativePresentRate() }.getOrDefault(0)
 
+    @JvmStatic external fun nativeSetPadHeld(held: Boolean)
+
+    /** The online menu over the game: the game goes on, but the pads do not reach it. */
+    fun setPadHeld(held: Boolean) {
+        runCatching { nativeSetPadHeld(held) }
+    }
+
     fun setPaused(paused: Boolean) {
         runCatching { nativeSetPaused(paused) }
     }

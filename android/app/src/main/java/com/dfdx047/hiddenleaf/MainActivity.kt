@@ -95,17 +95,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // a page to open at start (a route of Dest), for the screenshot tests and shortcuts
-        val page = intent?.getStringExtra(EXTRA_PAGE)
+        page.value = intent?.getStringExtra(EXTRA_PAGE)?.let { it to System.nanoTime() }
         setContent {
             val ui by vm.uiState.collectAsStateWithLifecycle()
             HiddenLeafTheme(mode = ui.theme, dynamicColor = ui.dynamicColor) {
-                HiddenLeafApp(vm, page)
+                HiddenLeafApp(vm, page.value)
             }
         }
     }
 
+    /** The page asked for, with when: the game's "Naruto Online" opens Online again over a launcher already running. */
+    private val page = androidx.compose.runtime.mutableStateOf<Pair<String, Long>?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(EXTRA_PAGE)?.let { page.value = it to System.nanoTime() }
+    }
+
     companion object {
         const val EXTRA_PAGE = "page"
+        const val PAGE_ONLINE = "online"
     }
 }
 
@@ -136,7 +146,7 @@ private enum class Dest(val route: String, val label: Int, val icon: ImageVector
 }
 
 @Composable
-private fun HiddenLeafApp(vm: AppViewModel, startPage: String? = null) {
+private fun HiddenLeafApp(vm: AppViewModel, startPage: Pair<String, Long>? = null) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val current = entry?.destination?.route
@@ -169,7 +179,7 @@ private fun HiddenLeafApp(vm: AppViewModel, startPage: String? = null) {
     fun open(d: Dest) = nav.navigate(d.route) { launchSingleTop = true }
 
     LaunchedEffect(startPage) {
-        val d = Dest.entries.firstOrNull { it.route == startPage } ?: return@LaunchedEffect
+        val d = Dest.entries.firstOrNull { it.route == startPage?.first } ?: return@LaunchedEffect
         if (d.inBar) go(d) else { go(Dest.MORE); open(d) }
     }
 

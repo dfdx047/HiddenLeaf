@@ -340,6 +340,8 @@ namespace
     // Player 1: the touch controller and the first gamepad, together.
     SDL_Gamepad *g_pad = nullptr;
 
+    std::atomic<bool> g_padHeld{false};
+
     void updatePad()
     {
         unsigned buttons = g_touchButtons.load(std::memory_order_relaxed);
@@ -384,6 +386,11 @@ namespace
                 const unsigned ry = axis(SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHTY));
                 axes = lx | ly << 8 | rx << 16 | ry << 24;
             }
+        }
+        if (g_padHeld.load(std::memory_order_relaxed))
+        {   // (the online menu over the Mode Select: the game goes on, its music and Naruto too, but the buttons are the menu's)
+            buttons = 0u;
+            axes = 0x80808080u;
         }
         g_hlPadButtons.store(buttons, std::memory_order_relaxed);
         g_hlPadAxes.store(axes, std::memory_order_relaxed);
@@ -495,6 +502,11 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
     hl_game::g_menuOnline.store(on != JNI_FALSE && !hl_online::active(), std::memory_order_relaxed);
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeOnlineMenu(JNIEnv *, jclass) { return hl_game::g_onlineMenu.load(std::memory_order_relaxed); }
+// The online menu open over the game (OnlineMenu.kt): the controller and the touch pad move the menu, not the game behind it
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPadHeld(JNIEnv *, jclass, jboolean held)
+{
+    g_padHeld.store(held != JNI_FALSE, std::memory_order_relaxed);
+}
 // HL_PERF's line of the last second: "" when it is off
 extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePerfLine(JNIEnv *env, jclass) { return env->NewStringUTF(hl_perf::line()); }
 

@@ -57,9 +57,22 @@ class GameActivity : SDLActivity() {
     private var online: OnlineGame? = null
     private val handler = Handler(Looper.getMainLooper())
 
+    /** How many times "Naruto Online" was chosen in the game's Mode Select when this start began (hl_game.cpp's counter). */
+    private var onlineChosen = -1
+
     private val watchMenu = object : Runnable {
         override fun run() {
-            pad?.suppressed = menu?.isOpen == true
+            pad?.suppressed = menu?.isOpen == true || onlineMenu != null
+            // "Naruto Online" in the game's own Mode Select (docs/menu-online.md; the developer, 2026-11-14: a menu of its own
+            // inside the game, never out to the launcher): the online menu over the game (OnlineMenu.kt)
+            if (online == null) {
+                val n = runCatching { TouchBridge.nativeOnlineMenu() }.getOrDefault(-1)
+                if (onlineChosen < 0) onlineChosen = n
+                else if (n > onlineChosen) {
+                    onlineChosen = n
+                    openOnlineMenu()
+                }
+            }
             handler.postDelayed(this, 50)
         }
     }
@@ -90,6 +103,8 @@ class GameActivity : SDLActivity() {
         runCatching { com.dfdx047.hiddenleaf.data.ModSaves.prepare(paths) } // (a mod's card folder, before the engine reads the card)
         online = runCatching { OnlineGame.from(this, paths) }.getOrNull() // (before the engine reads and puts away the session file)
         super.onCreate(savedInstanceState)
+        // the "Naruto Online" entry of the game's Mode Select: only outside a match and with the base game (online is base only)
+        if (online == null && !com.dfdx047.hiddenleaf.data.Online.modsOn(paths)) runCatching { TouchBridge.nativeSetMenuOnline(true) }
         preferRefresh()
         addTouchPad()
         (SDLActivity.getContentView() as? ViewGroup)?.let { layout -> online?.attach(layout) }
@@ -163,6 +178,91 @@ class GameActivity : SDLActivity() {
         if (level == 2) return frame
         fun cat(n: String) = Regex("\\b$n ([0-9.]+)").find(raw)?.groupValues?.get(1) ?: "?"
         return "$frame\nEE ${cat("EE")}  VU1 ${cat("VU1")}  GS ${cat("GS")}  IOP ${cat("IOP")}  idle ${cat("idle")}"
+    }
+
+    // ---- the online menu inside the game (OnlineMenu.kt): over the game's Mode Select, the game frozen behind it
+    private var onlineMenu: OnlineMenuHost? = null
+    private var onlineLobby: com.dfdx047.hiddenleaf.data.OnlineLobby? = null
+
+    private fun openOnlineMenu() {
+        if (onlineMenu != null) return
+        val layout = SDLActivity.getContentView() as? ViewGroup ?: return
+        releaseInputs()
+        // (the developer, 2026-11-14: the Mode Select goes on behind the menu, Naruto and its music; only the buttons are held)
+        TouchBridge.setPadHeld(true)
+        val lobby = onlineLobby ?: com.dfdx047.hiddenleaf.data.OnlineLobby(application).also { onlineLobby = it }
+        val fp = com.dfdx047.hiddenleaf.data.Online.fingerprint(this, paths)
+        val host = OnlineMenuHost(this, lobby, fp, close = ::closeOnlineMenu, start = ::restartIntoMatch)
+        host.installOwners(window.decorView, layout)
+        layout.addView(host, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        onlineMenu = host
+        pad?.suppressed = true
+        host.post { host.focus() }
+    }
+
+    private fun closeOnlineMenu() {
+        val host = onlineMenu ?: return
+        onlineLobby?.cancel()
+        (host.parent as? ViewGroup)?.removeView(host)
+        onlineMenu = null
+        TouchBridge.setPadHeld(false)
+        focusGame()
+    }
+
+    /**
+     * The other player is there and the session file is written: the game starts again in step with the other phone. This
+     * process goes; OnlineRestartActivity (the launcher's process, nothing on screen) waits for it to be gone and opens the
+     * game, whose loading cover (OnlineGame) hides the way to the character select.
+     */
+    private fun restartIntoMatch() {
+        runOnUiThread {
+            TouchBridge.releaseAll()
+            startActivity(Intent(this, com.dfdx047.hiddenleaf.OnlineRestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 200)
+        }
+    }
+
+    /** The controller in the online menu: the D-pad moves between the boards, ✕ (A) chooses, ○ / △ (B, Y) or Back goes back. */
+    private fun onlineMenuKey(host: OnlineMenuHost, event: KeyEvent): Boolean {
+        val down = event.action == KeyEvent.ACTION_DOWN
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER ->
+                return super.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount))
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
+                if (!down) host.back()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER -> {
+                host.focus()
+                return super.dispatchKeyEvent(event)
+            }
+        }
+        return true
+    }
+
+    private var onlineHat = 0
+
+    /** The hat and the left stick move like the D-pad in the online menu. */
+    private fun onlineMenuMotion(ev: MotionEvent): Boolean {
+        val x = ev.getAxisValue(MotionEvent.AXIS_HAT_X).let { if (kotlin.math.abs(it) > 0.5f) it else ev.getAxisValue(MotionEvent.AXIS_X) }
+        val y = ev.getAxisValue(MotionEvent.AXIS_HAT_Y).let { if (kotlin.math.abs(it) > 0.5f) it else ev.getAxisValue(MotionEvent.AXIS_Y) }
+        val dir = when {
+            y < -0.5f -> KeyEvent.KEYCODE_DPAD_UP
+            y > 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
+            x < -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
+            x > 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
+            else -> 0
+        }
+        if (dir != onlineHat) {
+            onlineHat = dir
+            if (dir != 0) {
+                onlineMenu?.focus()
+                super.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, dir))
+                super.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, dir))
+            }
+        }
+        return true
     }
 
     // ---- the game menu (GameMenu, a drawer at the left): it freezes the game while open (not an online match)
@@ -429,6 +529,7 @@ class GameActivity : SDLActivity() {
 
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
         if (fromController(ev.source) && ev.actionMasked == MotionEvent.ACTION_MOVE) {
+            if (onlineMenu != null) return onlineMenuMotion(ev)
             val m = menu
             if (m != null && m.isShowing) return menuMotion(m, ev)
             if (pad?.editing == true) return true
@@ -636,13 +737,14 @@ class GameActivity : SDLActivity() {
      * needs the fixed addresses only a fresh one has), so the process goes, as it does when the game is closed.
      */
     @Suppress("unused")
-    fun quitToApp() {
+    fun quitToApp(page: String? = null) {
         online?.leave() // (the other phone is told before this process goes)
         runOnUiThread {
             TouchBridge.releaseAll()
             startActivity(
                 Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .apply { if (page != null) putExtra(MainActivity.EXTRA_PAGE, page) },
             )
         }
         // a moment for the launcher to be started, then this process goes (the engine's saves are closed as they are written)
@@ -714,6 +816,7 @@ class GameActivity : SDLActivity() {
             }
             return if (fromPad) true else super.dispatchKeyEvent(event)
         }
+        onlineMenu?.let { return onlineMenuKey(it, event) }
         val m = menu
         if (m != null && m.isShowing) return menuKey(m, event, fromPad)
         if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_MODE) {

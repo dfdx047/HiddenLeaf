@@ -63,6 +63,14 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- From the game's own online menu into the match: waits for the game's process to go, then opens it again. -->
+        <activity
+            android:name=".OnlineRestartActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
         <!-- The game (SDL). Its own process: see GameActivity. -->
         <activity
             android:name=".engine.GameActivity"

@@ -98,4 +98,16 @@
     <string name="online_quota_use_lan">Jogar na rede local</string>
     <string name="online_mods_only">O online é só no jogo base por enquanto. Desligue os mods em Mais → Mods para jogar online.</string>
     <string name="online_mods_open">Abrir Mods</string>
+    <string name="ingame_online_who">Jogando como %1$s</string>
+    <string name="ingame_online_create_hint">Abra uma sala e passe o código para um amigo.</string>
+    <string name="ingame_online_join">Entrar com código</string>
+    <string name="ingame_online_join_hint">Digite os 6 números da sala de um amigo.</string>
+    <string name="ingame_online_lan_hint">Os dois celulares no mesmo Wi-Fi, sem internet.</string>
+    <string name="ingame_lan_create_hint">Espere aqui pelo outro celular.</string>
+    <string name="ingame_lan_search_hint">Ache uma partida aberta neste Wi-Fi.</string>
+    <string name="ingame_online_help">✕ Escolher     ○ / △ Voltar</string>
+    <string name="ingame_cover_linking">Encontrando %1$s…</string>
+    <string name="ingame_cover_entering">Abrindo a seleção de personagens…</string>
+    <string name="ingame_cover_vs">Você contra %1$s</string>
+    <string name="online_waiting_peer">Esperando %1$s…</string>
 </resources>

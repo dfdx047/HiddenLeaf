@@ -51,6 +51,11 @@ public:
         bool strictDesync = false;              // a difference of the state checks ends the match (else it is only said)
         unsigned meetTimeoutMs = 90000;         // how long the first game waits for the other's engine
         unsigned silentRunningMs = 30000;       // how long the other game may say nothing during the match (a long load on its side)
+        // The first `localUntil` fields of the match are the same on both phones whatever happens (the way into the character select,
+        // pressed by the engine): each game runs them alone, its pads from `localPads`, without waiting for the other; the lockstep
+        // starts after them, where both games meet again.
+        std::uint32_t localUntil = 0;
+        std::function<void(std::uint32_t field, std::uint8_t p1[6], std::uint8_t p2[6])> localPads;
     };
     enum class Phase {Meeting, Running, Ended};
 
@@ -67,7 +72,8 @@ public:
     const std::string& peerName() const {return file_.peerName;}
     bool iAmPlayer1() const {return p1_;}
     unsigned delay() const {return cfg_.delay;}          // fields
-    std::uint32_t field() const {return field_;}         // lockstep fields run
+    std::uint32_t field() const {return field_;}         // fields of the match run (the way in, then the lockstep's)
+    std::uint32_t lockField() const {return field_ >= env_.localUntil ? field_ - env_.localUntil : 0u;}
     int roundTripMs() const {return link_.roundTripMs();}
     bool viaRelay() const {return link_.state() == Link::Up && link_.viaRelay();}
     bool linked() const {return link_.state() == Link::Up;}

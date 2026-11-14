@@ -25,6 +25,8 @@
 
 #include "ps2_runtime.h"
 
+void hl_spu2_mute(bool muted); // (spu2/hl_spu2.cpp)
+
 #include <jni.h>
 #include <sys/stat.h>
 
@@ -139,11 +141,22 @@ namespace
         }
     }
 
+    // (the way into the match, further down)
+    extern bool g_entry;
+    uint32_t entryEnd();
+    void entryPads(uint32_t field, uint8_t p1[6], uint8_t p2[6]);
+
     void begin(PS2Runtime *runtime)
     {
         g_begun = true;
         MatchSession::Env env;
         env.log = log;
+        if (g_entry)
+        {   // (the developer, 2026-11-14: from the game's online menu the players must land on the character select at once, not
+            // watch the boot's menus go by: each phone runs the way in alone, fast and unheard, and the two meet at its end)
+            env.localUntil = entryEnd();
+            env.localPads = entryPads;
+        }
         env.ram = runtime->memory().getRDRAM();
         env.ramSize = kRamSize;
         // docs/online.md: between two phones (and between two speeds of one) these differ with the game still the same: the clock
@@ -239,6 +252,18 @@ namespace
         return 0u;
     }
 
+    uint32_t entryEnd() { return kEntryEnd; }
+
+    // Both players' pads on the way in, the same on both phones without asking the other (MatchSession::Env::localPads)
+    void entryPads(uint32_t field, uint8_t p1[6], uint8_t p2[6])
+    {
+        const uint16_t a = entryButtons(field, true), b = entryButtons(field, false);
+        const uint8_t one[6] = {static_cast<uint8_t>(a), static_cast<uint8_t>(a >> 8), 0x80u, 0x80u, 0x80u, 0x80u};
+        const uint8_t two[6] = {static_cast<uint8_t>(b), static_cast<uint8_t>(b >> 8), 0x80u, 0x80u, 0x80u, 0x80u};
+        std::memcpy(p1, one, 6);
+        std::memcpy(p2, two, 6);
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_prevVsync)
@@ -276,6 +301,12 @@ namespace
         }
         else
             g_padsOn.store(false, std::memory_order_release);
+        static bool s_heard = false;
+        if (!s_heard && (!g_entry || g_match.ended() || g_match.field() >= kEntryEnd))
+        {
+            s_heard = true;
+            hl_spu2_mute(false);
+        }
         if (tick % 10u == 0u || g_match.ended())
             publishNow();
     }
@@ -321,6 +352,13 @@ bool hl_online::setup(const std::string &root)
     g_active = true;
     if (const char *e = std::getenv("HL_ONLINE_ENTRY"))
         g_entry = std::atoi(e) != 0;
+    if (g_entry)
+    {   // the way in without waiting for the clock (the vsyncs are counted in the EE's cycles: the game is the same, only sooner),
+        // and without its sound
+        if (!std::getenv("HL_FAST_UNTIL"))
+            setenv("HL_FAST_UNTIL", std::to_string(kEntryEnd).c_str(), 1);
+        hl_spu2_mute(true);
+    }
 
     // a memory card of the match's own, empty: what the game finds at boot must be the same on both phones
     const std::string saves = dir + "/saves";

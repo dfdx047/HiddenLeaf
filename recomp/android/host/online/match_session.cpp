@@ -93,7 +93,8 @@ void MatchSession::pump() {
 
 void MatchSession::sendInputs() {
     std::uint8_t pkt[1100];
-    if (const std::size_t n = lock_.makePacket(pkt, sizeof pkt, field_)) link_.sendMessage(Lockstep::messageType, pkt, n);
+    if (field_ < env_.localUntil) {lastSend_ = now(); return;}
+    if (const std::size_t n = lock_.makePacket(pkt, sizeof pkt, lockField())) link_.sendMessage(Lockstep::messageType, pkt, n);
     lastSend_ = now();
 }
 
@@ -177,16 +178,24 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
             (link_.viaRelay() ? "through the room's relay" : "direct") + (ctl_.fieldsDiffer() ? "; the two arrived at DIFFERENT fields" : ""));
         if (env_.onMet) env_.onMet();
     }
+    // The way in, the same on both phones: no waiting for the other (the link still pings and is heard, in pump)
+    if (field_ < env_.localUntil && env_.localPads) {
+        env_.localPads(field_, p1, p2);
+        ++field_;
+        if (field_ == env_.localUntil) log("online: the way in is over at field " + std::to_string(field_) + "; the lockstep begins");
+        return 1;
+    }
     // Running: this field's pad goes out; the game goes on when the other side's for this field is here.
+    const std::uint32_t lf = lockField();
     Lockstep::Sample mine;
     std::memcpy(mine.data(), local, 6);
-    lock_.pushLocal(field_, mine);
+    lock_.pushLocal(lf, mine);
     sendInputs();
-    if (!lock_.ready(field_)) {
+    if (!lock_.ready(lf)) {
         ++waits_;
         const std::uint32_t waitFrom = now();
         std::uint32_t nextNote = waitFrom + 2000;
-        while (!lock_.ready(field_)) {
+        while (!lock_.ready(lf)) {
             if (now() >= nextNote) {
                 nextNote += 2000;
                 log("online: waiting " + std::to_string(now() - waitFrom) + " ms for the other's field " + std::to_string(field_) + "; link silent " +
@@ -203,7 +212,7 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
         }
         lastField_ = now();
     }
-    if (field_ % Lockstep::digest_every == 0) lock_.noteDigest(field_, digestOf(env_.ram, env_.ramSize, env_.skip, field_));
+    if (lf % Lockstep::digest_every == 0) lock_.noteDigest(lf, digestOf(env_.ram, env_.ramSize, env_.skip, lf));
     if (lock_.desync() && !desyncSaid_) {
         desyncSaid_ = true;
         ++desyncs_;
@@ -217,10 +226,10 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
         mismatchesSaid_ = lock_.mismatches();
         mismatchSaidAt_ = now();
     }
-    const Lockstep::Pair pair = lock_.pair(field_);
+    const Lockstep::Pair pair = lock_.pair(lf);
     std::memcpy(p1, pair.p1.data(), 6);
     std::memcpy(p2, pair.p2.data(), 6);
-    lock_.done(field_);
+    lock_.done(lf);
     ++field_;
     return 1;
 }
