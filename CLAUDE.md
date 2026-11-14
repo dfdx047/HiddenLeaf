@@ -15,6 +15,10 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
   commitar junto com o código. Nunca apagar entradas antigas; corrigir com uma entrada nova.
 - Nada é dado como corrigido sem a rota completa gravada nos 3 aparelhos e no 20:9 (método no fim do
   `docs/registro.md`).
+- **Release público:** sempre assinado com a chave `~/keys/hiddenleaf-release.jks` (senha em
+  `~/keys/hiddenleaf-release.properties`, fora do repositório), para a atualização instalar por cima da versão anterior
+  e o atualizador do app funcionar. Nunca gerar outra chave nem assinar release com a `hiddenleaf-test.jks`. Versão,
+  changelog, tag `vX.Y.Z` e passo a passo: `docs/release.md`.
 
 ## Onde está cada coisa
 
@@ -22,6 +26,7 @@ PS2Recomp, mais o launcher Android (`android/`, a partir do template do Dragon R
 |---|---|
 | `docs/analise-elf.md` | ELF, overlays (`MWo3`), mods (UN6 A35, Versão Brasileira), hashes |
 | `docs/registro.md` | **estado das funções e histórico por build (ler primeiro)** |
+| `docs/release.md` | release público: chave de assinatura, versão, changelog, `gh release`, atualização automática |
 | `docs/plano.md` | plano, decisões, controles na tela, contrato do motor |
 | `tools/un5.py` | `verify`, `extract`, `overlays`, `diff`, `unpack`, `prepelf`, `ovlelf` |
 | `tools/vifdump.py`, `docs/vifdump.md` | dumps do VIF1 e do GIF por cena (`HL_VIF_DUMP`, patch `0058`) para a Fase 3 do Nominum: leitor e formato |

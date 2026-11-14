@@ -61,6 +61,12 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 12:20: documentação do release e da chave de assinatura
+
+- A pedido do desenvolvedor (a próxima atualização deve sair em 2–3 semanas, em outra sessão): `docs/release.md` com a
+  chave de release, a regra de versão, o passo a passo e como o app se atualiza; regra no `CLAUDE.md` e entrada na
+  tabela "Onde está cada coisa".
+
 ### 2026-11-14 12:10: atualização automática; o APK da v0.1.0-beta substituído
 
 - O desenvolvedor pediu atualização automática: quando sair versão nova, o app baixa e instala. O fluxo já existia (do
