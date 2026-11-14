@@ -479,6 +479,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
     hl_game::g_specialOn.store(specialOne != 0, std::memory_order_relaxed);
     hl_game::g_mashPercent.store(mashPercent, std::memory_order_relaxed);
 }
+// "Naruto Online" in the game's Mode Select (hl_game.cpp, docs/menu-online.md): the entry on or off, and how many times the
+// player chose it (the launcher polls it and opens its lobby when it goes up)
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetMenuOnline(JNIEnv *, jclass, jboolean on)
+{
+    // (an online match boots both games in lockstep: the menu must be the same on both, so the game's own)
+    hl_game::g_menuOnline.store(on != JNI_FALSE && !hl_online::active(), std::memory_order_relaxed);
+}
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeOnlineMenu(JNIEnv *, jclass) { return hl_game::g_onlineMenu.load(std::memory_order_relaxed); }
 // HL_PERF's line of the last second: "" when it is off
 extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativePerfLine(JNIEnv *env, jclass) { return env->NewStringUTF(hl_perf::line()); }
 

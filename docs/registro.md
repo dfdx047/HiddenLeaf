@@ -61,6 +61,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14: "Naruto Online" no Mode Select do jogo (protótipo no PC, desligado por padrão); não testado em aparelho
+
+Pedido do desenvolvedor: uma entrada "Naruto Online" no próprio Mode Select, logo abaixo do Free Battle, que leve ao lobby
+do launcher. Estudo e protótipo numa branch de agente; detalhes, endereços e riscos em `docs/menu-online.md`.
+
+- **Achado:** o Mode Select (ELF, `0x3953B0` monta, `0x396B90` o quadro, `0x395CE0` a lista, `0x395DC0` escolher) tem um
+  sétimo modo escondido, o **3** (Mini-Games do original), cortado na versão europeia só pelo `-1` em `0x5DC30C`; a placa,
+  o diorama e a linha de texto dele continuam no `modesel1.ccs`, e a faixa do nome dele na textura dos nomes
+  (`TEX_modesel02`) está vazia.
+- **Protótipo** (`hl_game.cpp`, `HL_MENU_ONLINE=1` ou `TouchBridge.nativeSetMenuOnline`): o modo 3 entra na lista depois do
+  Free Battle; "Online" é escrito na faixa vazia com as letras das outras placas (O, n, l, i, e recortados em tempo de
+  execução, nada da arte no repositório); a linha de baixo e a caixa de mensagem do próprio jogo (`0x3D1850`, `0x3D18A0`)
+  ganham textos nossos em 5 idiomas, em `0xFE000`; o ✕ passa por `0x395F20` (o "modo indisponível" do jogo), que agora
+  loga `[online] menu chosen`, soma `hl_game::g_onlineMenu` (JNI `nativeOnlineMenu`) e toca o som de escolher. ✕ e △
+  fecham a caixa, a navegação dá a volta normal, sem travar. Só no ELF europeu (seis palavras conferidas; o A35 fica sem).
+- **Testado no PC** (GS do ARMSX2, 4:3 e 20:9): capturas em `build/lab/menu/shots/`. Desligado, o menu é o de sempre.
+  Android: só compilação de sintaxe com o NDK; o launcher ainda não lê o contador nem abre o lobby.
+- **Depuração nova:** `HL_FNCOUNT=all:btl` ou `all:elf`, `HL_FNCHG=ADDR` (quem mudou uma palavra), `HL_POKE=ADDR=VALOR`.
 ### 2026-11-13 23:59: partida rápida, aviso do online grátis esgotado e online só no jogo base; não testado em aparelho
 
 Pedidos do desenvolvedor: oponente aleatório ("Partida rápida"), um aviso claro quando o plano grátis da Cloudflare

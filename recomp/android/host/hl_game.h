@@ -20,6 +20,8 @@ namespace hl_game
     extern std::atomic<bool> g_specialOn;      // the launcher's "special with one button"
     extern std::atomic<uint32_t> g_specialMask; // its button, in the game's bits of the pad
     extern std::atomic<int> g_mashPercent;     // what a tap is worth in the steps of pressing repeatedly: 100, 125, 150, 165, 200
+    extern std::atomic<bool> g_menuOnline;     // "Naruto Online" in the game's Mode Select (also HL_MENU_ONLINE=1; docs/menu-online.md)
+    extern std::atomic<int> g_onlineMenu;      // how many times it was chosen (the launcher opens its lobby when this goes up)
     int overlay();                             // the mode's code in memory: 0 none yet, 1 BTL (fight), 2 ADV (campaign), 3 other
 
     // HL_GS_DUMP: libbt4gsx's Bt4Gsx_GsDump (a PCSX2 GS dump of the next vsyncs into <base>.gs.zst) and the folder

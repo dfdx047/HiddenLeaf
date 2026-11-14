@@ -23,6 +23,7 @@
 #include <sys/system_properties.h>
 #endif
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 // the runtime's Pad.cpp: when fight N began, for the "@N+vsyncs" steps of HL_PADROUTE
@@ -43,6 +44,8 @@ namespace hl_game
     std::atomic<bool> g_specialOn{true};
     std::atomic<uint32_t> g_specialMask{0x20u};
     std::atomic<int> g_mashPercent{100};
+    std::atomic<bool> g_menuOnline{false};
+    std::atomic<int> g_onlineMenu{0};
     bool (*g_nativeOn)() = nullptr;
     void (*g_liveFight)(bool) = nullptr;
     void (*g_wideCameraOut)(bool) = nullptr;
@@ -639,15 +642,30 @@ namespace
     // HL_FNCOUNT=ADDR,... or all (hex, ADV.BIN's functions, debugging): how many times each ran, a line every 50 vsyncs
     // ("[fn]"), for finding which of them run in one state of the game and not in another (docs/registro.md 2026-11-09).
     // HL_FNCOUNT_WIN=A0:A1,B0:B1 (vsyncs) instead: the functions that ran only in window A or only in window B, at B1.
-    constexpr int kCountMax = 8192;
+    // HL_FNCOUNT=all:btl or all:elf counts BTL.BIN's functions or the ELF's instead (the menus run with BTL.BIN in memory,
+    // docs/menu-online.md). HL_FNCHG=ADDR (hex): the function that changed this 32-bit word ("[fnchg]", the innermost of the
+    // counted ones: it returns first), a write watch without gdb.
+    constexpr int kCountMax = 16384;
     PS2Runtime::RecompiledFunction g_countOriginal[kCountMax] = {};
     uint32_t g_countAddress[kCountMax] = {}, g_countCalls[kCountMax] = {};
     int g_countUsed = 0;
+    uint32_t g_chgAddress = 0u, g_chgLast = 0u;
     template <int I>
     void countCall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         ++g_countCalls[I];
+        const uint32_t ra = GPR_U32(ctx, 31);
         g_countOriginal[I](rdram, ctx, runtime);
+        if (g_chgAddress != 0u)
+        {
+            uint32_t now;
+            std::memcpy(&now, rdram + g_chgAddress, 4);
+            if (now != g_chgLast)
+            {
+                std::fprintf(stderr, "[fnchg] v%llu fn %x (ra %x): %08x -> %08x\n", static_cast<unsigned long long>(g_tick), g_countAddress[I], ra, g_chgLast, now);
+                g_chgLast = now;
+            }
+        }
     }
     template <int... I>
     constexpr std::array<PS2Runtime::RecompiledFunction, sizeof...(I)> countCalls(std::integer_sequence<int, I...>) { return {&countCall<I>...}; }
@@ -659,6 +677,37 @@ namespace
             return;
         s_done = true;
         static constexpr auto kCalls = countCalls(std::make_integer_sequence<int, kCountMax>{});
+        if (const char *c = std::getenv("HL_FNCHG"))
+            g_chgAddress = static_cast<uint32_t>(std::strtoul(c, nullptr, 16)) & 0x1FFFFFFu;
+        const bool btl = std::strstr(list, "btl") != nullptr && &un5_btl_table != nullptr;
+        const bool elf = std::strstr(list, "elf") != nullptr;
+        if (btl || elf)
+        {
+            // (a function's every entry point shares one slot each: one counter per function, by its pointer)
+            std::unordered_map<PS2Runtime::RecompiledFunction, int> seen;
+            auto wrap = [&](PS2Runtime::RecompiledFunction *table, uint32_t base, uint32_t slots) {
+                for (uint32_t slot = 0; slot < slots; ++slot)
+                    if (table[slot] != nullptr)
+                    {
+                        auto [it, fresh] = seen.try_emplace(table[slot], g_countUsed);
+                        if (fresh)
+                        {
+                            if (g_countUsed >= kCountMax)
+                                break;
+                            g_countOriginal[g_countUsed] = table[slot];
+                            g_countAddress[g_countUsed] = base + slot * 4u;
+                            ++g_countUsed;
+                        }
+                        table[slot] = kCalls[it->second];
+                    }
+            };
+            if (btl)
+                wrap(un5_btl_table, un5_btl_base, un5_btl_slots);
+            if (elf)
+                wrap(g_ps2RecompiledFunctionTable, g_ps2RecompiledFunctionTableBase, g_ps2RecompiledFunctionTableSlotCount);
+            std::fprintf(stderr, "[fn] counting %d functions (%s%s)\n", g_countUsed, btl ? "BTL " : "", elf ? "ELF" : "");
+            return;
+        }
         if (std::strcmp(list, "all") == 0)
         {
             for (uint32_t slot = 0; slot < un5_adv_slots && g_countUsed < kCountMax; ++slot)
@@ -789,6 +838,250 @@ namespace
             g_promptOriginal = un5_btl_table[slot];
             un5_btl_table[slot] = promptPressed;
         }
+    }
+
+    // "Naruto Online" in the game's Mode Select (docs/menu-online.md). The menu is the ELF's (0x3953B0 builds it, 0x396B90
+    // runs it, 0x3972E0 draws it), with an object whose +0x04 is the count of entries, +0x08 their mode ids (up to 7), +0x24
+    // the cursor. 0x395CE0 fills the ids with every mode whose word in 0x5DC300 is not negative, in id order: 0 Master Mode,
+    // 1 Free Battle, 2 Practice, 4 Shop, 5 Collection, 6 Options. Mode 3 is the Mini-Games of the original, cut from the
+    // European game (its word is -1) but with all its pieces still in the menu's file: a board (with no name on it), its
+    // diorama and its line of text. We put it right under Free Battle and give it our own text; choosing it is the game's own
+    // path for a mode that is not there (0x395F20, state 5, the message box with message 4, empty in this version), where
+    // we write our message and tell the launcher (hl_game::g_onlineMenu).
+    constexpr uint32_t kMsBuildList = 0x395CE0u, kMsUnavailable = 0x395F20u, kModeText = 0x3D1850u, kMenuText = 0x3D18A0u;
+    constexpr uint32_t kPlaySound = 0x1DD470u;
+    constexpr uint32_t kMsCount = 0x04u, kMsIds = 0x08u, kMsCursor = 0x24u, kMsMax = 7u;
+    constexpr uint32_t kOnlineMode = 3u, kUnavailableText = 4u;
+    constexpr uint32_t kSoundRefused = 0x3Fu, kSoundChosen = 0x58u;
+    constexpr uint32_t kTextOverlay = 0x8F3D00u; // TEXT*.BIN: id 4 English ... 8 Spanish (+4 of the MWo3 header)
+    // Our strings, in RAM no one uses: under the ELF (0x100000), above the runtime's pools (0xA0000-0xD1000), all zero the
+    // first time (checked)
+    constexpr uint32_t kOnlineStrings = 0xFE000u, kOnlineStringMax = 0x100u;
+    std::atomic<bool> g_menuOnlineEnv{std::getenv("HL_MENU_ONLINE") != nullptr && std::getenv("HL_MENU_ONLINE")[0] == '1'};
+    PS2Runtime::RecompiledFunction g_msBuildOriginal = nullptr, g_msUnavailableOriginal = nullptr, g_modeTextOriginal = nullptr,
+                                   g_menuTextOriginal = nullptr, g_playSoundOriginal = nullptr;
+    bool g_onlineSound = false;
+    uint64_t g_onlineSoundTick = 0u;
+    int g_onlineStringsOk = -1;
+
+    bool menuOnline()
+    {
+        return g_menuOnlineEnv.load(std::memory_order_relaxed) || hl_game::g_menuOnline.load(std::memory_order_relaxed);
+    }
+    int textLanguage()
+    {
+        if (std::memcmp(g_rdram + kTextOverlay, "MWo3", 4) != 0)
+            return 0;
+        const uint32_t id = read32(kTextOverlay + 4u);
+        return id >= 4u && id <= 8u ? static_cast<int>(id - 4u) : 0;
+    }
+    // (ASCII only: the game's markup, <colorRRGGBB> <WHITE> <BLACK> <br>, and nothing else)
+    const char *const kOnlineDescription[5] = {
+        "<color00FFFF>Naruto Online<WHITE>: fight other players over the internet.",
+        "<color00FFFF>Naruto Online<WHITE> : combattez d'autres joueurs sur Internet.",
+        "<color00FFFF>Naruto Online<WHITE>: kaempfe gegen andere Spieler im Internet.",
+        "<color00FFFF>Naruto Online<WHITE>: sfida altri giocatori su Internet.",
+        "<color00FFFF>Naruto Online<WHITE>: lucha contra otros jugadores por Internet.",
+    };
+    const char *const kOnlineMessage[5] = {
+        "<color080860>Naruto Online<BLACK><br>Quick Match, Create Room or Join Room.",
+        "<color080860>Naruto Online<BLACK><br>Partie rapide, creer ou rejoindre une salle.",
+        "<color080860>Naruto Online<BLACK><br>Schnelles Spiel, Raum erstellen oder beitreten.",
+        "<color080860>Naruto Online<BLACK><br>Partita rapida, crea o entra in una stanza.",
+        "<color080860>Naruto Online<BLACK><br>Partida rapida, crear o unirse a una sala.",
+    };
+    // writes one of our strings into slot 0 or 1 of kOnlineStrings; 0 if that RAM was not ours to take
+    uint32_t onlineString(int slot, const char *text)
+    {
+        const uint32_t at = kOnlineStrings + static_cast<uint32_t>(slot) * kOnlineStringMax;
+        if (g_onlineStringsOk < 0)
+        {
+            const uint8_t *p = g_rdram + kOnlineStrings;
+            g_onlineStringsOk = std::all_of(p, p + 2u * kOnlineStringMax, [](uint8_t b) { return b == 0u; }) ? 1 : 0;
+            std::fprintf(stderr, "[online] strings at %x: %s\n", kOnlineStrings, g_onlineStringsOk ? "free" : "in use, menu text left alone");
+        }
+        if (g_onlineStringsOk == 0)
+            return 0u;
+        const size_t n = std::min(std::strlen(text), static_cast<size_t>(kOnlineStringMax - 1u));
+        std::memcpy(g_rdram + at, text, n);
+        std::memset(g_rdram + at + n, 0, kOnlineStringMax - n);
+        return at;
+    }
+    uint32_t msEntry(uint32_t menu, uint32_t i) { return read32(menu + kMsIds + i * 4u); }
+
+    // The board's name: the boards' names are one texture of the menu's file (TEX_modesel02, 256x512, 8 bits, upside down:
+    // raw row 0 is the bottom on screen), one band of 48 rows each, from the bottom: Master Mode, Free Battle, Practice,
+    // (Mini-Games: empty in this version), Shop, Collection, Options. "Online" goes into the empty band, made of the letters
+    // of the other names (the game's own lettering, cut and put together here; nothing of it is in our code): O of Options,
+    // n l i e of Collection and Free Battle. Each piece: its band, its columns [a, b) at the band's raw row 0 (they move right
+    // by 0.15 per row up, as the lettering leans), its raw rows [r0, r1). Tuned on the PC (build/lab/menu, docs/menu-online.md).
+    struct LabelPiece
+    {
+        uint16_t band, a, b, r0, r1;
+    };
+    constexpr uint32_t kLabelOptions = 176u, kLabelCollection = 224u, kLabelEmpty = 320u, kLabelFree = 416u, kLabelRows = 48u;
+    constexpr uint32_t kLabelWidth = 256u, kLabelBytes = 256u * 512u;
+    constexpr LabelPiece kOnlineLabel[][2] = {
+        {{kLabelOptions, 50, 88, 0, 48}, {}},                              // O
+        {{kLabelCollection, 200, 232, 0, 48}, {}},                         // n
+        {{kLabelCollection, 86, 100, 0, 48}, {}},                          // l
+        {{kLabelCollection, 86, 100, 0, 27}, {kLabelCollection, 170, 184, 33, 46}}, // i: the l's stroke under the x-height, the i's dot
+        {{kLabelCollection, 200, 232, 0, 48}, {}},                         // n
+        {{kLabelFree, 217, 248, 0, 48}, {}},                               // e
+    };
+    // the texture's pixels: its name in the file's table of names, +0x2C its object, +0x28 the upload's block, +4 the pixels,
+    // +8 their size in quadwords
+    uint32_t labelTexture()
+    {
+        static const char kName[] = "TEX_modesel02";
+        const uint8_t *ram = g_rdram;
+        for (const uint8_t *p = ram + 0x100000u; (p = static_cast<const uint8_t *>(memmem(p, (ram + (32u << 20)) - p, kName, sizeof(kName)))) != nullptr; ++p)
+        {
+            const uint32_t entry = static_cast<uint32_t>(p - ram);
+            if ((entry & 7u) != 0u)
+                continue;
+            const uint32_t object = read32(entry + 0x2Cu);
+            if (object < 0x100000u || object >= (32u << 20) || read32(object) != entry)
+                continue;
+            const uint32_t upload = read32(object + 0x28u);
+            if (upload < 0x100000u || upload >= (32u << 20))
+                continue;
+            const uint32_t pixels = read32(upload + 4u);
+            if (read32(upload + 8u) == kLabelBytes / 16u && pixels >= 0x100000u && pixels + kLabelBytes <= (32u << 20))
+                return pixels;
+        }
+        return 0u;
+    }
+    void writeOnlineLabel()
+    {
+        const uint32_t pixels = labelTexture();
+        if (pixels == 0u)
+        {
+            std::fprintf(stderr, "[online] the boards' names (TEX_modesel02) not found: the board stays empty\n");
+            return;
+        }
+        uint8_t *tex = g_rdram + pixels;
+        uint8_t *empty = tex + kLabelEmpty * kLabelWidth;
+        if (!std::all_of(empty, empty + kLabelRows * kLabelWidth, [](uint8_t b) { return b == 0u; }))
+            return; // (already written, or a version with its own name there)
+        auto shadow = [](uint8_t v) { return v >= 28u && v <= 33u; }; // (the indices of the dark outline around the letters)
+        int width = 0;
+        for (const auto &letter : kOnlineLabel)
+            width += letter[0].b - letter[0].a - 2;
+        int x = (static_cast<int>(kLabelWidth) - width) / 2;
+        for (const auto &letter : kOnlineLabel)
+        {
+            for (const LabelPiece &piece : letter)
+                for (uint32_t row = piece.r0; row < piece.r1; ++row)
+                {
+                    const int shift = static_cast<int>(0.15f * static_cast<float>(row) + 0.5f);
+                    const uint8_t *src = tex + (piece.band + row) * kLabelWidth;
+                    uint8_t *dst = empty + row * kLabelWidth;
+                    for (int c = piece.a; c < piece.b; ++c)
+                    {
+                        const int sx = c + shift, tx = x + (c - piece.a) + shift;
+                        if (sx >= static_cast<int>(kLabelWidth) || tx < 0 || tx >= static_cast<int>(kLabelWidth) || src[sx] == 0u)
+                            continue;
+                        if (dst[tx] == 0u || (shadow(dst[tx]) && !shadow(src[sx])))
+                            dst[tx] = src[sx];
+                    }
+                }
+            x += letter[0].b - letter[0].a - 2;
+        }
+        std::fprintf(stderr, "[online] board name written into %x\n", pixels);
+    }
+
+    void msBuildList(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t menu = GPR_U32(ctx, 4);
+        g_msBuildOriginal(rdram, ctx, runtime);
+        if (!menuOnline())
+            return;
+        const uint32_t count = read32(menu + kMsCount);
+        if (count >= kMsMax)
+            return;
+        uint32_t at = count; // right under Free Battle (mode 1); at the end if it is not there
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            if (msEntry(menu, i) == kOnlineMode)
+                return;
+            if (msEntry(menu, i) == 1u)
+                at = i + 1u;
+        }
+        for (uint32_t i = count; i > at; --i)
+        {
+            const uint32_t v = msEntry(menu, i - 1u);
+            std::memcpy(rdram + ((menu + kMsIds + i * 4u) & 0x1FFFFFFu), &v, 4);
+        }
+        std::memcpy(rdram + ((menu + kMsIds + at * 4u) & 0x1FFFFFFu), &kOnlineMode, 4);
+        const uint32_t n = count + 1u;
+        std::memcpy(rdram + ((menu + kMsCount) & 0x1FFFFFFu), &n, 4);
+        std::fprintf(stderr, "[online] Mode Select at %x: Naruto Online is entry %u of %u\n", menu, at, n);
+        writeOnlineLabel();
+    }
+    // 0x395F20(menu, 1): the mode under the cursor is not there; with ours under the cursor, it is "Naruto Online chosen"
+    void msUnavailable(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t menu = GPR_U32(ctx, 4);
+        const uint32_t cursor = read32(menu + kMsCursor);
+        const bool ours = menuOnline() && GPR_U32(ctx, 5) == 1u && cursor < kMsMax && msEntry(menu, cursor) == kOnlineMode;
+        if (ours)
+        {
+            std::fprintf(stderr, "[online] menu chosen (v%llu)\n", static_cast<unsigned long long>(g_tick));
+            hl_game::g_onlineMenu.fetch_add(1, std::memory_order_relaxed);
+            g_onlineSound = true; // the game's "chosen" sound instead of its "refused" one
+            g_onlineSoundTick = g_tick;
+        }
+        g_msUnavailableOriginal(rdram, ctx, runtime);
+        g_onlineSound = false;
+    }
+    void playSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (g_onlineSound && g_onlineSoundTick == g_tick && GPR_U32(ctx, 4) == kSoundRefused)
+            SET_GPR_U32(ctx, 4, kSoundChosen);
+        g_playSoundOriginal(rdram, ctx, runtime);
+    }
+    // the line of text under the boards (by mode id) and the text of the menu's message box (by message)
+    void modeText(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (menuOnline() && GPR_U32(ctx, 4) == kOnlineMode)
+            if (const uint32_t at = onlineString(0, kOnlineDescription[textLanguage()]))
+            {
+                SET_GPR_U32(ctx, 2, at);
+                ctx->pc = GPR_U32(ctx, 31);
+                return;
+            }
+        g_modeTextOriginal(rdram, ctx, runtime);
+    }
+    void menuText(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (menuOnline() && GPR_U32(ctx, 4) == kUnavailableText)
+            if (const uint32_t at = onlineString(1, kOnlineMessage[textLanguage()]))
+            {
+                SET_GPR_U32(ctx, 2, at);
+                ctx->pc = GPR_U32(ctx, 31);
+                return;
+            }
+        g_menuTextOriginal(rdram, ctx, runtime);
+    }
+    void hookModeSelect(PS2Runtime *runtime)
+    {
+        // only the European ELF's (and the Alpha 1.1X's, which runs it): an instruction of each, the A35's code is elsewhere
+        const std::pair<uint32_t, uint32_t> sign[] = {{0x395CE0u, 0xAC800004u}, {0x395D04u, 0x2463C300u}, {0x395F30u, 0x24020005u},
+                                                      {0x3D1870u, 0x2442A810u}, {0x3D18C0u, 0x2442A830u}, {0x1DD470u, 0x27BDFFD0u}};
+        for (const auto &[address, word] : sign)
+            if (read32(address) != word)
+            {
+                std::fprintf(stderr, "[online] not the European Mode Select (%x): no Naruto Online in the menu\n", address);
+                return;
+            }
+        const std::pair<uint32_t, std::pair<PS2Runtime::RecompiledFunction *, PS2Runtime::RecompiledFunction>> hooks[] = {
+            {kMsBuildList, {&g_msBuildOriginal, msBuildList}}, {kMsUnavailable, {&g_msUnavailableOriginal, msUnavailable}},
+            {kModeText, {&g_modeTextOriginal, modeText}},      {kMenuText, {&g_menuTextOriginal, menuText}},
+            {kPlaySound, {&g_playSoundOriginal, playSound}}};
+        for (const auto &[address, hook] : hooks)
+            if ((*hook.first = runtime->lookupFunction(address)) != nullptr)
+                runtime->registerFunction(address, hook.second);
     }
 
     void padRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1285,6 +1578,7 @@ namespace
             g_sequenceOriginal = runtime->lookupFunction(kSequenceStep);
             if (g_sequenceOriginal != nullptr)
                 runtime->registerFunction(kSequenceStep, sequenceStep);
+            hookModeSelect(runtime);
             hookOverlay();
             hookCounts();
 #if defined(HL_WATCH_BUILD)
@@ -1374,6 +1668,22 @@ namespace
                     }
                 return w;
             }();
+            // HL_POKE=ADDR=VALUE,... (hex, debugging): these 32-bit words written at every vsync
+            static std::vector<std::pair<uint32_t, uint32_t>> s_poke = [] {
+                std::vector<std::pair<uint32_t, uint32_t>> w;
+                if (const char *v = std::getenv("HL_POKE"))
+                    for (const char *p = v; *p;)
+                    {
+                        char *e;
+                        const uint32_t a = static_cast<uint32_t>(std::strtoul(p, &e, 16));
+                        const uint32_t x = *e == '=' ? static_cast<uint32_t>(std::strtoul(e + 1, &e, 16)) : 0u;
+                        w.emplace_back(a & 0x1FFFFFCu, x);
+                        p = *e ? e + 1 : e;
+                    }
+                return w;
+            }();
+            for (const auto &[addr, value] : s_poke)
+                std::memcpy(g_rdram + addr, &value, 4);
             for (auto &[addr, last] : s_watch)
                 if (const uint32_t now = read32(addr); now != last)
                 {

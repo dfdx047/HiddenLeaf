@@ -34,6 +34,12 @@ object TouchBridge {
     /** Resolution (quarters: 4 = 1x), screen filter, the picture's shape and the frame rate, in effect from the next frame. */
     @JvmStatic external fun nativeSetVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int)
 
+    /** "Naruto Online" in the game's own Mode Select (under Free Battle; docs/menu-online.md), on or off. */
+    @JvmStatic external fun nativeSetMenuOnline(on: Boolean)
+
+    /** How many times the player chose "Naruto Online" there; the lobby opens when it goes up (not wired yet). */
+    @JvmStatic external fun nativeOnlineMenu(): Int
+
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
 
     fun divider(): Int = runCatching { nativeDivider() }.getOrDefault(2)
