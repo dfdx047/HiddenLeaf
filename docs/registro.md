@@ -61,6 +61,27 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-14 11:40: v0.1.0-beta, APK de release, READMEs e changelogs em três línguas
+
+- O desenvolvedor já tinha testado e gravado o vídeo; pediu o release sem testar nenhum aparelho de novo.
+- `android/app/build.gradle.kts`: versão padrão `0.1.0-beta` (versionCode 100) e release **sem R8** (`isMinifyEnabled` e
+  `isShrinkResources` desligados), para o APK rodar as mesmas classes do debug que foi testado nos celulares.
+- Chave de release nova, `~/keys/hiddenleaf-release.jks` com `hiddenleaf-release.properties` (fora do repositório, no
+  padrão das chaves dos outros projetos). Certificado `CN=Hidden Leaf, O=dfdx047`, SHA-256
+  `8b3f4213556edbd018996833418f102f4769e418e2edab675a6e67b084990830`. O APK de release não instala por cima dos builds
+  de teste (chave diferente): quem tem o de teste desinstala antes.
+- APK: `build/release/HiddenLeaf-v0.1.0-beta.apk` (172 MB), SHA-256
+  `96569b29ae339da2f3577e397c59d91baba43352858e89c6861080b161c75174`. Motores `libun5.so` e `libun5_v80.so` de 08:55 (os
+  testados no online); `libun5_un6_a35*.so` de 13/11 15:30 (sem as funções JNI novas do online, que o app chama com
+  `runCatching`; o online fica desligado com mod).
+- `README.md` agora em inglês, com `README.pt-BR.md` e `README.es.md` (o `README.en.md` saiu): banner, botões do
+  shields.io, imagens, recursos, como funciona, trajetória, aparelhos, problemas conhecidos, compilação e créditos.
+  `CHANGELOG.md`, `CHANGELOG.pt-BR.md` e `CHANGELOG.es.md` com a v0.1.0-beta.
+- Imagens em `docs/images/` (1,9 MB): capturas do Honor e do Poco (lutas online, Mode Select com o Naruto Online, painel,
+  seleção 1P × 2P), do Mi A3 com o Alpha 1.1X (VS, WINNER), do Honor e do Cube (launcher, título), e dos testes
+  Robolectric (controles na tela, Toque Pro, menu do jogo). O banner é a luta contra o Zabuza escurecida com o ícone.
+- Nada foi instalado nem testado em aparelho nesta entrada.
+
 ### 2026-11-14 08:58: sem a caixa do jogo atrás do painel online
 
 - O desenvolvedor achou estranha a caixa de mensagem do jogo ("Naruto Online / Quick Match, Create Room or Join Room")

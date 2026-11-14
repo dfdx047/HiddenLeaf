@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         // CI passes the tag (android-v0.1.0 -> 0.1.0) and the run number; a local build is named after the line below
-        val vName = System.getenv("HL_VERSION_NAME") ?: "0.2.0"
+        val vName = System.getenv("HL_VERSION_NAME") ?: "0.1.0-beta"
         val vParts = vName.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
         versionCode = System.getenv("HL_VERSION_CODE")?.toInt()
             ?: maxOf(1, vParts.getOrElse(0) { 0 } * 10000 + vParts.getOrElse(1) { 0 } * 100 + vParts.getOrElse(2) { 0 })
@@ -46,8 +46,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // no R8: the release runs the same classes as the debug build the phones were tested with (the engine dominates the
+            // size anyway, and JNI finds its Kotlin side by name)
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
