@@ -262,17 +262,76 @@ assert.equal(bad.status, 413);
 bad = await handle(new Request("https://t/v1/nothing", { method: "POST", body: "{}" }), env, now);
 assert.equal(bad.status, 404);
 
-// the Durable Object: what the host sends reaches the guest and back, unchanged; text and empty messages are dropped
-const sockets = { h: [], g: [] };
+// the Durable Object: what the host sends reaches the guest and back, unchanged; spectators receive tagged fan-out and are read-only
+const sockets = { h: [], g: [], s: [] };
 const mk = (tag) => { const s = { tag, got: [], send(m) { this.got.push(new Uint8Array(m)); } }; sockets[tag].push(s); return s; };
-const hs = mk("h"), gs = mk("g");
+const hs = mk("h"), gs = mk("g"), sp = mk("s");
 const relay = new HiddenLeafRelay({ getWebSockets: (tag) => sockets[tag] ?? [], getTags: (ws) => [ws.tag] });
 relay.webSocketMessage(hs, new Uint8Array([1, 2, 3]).buffer);
 relay.webSocketMessage(gs, new Uint8Array([9]).buffer);
+relay.webSocketMessage(sp, new Uint8Array([7, 7]).buffer); // ignored: spectators are read-only
 relay.webSocketMessage(gs, "text");
 relay.webSocketMessage(hs, new Uint8Array(0).buffer);
 relay.webSocketMessage(hs, new Uint8Array(2000).buffer);
 assert.deepEqual(gs.got.map((m) => [...m]), [[1, 2, 3]]);
 assert.deepEqual(hs.got.map((m) => [...m]), [[9]]);
+assert.deepEqual(sp.got.map((m) => [...m]), [[0x53, 1, 1, 2, 3], [0x53, 2, 9]]);
+
+// ---- Phase 8: Ranked profiles, bilateral match verification, Global Top 100 leaderboard
+const p1 = await call("profile", { player_id: "p1_deadbeef01", secret: "secret_p1_0123456789", name: "NarutoRP", input_mode: "touch" }, "198.51.100.80");
+assert.equal(p1.status, 200);
+assert.equal(p1.points, 1000);
+assert.equal(p1.tier, "Genin");
+assert.equal((await call("profile", { player_id: "p1_deadbeef01", secret: "wrong_secret_0123456789", name: "Hacker" })).status, 403);
+const p2 = await call("profile", { player_id: "p2_deadbeef02", secret: "secret_p2_0123456789", name: "SasukeRP", input_mode: "touch" }, "198.51.100.81");
+assert.equal(p2.status, 200);
+
+// bilateral verification: first report waits, second matching report resolves and awards RP
+const rep1 = await call("ranked/report", { match_id: "m_100001", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "p1" });
+assert.equal(rep1.resolved, false);
+assert.equal(rep1.waiting, true);
+const rep2 = await call("ranked/report", { match_id: "m_100001", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "p1" });
+assert.equal(rep2.resolved, true);
+assert.equal(rep2.winner_id, "p1_deadbeef01");
+assert.ok(rep2.p1_points > 1000);
+assert.ok(rep2.p2_points < 1000);
+
+// disputed report (cheater claims opposite winner) -> 0 points awarded
+await call("ranked/report", { match_id: "m_100002", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "p1" });
+const disp = await call("ranked/report", { match_id: "m_100002", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "p2" });
+assert.equal(disp.resolved, false);
+assert.equal(disp.disputed, true);
+
+// cached global leaderboard
+const lbRes = await handle(new Request("https://t/v1/leaderboard?limit=10&mode=touch"), env, now);
+assert.equal(lbRes.status, 200);
+assert.match(lbRes.headers.get("cache-control"), /max-age=60/);
+const lb = await lbRes.json();
+assert.equal(lb.entries[0].name, "NarutoRP");
+assert.equal(lb.entries[0].rank, 1);
+
+// ---- Phase 8: Custom Lobby (2-8 players, King-of-the-Hill rotation + spectator WS)
+const lob = await call("lobby/create", { v, game: GAME, fp, player_id: "host_0001", name: "Kakashi", max_players: 4, allow_spectators: true, input_mode: "any" }, "198.51.100.90");
+assert.equal(lob.status, 200);
+assert.equal(lob.members.length, 1);
+const lj1 = await call("lobby/join", { v, game: GAME, fp, code: lob.code, player_id: "ply_0002", name: "Guy" }, "198.51.100.91");
+assert.equal(lj1.members.find((m) => m.id === "ply_0002").role, "p2");
+const lj2 = await call("lobby/join", { v, game: GAME, fp, code: lob.code, player_id: "ply_0003", name: "Lee" }, "198.51.100.92");
+assert.equal(lj2.members.find((m) => m.id === "ply_0003").role, "queue");
+const lSpec = await call("lobby/join", { v, game: GAME, fp, code: lob.code, player_id: "spec_0004", name: "Tenten", spectator: true }, "198.51.100.93");
+assert.equal(lSpec.members.find((m) => m.id === "spec_0004").role, "spectator");
+// King-of-the-Hill rotation: p2 (Guy) wins -> Guy becomes p1, Lee becomes p2, Kakashi goes to queue!
+const rot = await call("lobby/rotate", { code: lob.code, player_id: "host_0001", winner: "p2" }, "198.51.100.90");
+assert.equal(rot.members.find((m) => m.id === "ply_0002").role, "p1");
+assert.equal(rot.members.find((m) => m.id === "ply_0003").role, "p2");
+assert.equal(rot.members.find((m) => m.id === "host_0001").role, "queue");
+
+// Spectator WebSocket upgrade
+const specRoom = await call("host", { v, game: GAME, fp, name: "SpecHost", addrs: [], opts: { spectators: true } }, "198.51.100.95");
+relayCalls.length = 0;
+const wsSpec = await handle(new Request(`https://t/v1/ws?code=${specRoom.code}&role=spectator`, { headers: { upgrade: "websocket" } }), env, now);
+assert.equal(wsSpec.status, 200);
+assert.deepEqual(relayCalls.map((c) => [c.room, c.who]), [[specRoom.code, "s"]]);
+console.log("hiddenleaf-online worker: all tests passed");
 
 console.log("hiddenleaf-online worker: all tests passed");

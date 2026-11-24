@@ -67,6 +67,7 @@ import com.dfdx047.hiddenleaf.ui.components.ScreenTitle
 import com.dfdx047.hiddenleaf.ui.components.SectionCard
 import com.dfdx047.hiddenleaf.ui.theme.Konoha
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Online: two players, each on their phone. One creates a room and tells the other its six-digit code; the other joins with it. The
@@ -146,6 +147,25 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
                     Button(onClick = { lobby.quick(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.online_quick))
                     }
+                    OutlinedButton(
+                        onClick = {
+                            com.dfdx047.hiddenleaf.engine.TrainingQueue.arm(
+                                com.dfdx047.hiddenleaf.engine.TrainingQueue.Request(
+                                    server = Online.cleanServer(prefs.server),
+                                    name = prefs.name,
+                                    fp = fp(),
+                                    inputMode = Online.effectiveInputMode(prefs.inputMode),
+                                    delay = prefs.delay,
+                                    relay = prefs.relay,
+                                )
+                            )
+                            vm.play()
+                        },
+                        enabled = can,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.online_train_while_queue))
+                    }
                     Text(
                         stringResource(R.string.online_quick_hint) +
                             (if (waiting > 0) " " + pluralStringResource(R.plurals.online_quick_others, waiting, waiting) + "." else ""),
@@ -178,6 +198,8 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
                 }
             }
         }
+
+        if (!prefs.lan) RankedAndLobbySection(prefs, ready, serverSet, fp)
 
         SectionCard(stringResource(R.string.online_guide_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
             Text(stringResource(if (prefs.lan) R.string.lan_guide else R.string.online_guide), style = MaterialTheme.typography.bodyMedium)
@@ -417,5 +439,141 @@ private fun Busy(text: String, onCancel: (() -> Unit)?) {
         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         if (onCancel != null) TextButton(onClick = onCancel) { Text(stringResource(R.string.online_cancel)) }
+    }
+}
+
+@Composable
+private fun RankedAndLobbySection(
+    prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
+    ready: Boolean,
+    serverSet: Boolean,
+    fp: () -> String,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var profile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.RankedProfile?>(null) }
+    var leaderboard by remember { mutableStateOf<List<com.dfdx047.hiddenleaf.data.OnlineAdvanced.LeaderboardEntry>>(emptyList()) }
+    var loadingRank by remember { mutableStateOf(false) }
+    var customLobby by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.CustomLobby?>(null) }
+    var lobbyCode by remember { mutableStateOf("") }
+    var lobbyMax by remember { mutableStateOf(4) }
+    var lobbyErr by remember { mutableStateOf<String?>(null) }
+
+    // Ranked & Top 100 Global card
+    SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
+        profile?.let { p ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${p.tier} · #${p.rank}", style = MaterialTheme.typography.titleMedium, color = Konoha.ChakraAmber)
+                Text("${p.points} RP (${p.wins}V / ${p.losses}D)", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        FilledTonalButton(
+            onClick = {
+                if (!serverSet) return@FilledTonalButton
+                loadingRank = true
+                scope.launch {
+                    val srv = Online.cleanServer(prefs.server)
+                    runCatching {
+                        profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                            context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
+                        )
+                    }
+                    leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 20)
+                    loadingRank = false
+                }
+            },
+            enabled = serverSet && !loadingRank,
+        ) {
+            Text(stringResource(R.string.online_ranked_refresh))
+        }
+        if (leaderboard.isEmpty()) {
+            Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            for (e in leaderboard.take(10)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("#${e.rank}", style = MaterialTheme.typography.labelLarge, color = Konoha.ChakraAmber, modifier = Modifier.width(34.dp))
+                    Text(e.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text("${e.tier} · ${e.points} RP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+
+    // Custom Lobby (2-8 players, King of the Hill) & Spectator card
+    SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
+        Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val cur = customLobby
+        if (cur != null) {
+            Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
+            for (m in cur.members) {
+                Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
+            }
+            OutlinedButton(onClick = {
+                scope.launch {
+                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
+                    customLobby = null
+                }
+            }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (n in listOf(2, 4, 6, 8)) {
+                    FilterChip(selected = lobbyMax == n, onClick = { lobbyMax = n }, label = { Text("${n}P") })
+                }
+            }
+            FilledTonalButton(
+                onClick = {
+                    lobbyErr = null
+                    scope.launch {
+                        runCatching {
+                            customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
+                                context, Online.cleanServer(prefs.server), prefs.name, fp(), lobbyMax, true,
+                                Online.effectiveInputMode(prefs.inputMode),
+                            )
+                        }.onFailure { lobbyErr = it.message }
+                    }
+                },
+                enabled = ready && serverSet && prefs.name.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(stringResource(R.string.online_custom_lobby_create)) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = lobbyCode,
+                    onValueChange = { lobbyCode = it.filter { c -> c.isDigit() }.take(6) },
+                    label = { Text(stringResource(R.string.online_code)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = {
+                        lobbyErr = null
+                        scope.launch {
+                            runCatching {
+                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                    Online.effectiveInputMode(prefs.inputMode), spectator = false,
+                                )
+                            }.onFailure { lobbyErr = it.message }
+                        }
+                    },
+                    enabled = ready && serverSet && lobbyCode.length == 6,
+                ) { Text(stringResource(R.string.online_custom_lobby_join)) }
+                OutlinedButton(
+                    onClick = {
+                        lobbyErr = null
+                        scope.launch {
+                            runCatching {
+                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                    Online.effectiveInputMode(prefs.inputMode), spectator = true,
+                                )
+                            }.onFailure { lobbyErr = it.message }
+                        }
+                    },
+                    enabled = ready && serverSet && lobbyCode.length == 6,
+                ) { Text(stringResource(R.string.online_custom_lobby_spectate)) }
+            }
+            lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }

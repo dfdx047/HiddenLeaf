@@ -61,6 +61,20 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 02:12: Fase 8 — Modo Online avançado: Rankeada + Top 100 Global, Salas Personalizadas (2–8), Espectador e Treino na Fila
+
+- **Worker Cloudflare (`online/worker/worker.js`, `schema.sql`, `test.mjs`):**
+  - **Rankeada por pontos (RP/Elo) + Top 100 Global:** novas tabelas `hl_players` (autenticação por `player_id` + SHA-256 de `secret`) e `hl_matches` (verificação bilateral de vencedor — resultados divergentes ficam como `disputed` sem pontuar, bloqueando vitórias falsas; `ragequit` pune quem caiu). Patentes Ninja (*Genin* → *Chunin* → *Jonin* → *ANBU* → *Sannin* → *Kage*) e `GET /v1/leaderboard` com `Cache-Control: public, max-age=60`.
+  - **Salas Personalizadas (2–8 jogadores, Rei da Mesa):** tabela `hl_lobbies` e rotas `/v1/lobby/create`, `/v1/lobby/join`, `/v1/lobby/state`, `/v1/lobby/rotate` (vencedor fica em P1, próximo da fila entra em P2, perdedor vai pro fim da fila) e `/v1/lobby/leave`.
+  - **Modo Espectador leve (~300 B/s):** `HiddenLeafRelay` atualizado para suportar até 4 espectadores somente leitura (tag `"s"` via `/v1/ws?code=&role=spectator`), recebendo fan-out etiquetado (`[0x53, 1|2, ...pacote]`) dos inputs de P1/P2.
+- **App Android (`OnlineAdvanced.kt`, `TrainingQueue.kt`, `OnlineScreen.kt`, `GameActivity.kt`, `strings.xml` en/pt/es):**
+  - **Treinar enquanto procura (`TrainingQueue.kt`):** botão *Treinar enquanto procura* abre o jogo normalmente enquanto busca oponente em segundo plano, exibindo o selo *Procurando oponente durante o treino…* e um banner de aceitação (*Oponente encontrado! [Aceitar]*) que reinicia direto para a partida via `OnlineRestartActivity`.
+  - **UI de Rankeada & Top 100 + Sala Personalizada (2–8) / Espectador** integrada na aba Online (`OnlineScreen.kt`).
+- **Verificado:**
+  - `node online/worker/test.mjs`: 100% verde (perfil autenticado, report bilateral, anti-cheat de disputa, leaderboard cacheado 60 s, lobby 2–8 com rotação Rei da Mesa, espectador read-only e fan-out).
+  - `./gradlew testDebugUnitTest` verde e instalado nos 3 aparelhos.
+  - Conferido visualmente nos 3 aparelhos (**Mi A3**, **RG Cube**, **RP5 capado**): cards *Rankeada e Top 100 Global*, *Sala Personalizada (2–8) e Espectador*, *Separação por controle* e modo *Treinar enquanto procura* abrindo `GameActivity` com o overlay da fila sem crashes.
+
 ### 2026-11-24 02:03: Fase 7 — Modo Online: otimização Cloudflare free-tier + segurança + separação Toque vs Controle
 
 - **Worker Cloudflare (`online/worker/worker.js`, `schema.sql`, `test.mjs`):**

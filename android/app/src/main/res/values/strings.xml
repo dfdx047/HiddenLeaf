@@ -504,4 +504,17 @@
     <string name="online_input_touch">Touch only</string>
     <string name="online_input_gamepad">Controller only</string>
     <string name="online_input_mode_hint">Separate Touch and Controller players for fair matches. Touch-only locks out external gamepads during the match.</string>
+    <string name="online_train_while_queue">Train while searching</string>
+    <string name="online_training_searching">Searching for opponent while training…</string>
+    <string name="online_training_found">Opponent found: %1$s!</string>
+    <string name="online_training_accept">Accept</string>
+    <string name="online_ranked_board_title">Ranked &amp; Global Top 100</string>
+    <string name="online_ranked_refresh">Refresh ranking</string>
+    <string name="online_ranked_empty">No ranked players yet. Play ranked matches to climb from Genin to Kage!</string>
+    <string name="online_custom_lobby_title">Custom Lobby (2–8) &amp; Spectator</string>
+    <string name="online_custom_lobby_create">Create Lobby (King of the Hill)</string>
+    <string name="online_custom_lobby_join">Join</string>
+    <string name="online_custom_lobby_spectate">Spectate</string>
+    <string name="online_custom_lobby_leave">Leave Lobby</string>
+    <string name="online_custom_lobby_hint">Up to 8 players with automatic King-of-the-Hill rotation and live low-bandwidth spectator mode.</string>
 </resources>

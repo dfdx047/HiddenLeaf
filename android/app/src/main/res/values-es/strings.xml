@@ -503,4 +503,17 @@
     <string name="online_input_touch">Solo Táctil</string>
     <string name="online_input_gamepad">Solo Mando</string>
     <string name="online_input_mode_hint">Separa a jugadores táctiles de quienes usan mando físico. En Solo Táctil se bloquean los mandos externos en la partida.</string>
+    <string name="online_train_while_queue">Entrenar mientras busca</string>
+    <string name="online_training_searching">Buscando rival mientras entrenas…</string>
+    <string name="online_training_found">¡Rival encontrado: %1$s!</string>
+    <string name="online_training_accept">Aceptar</string>
+    <string name="online_ranked_board_title">Clasificatoria y Top 100 Global</string>
+    <string name="online_ranked_refresh">Actualizar ranking</string>
+    <string name="online_ranked_empty">Aún no hay jugadores clasificados. ¡Juega para subir de Genin a Kage!</string>
+    <string name="online_custom_lobby_title">Sala Personalizada (2–8) y Espectador</string>
+    <string name="online_custom_lobby_create">Crear Sala (Rey de la Colina)</string>
+    <string name="online_custom_lobby_join">Unirse</string>
+    <string name="online_custom_lobby_spectate">Ver</string>
+    <string name="online_custom_lobby_leave">Salir de la Sala</string>
+    <string name="online_custom_lobby_hint">Hasta 8 jugadores con rotación automática Rey de la Colina y modo espectador ligero en vivo.</string>
 </resources>

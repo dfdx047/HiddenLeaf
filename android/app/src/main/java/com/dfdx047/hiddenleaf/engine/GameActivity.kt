@@ -107,7 +107,14 @@ class GameActivity : SDLActivity() {
         if (online == null && !com.dfdx047.hiddenleaf.data.Online.modsOn(paths)) runCatching { TouchBridge.nativeSetMenuOnline(true) }
         preferRefresh()
         addTouchPad()
-        (SDLActivity.getContentView() as? ViewGroup)?.let { layout -> online?.attach(layout) }
+        (SDLActivity.getContentView() as? ViewGroup)?.let { layout ->
+            online?.attach(layout)
+            if (online == null) {
+                TrainingQueue.pending?.let { req ->
+                    trainingQueue = TrainingQueueOverlay(this, paths, req).also { it.attach(layout) }
+                }
+            }
+        }
     }
 
     /** 90 or 120 pictures a second: the screen's fastest mode at its current size (a 120 Hz panel left at 60 shows half). */
@@ -267,6 +274,16 @@ class GameActivity : SDLActivity() {
 
     // ---- the native-styled UN5 Graphics menu (GraphicsMenu.kt): live game behind it, wooden boards
     private var graphicsMenu: GraphicsMenuHost? = null
+
+    private var trainingQueue: TrainingQueueOverlay? = null
+
+    fun restartForOnlineMatch() {
+        runCatching {
+            startActivity(Intent(this, com.dfdx047.hiddenleaf.OnlineRestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        finish()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
 
     private fun openGraphicsMenu() {
         closeMenu()
@@ -772,6 +789,7 @@ class GameActivity : SDLActivity() {
      */
     @Suppress("unused")
     fun quitToApp(page: String? = null) {
+        trainingQueue?.stop()
         online?.leave() // (the other phone is told before this process goes)
         runOnUiThread {
             TouchBridge.releaseAll()

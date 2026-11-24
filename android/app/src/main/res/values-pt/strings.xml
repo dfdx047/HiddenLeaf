@@ -503,4 +503,17 @@
     <string name="online_input_touch">Só Toque</string>
     <string name="online_input_gamepad">Só Controle</string>
     <string name="online_input_mode_hint">Separa quem joga na tela de quem usa controle físico. Em Só Toque, controles externos ficam bloqueados na partida.</string>
+    <string name="online_train_while_queue">Treinar enquanto procura</string>
+    <string name="online_training_searching">Procurando oponente durante o treino…</string>
+    <string name="online_training_found">Oponente encontrado: %1$s!</string>
+    <string name="online_training_accept">Aceitar</string>
+    <string name="online_ranked_board_title">Rankeada e Top 100 Global</string>
+    <string name="online_ranked_refresh">Atualizar ranking</string>
+    <string name="online_ranked_empty">Nenhum jogador ranqueado ainda. Jogue rankeadas para subir de Genin até Kage!</string>
+    <string name="online_custom_lobby_title">Sala Personalizada (2–8) e Espectador</string>
+    <string name="online_custom_lobby_create">Criar Lobby (Rei da Mesa)</string>
+    <string name="online_custom_lobby_join">Entrar</string>
+    <string name="online_custom_lobby_spectate">Assistir</string>
+    <string name="online_custom_lobby_leave">Sair do Lobby</string>
+    <string name="online_custom_lobby_hint">Até 8 jogadores com rotação automática Rei da Mesa e modo espectador leve em tempo real.</string>
 </resources>

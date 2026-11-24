@@ -77,6 +77,33 @@ function cleanInputMode(s) {
     return s === "touch" || s === "gamepad" ? s : "any";
 }
 
+function cleanPlayerId(s) {
+    return typeof s === "string" ? s.replace(/[^0-9a-zA-Z_-]/g, "").slice(0, 48) : "";
+}
+
+async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text)));
+    return [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+export function ninjaTier(points) {
+    if (points >= 2000) return "Kage";
+    if (points >= 1700) return "Sannin";
+    if (points >= 1500) return "ANBU";
+    if (points >= 1300) return "Jonin";
+    if (points >= 1100) return "Chunin";
+    return "Genin";
+}
+
+// Elo/RP points delta: K=32, bounded [8..48], +4 bonus for 3+ win streak.
+export function eloDelta(winnerPts, loserPts, winnerStreak = 0) {
+    const expected = 1 / (1 + Math.pow(10, (loserPts - winnerPts) / 400));
+    const base = Math.round(32 * (1 - expected));
+    const gain = Math.max(8, Math.min(48, base)) + (winnerStreak >= 2 ? 4 : 0);
+    const loss = Math.max(8, Math.min(40, base));
+    return { gain, loss };
+}
+
 function reply(obj, status = 200) {
     return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 }
@@ -99,6 +126,8 @@ function cleanOpts(o) {
     if (o && typeof o === "object" && !Array.isArray(o)) {
         if (Number.isInteger(o.delay) && o.delay >= 0 && o.delay <= 4) out.delay = o.delay;
         if (typeof o.relay === "boolean") out.relay = o.relay;
+        if (typeof o.spectators === "boolean") out.spectators = o.spectators;
+        if (typeof o.ranked === "boolean") out.ranked = o.ranked;
     }
     return out;
 }
@@ -213,21 +242,63 @@ export async function handle(request, env, now) {
     if (request.method === "GET" && url.pathname === "/") {
         return new Response("Hidden Leaf Online: rooms for Hidden Leaf (Naruto Shippuden: Ultimate Ninja 5).\n", { headers: { "content-type": "text/plain; charset=utf-8" } });
     }
+    if (request.method === "GET" && url.pathname === "/v1/leaderboard") {
+        const limit = Math.max(1, Math.min(100, Number.parseInt(url.searchParams.get("limit") || "100", 10) || 100));
+        const mode = url.searchParams.get("mode") || "all";
+        let rows;
+        if (mode === "touch" || mode === "gamepad") {
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode FROM hl_players WHERE input_mode = ? ORDER BY points DESC, wins DESC LIMIT ?")
+                .bind(mode, limit).all()).results;
+        } else {
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode FROM hl_players ORDER BY points DESC, wins DESC LIMIT ?")
+                .bind(limit).all()).results;
+        }
+        const entries = rows.map((r, i) => ({
+            rank: i + 1,
+            player_id: r.player_id,
+            name: r.name,
+            points: r.points,
+            wins: r.wins,
+            losses: r.losses,
+            streak: r.streak,
+            input_mode: r.input_mode,
+            tier: ninjaTier(r.points),
+        }));
+        return new Response(JSON.stringify({ entries, updated: now }), {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-control": "public, max-age=60" },
+        });
+    }
     if (request.method === "GET" && url.pathname === "/v1/ws") {
         if (request.headers.get("upgrade") !== "websocket") return reply({ error: "bad request" }, 426);
         if (!env.RELAY) return reply({ error: "no relay" }, 503);
-        const who = await whoIs(env, url.searchParams.get("code"), url.searchParams.get("key"), now);
-        if (!who) return reply({ error: "no room" }, 404);
-        if (now - who.room.touched >= TOUCH_EVERY) {
-            await env.DB.prepare("UPDATE hl_rooms SET touched = ? WHERE code = ?").bind(now, who.room.code).run();
+        const roleParam = url.searchParams.get("role") || "";
+        const codeParam = url.searchParams.get("code") || "";
+        let tag = "";
+        let roomCode = "";
+        if (roleParam === "spectator") {
+            const room = await env.DB.prepare("SELECT * FROM hl_rooms WHERE code = ?").bind(codeParam).first();
+            if (!room || now - room.touched >= ROOM_IDLE) return reply({ error: "no room" }, 404);
+            const opts = JSON.parse(room.opts || "{}");
+            if (opts.spectators === false) return reply({ error: "no spectators" }, 403);
+            tag = "s";
+            roomCode = room.code;
+        } else {
+            const who = await whoIs(env, codeParam, url.searchParams.get("key"), now);
+            if (!who) return reply({ error: "no room" }, 404);
+            if (now - who.room.touched >= TOUCH_EVERY) {
+                await env.DB.prepare("UPDATE hl_rooms SET touched = ? WHERE code = ?").bind(now, who.room.code).run();
+            }
+            tag = who.host ? "h" : "g";
+            roomCode = who.room.code;
         }
         const headers = new Headers(request.headers);
-        headers.set("x-hl-who", who.host ? "h" : "g");
+        headers.set("x-hl-who", tag);
         // The relay is made near whoever connects first (left to Cloudflare it may sit on another continent: 100-150 ms more
         // each way between two players in Brazil, as Dragon Rage measured).
         const hints = { SA: "sam", NA: "enam", EU: "weur", AS: "apac", OC: "oc", AF: "afr" };
         const hint = hints[(request.cf && request.cf.continent) || ""] || "sam";
-        const stub = env.RELAY.get(env.RELAY.idFromName(who.room.code), { locationHint: hint });
+        const stub = env.RELAY.get(env.RELAY.idFromName(roomCode), { locationHint: hint });
         return stub.fetch(new Request(request.url, { headers }));
     }
     if (request.method !== "POST" || !url.pathname.startsWith("/v1/")) return reply({ error: "bad request" }, 404);
@@ -330,6 +401,215 @@ export async function handle(request, env, now) {
         return reply({ key, token: room.session_secret || "", input_mode: roomMode, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) });
     }
 
+    // ---- Ranked profile & bilateral result reporting
+    if (what === "profile") {
+        const pid = cleanPlayerId(body.player_id);
+        const secret = typeof body.secret === "string" ? body.secret : "";
+        if (pid.length < 8 || secret.length < 16) return reply({ error: "bad request" }, 400);
+        const name = cleanName(body.name) || "Ninja";
+        const mode = cleanInputMode(body.input_mode);
+        const hash = await sha256Hex(secret);
+        const existing = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
+        if (existing) {
+            if (existing.auth_hash !== hash) return reply({ error: "unauthorized" }, 403);
+            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, updated = ? WHERE player_id = ?")
+                .bind(name, mode, now, pid).run();
+            const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > ? OR (points = ? AND wins > ?)")
+                .bind(existing.points, existing.points, existing.wins).first();
+            return reply({
+                player_id: pid, name, points: existing.points, wins: existing.wins, losses: existing.losses,
+                streak: existing.streak, input_mode: mode, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(existing.points),
+            });
+        }
+        if (!checkRate(ip, now, "profile", 10)) return reply({ error: "busy" }, 429);
+        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?)")
+            .bind(pid, hash, name, mode, now).run();
+        const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > 1000 OR (points = 1000 AND wins > 0)").first();
+        return reply({ player_id: pid, name, points: 1000, wins: 0, losses: 0, streak: 0, input_mode: mode, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000) });
+    }
+
+    if (what === "ranked/report") {
+        const pid = cleanPlayerId(body.player_id);
+        const oppId = cleanPlayerId(body.opponent_id);
+        const secret = typeof body.secret === "string" ? body.secret : "";
+        const matchId = cleanPlayerId(body.match_id);
+        const claim = body.winner === "p1" || body.winner === "p2" || body.winner === "ragequit" ? body.winner : "";
+        const role = body.role === "p1" || body.role === "p2" ? body.role : "";
+        if (!pid || !oppId || pid === oppId || secret.length < 16 || matchId.length < 6 || !claim || !role) {
+            return reply({ error: "bad request" }, 400);
+        }
+        const player = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
+        if (!player || player.auth_hash !== (await sha256Hex(secret))) return reply({ error: "unauthorized" }, 403);
+        const p1Id = role === "p1" ? pid : oppId;
+        const p2Id = role === "p1" ? oppId : pid;
+        let m = await env.DB.prepare("SELECT * FROM hl_matches WHERE match_id = ?").bind(matchId).first();
+        if (!m) {
+            await env.DB.prepare("INSERT OR IGNORE INTO hl_matches (match_id, p1_id, p2_id, p1_claim, p2_claim, created) VALUES (?, ?, ?, ?, ?, ?)")
+                .bind(matchId, p1Id, p2Id, role === "p1" ? claim : null, role === "p2" ? claim : null, now).run();
+            m = await env.DB.prepare("SELECT * FROM hl_matches WHERE match_id = ?").bind(matchId).first();
+        } else {
+            if (m.resolved !== 0) return reply({ resolved: m.resolved === 1, winner_id: m.winner_id, p1_delta: m.p1_delta, p2_delta: m.p2_delta });
+            if (role === "p1" && m.p1_id === pid) {
+                await env.DB.prepare("UPDATE hl_matches SET p1_claim = ? WHERE match_id = ?").bind(claim, matchId).run();
+                m.p1_claim = claim;
+            } else if (role === "p2" && m.p2_id === pid) {
+                await env.DB.prepare("UPDATE hl_matches SET p2_claim = ? WHERE match_id = ?").bind(claim, matchId).run();
+                m.p2_claim = claim;
+            } else {
+                return reply({ error: "unauthorized" }, 403);
+            }
+        }
+        // Resolve when both sides agree, or when one side reports peer ragequit (the reporter wins)
+        let winnerRole = "";
+        if (m.p1_claim && m.p2_claim) {
+            if (m.p1_claim === m.p2_claim && (m.p1_claim === "p1" || m.p1_claim === "p2")) winnerRole = m.p1_claim;
+            else {
+                await env.DB.prepare("UPDATE hl_matches SET resolved = -1 WHERE match_id = ?").bind(matchId).run();
+                return reply({ resolved: false, disputed: true });
+            }
+        } else if (claim === "ragequit") {
+            winnerRole = role; // reporter stayed connected
+        } else {
+            return reply({ resolved: false, waiting: true });
+        }
+        const p1 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p1_id).first();
+        const p2 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p2_id).first();
+        if (!p1 || !p2) return reply({ error: "no player" }, 404);
+        const p1Won = winnerRole === "p1";
+        const winner = p1Won ? p1 : p2;
+        const loser = p1Won ? p2 : p1;
+        const { gain, loss } = eloDelta(winner.points, loser.points, winner.streak);
+        const wPts = winner.points + gain;
+        const lPts = Math.max(0, loser.points - loss);
+        const p1Delta = p1Won ? gain : -loss;
+        const p2Delta = p1Won ? -loss : gain;
+        await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, updated = ? WHERE player_id = ?")
+            .bind(wPts, now, winner.player_id).run();
+        await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, updated = ? WHERE player_id = ?")
+            .bind(lPts, now, loser.player_id).run();
+        await env.DB.prepare("UPDATE hl_matches SET winner_id = ?, p1_delta = ?, p2_delta = ?, resolved = 1 WHERE match_id = ?")
+            .bind(winner.player_id, p1Delta, p2Delta, matchId).run();
+        return reply({
+            resolved: true,
+            winner_id: winner.player_id,
+            p1_points: p1Won ? wPts : lPts,
+            p2_points: p1Won ? lPts : wPts,
+            p1_delta: p1Delta,
+            p2_delta: p2Delta,
+        });
+    }
+
+    // ---- Custom Lobbies (2-8 players, King-of-the-Hill queue + spectators)
+    if (what === "lobby/create") {
+        if (body.game !== GAME) return reply({ error: "game" }, 409);
+        if (!versionAllowed(env, body.v)) return reply({ error: "version" }, 409);
+        if (!checkRate(ip, now, "lobby", 10)) return reply({ error: "busy" }, 429);
+        const pid = cleanPlayerId(body.player_id) || randomKey().slice(0, 16);
+        const name = cleanName(body.name) || "Host";
+        const maxPlayers = Math.max(2, Math.min(8, Number.parseInt(body.max_players ?? 4, 10) || 4));
+        const allowSpec = body.allow_spectators === false ? 0 : 1;
+        const inputMode = cleanInputMode(body.input_mode);
+        const members = [{ id: pid, name, role: "p1", joined: now }];
+        for (let tries = 0; tries < 8; tries++) {
+            const code = randomCode();
+            const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_lobbies (code, v, game, fp, host_id, input_mode, max_players, allow_spectators, members, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(code, body.v, GAME, cleanFp(body.fp), pid, inputMode, maxPlayers, allowSpec, JSON.stringify(members), now, now).run();
+            if (r.meta.changes === 1) {
+                return reply({ code, player_id: pid, max_players: maxPlayers, allow_spectators: !!allowSpec, input_mode: inputMode, members });
+            }
+        }
+        return reply({ error: "busy" }, 503);
+    }
+
+    if (what === "lobby/join") {
+        const code = String(body.code ?? "").replace(/\D/g, "");
+        const lobby = await env.DB.prepare("SELECT * FROM hl_lobbies WHERE code = ?").bind(code).first();
+        if (!lobby || now - lobby.touched >= ROOM_IDLE * 2) return reply({ error: "no room" }, 404);
+        if (body.game !== lobby.game) return reply({ error: "game" }, 409);
+        if (lobby.v !== body.v) return reply({ error: "version" }, 409);
+        if (lobby.fp !== cleanFp(body.fp)) return reply({ error: "different" }, 409);
+        const reqMode = cleanInputMode(body.input_mode);
+        if (lobby.input_mode !== "any" && reqMode !== "any" && lobby.input_mode !== reqMode) return reply({ error: "input_mode" }, 409);
+        const members = JSON.parse(lobby.members || "[]");
+        const pid = cleanPlayerId(body.player_id) || randomKey().slice(0, 16);
+        const name = cleanName(body.name) || "Ninja";
+        const wantSpec = body.spectator === true;
+        if (wantSpec && !lobby.allow_spectators) return reply({ error: "no spectators" }, 403);
+        const existing = members.find((m) => m.id === pid);
+        if (!existing) {
+            if (members.length >= lobby.max_players) return reply({ error: "full" }, 409);
+            const hasP2 = members.some((m) => m.role === "p2");
+            const role = wantSpec ? "spectator" : (!hasP2 ? "p2" : "queue");
+            members.push({ id: pid, name, role, joined: now });
+            await env.DB.prepare("UPDATE hl_lobbies SET members = ?, touched = ? WHERE code = ?")
+                .bind(JSON.stringify(members), now, code).run();
+        }
+        return reply({
+            code, player_id: pid, host_id: lobby.host_id, max_players: lobby.max_players,
+            allow_spectators: !!lobby.allow_spectators, input_mode: lobby.input_mode,
+            active_room: lobby.active_room || null, members,
+        });
+    }
+
+    if (what === "lobby/state") {
+        const code = String(body.code ?? "").replace(/\D/g, "");
+        const lobby = await env.DB.prepare("SELECT * FROM hl_lobbies WHERE code = ?").bind(code).first();
+        if (!lobby || now - lobby.touched >= ROOM_IDLE * 2) return reply({ error: "no room" }, 404);
+        if (body.active_room && body.player_id === lobby.host_id) {
+            const ar = String(body.active_room).replace(/\D/g, "").slice(0, 6);
+            await env.DB.prepare("UPDATE hl_lobbies SET active_room = ?, touched = ? WHERE code = ?").bind(ar, now, code).run();
+            lobby.active_room = ar;
+        } else if (now - lobby.touched >= TOUCH_EVERY) {
+            await env.DB.prepare("UPDATE hl_lobbies SET touched = ? WHERE code = ?").bind(now, code).run();
+        }
+        return reply({
+            code, host_id: lobby.host_id, max_players: lobby.max_players,
+            allow_spectators: !!lobby.allow_spectators, input_mode: lobby.input_mode,
+            active_room: lobby.active_room || null, members: JSON.parse(lobby.members || "[]"),
+        });
+    }
+
+    if (what === "lobby/rotate") {
+        // King-of-the-Hill rotation: winner stays as P1, loser moves to back of queue, next queued player becomes P2.
+        const code = String(body.code ?? "").replace(/\D/g, "");
+        const lobby = await env.DB.prepare("SELECT * FROM hl_lobbies WHERE code = ?").bind(code).first();
+        if (!lobby || lobby.host_id !== cleanPlayerId(body.player_id)) return reply({ error: "unauthorized" }, 403);
+        const members = JSON.parse(lobby.members || "[]");
+        const p1 = members.find((m) => m.role === "p1");
+        const p2 = members.find((m) => m.role === "p2");
+        const queue = members.filter((m) => m.role === "queue");
+        const winner = body.winner === "p2" ? p2 : p1;
+        const loser = body.winner === "p2" ? p1 : p2;
+        if (winner && loser && queue.length > 0) {
+            const nextChallenger = queue[0];
+            winner.role = "p1";
+            nextChallenger.role = "p2";
+            loser.role = "queue";
+            // Reorder so loser goes to the back of the queue
+            const rest = members.filter((m) => m !== loser);
+            rest.push(loser);
+            await env.DB.prepare("UPDATE hl_lobbies SET members = ?, active_room = NULL, touched = ? WHERE code = ?")
+                .bind(JSON.stringify(rest), now, code).run();
+            return reply({ code, members: rest });
+        }
+        return reply({ code, members });
+    }
+
+    if (what === "lobby/leave") {
+        const code = String(body.code ?? "").replace(/\D/g, "");
+        const pid = cleanPlayerId(body.player_id);
+        const lobby = await env.DB.prepare("SELECT * FROM hl_lobbies WHERE code = ?").bind(code).first();
+        if (!lobby) return reply({});
+        if (lobby.host_id === pid) {
+            await env.DB.prepare("DELETE FROM hl_lobbies WHERE code = ?").bind(code).run();
+        } else {
+            const members = JSON.parse(lobby.members || "[]").filter((m) => m.id !== pid);
+            await env.DB.prepare("UPDATE hl_lobbies SET members = ?, touched = ? WHERE code = ?")
+                .bind(JSON.stringify(members), now, code).run();
+        }
+        return reply({});
+    }
+
     const who = await whoIs(env, body.code, body.key, now);
     if (!who) return reply({ error: "no room" }, 404);
     const code = who.room.code;
@@ -385,19 +665,24 @@ export default {
 };
 
 // A room's relay (one Durable Object per room code). Its sockets hibernate between messages: a room costs nothing while
-// nobody sends. Tags: "h" the host, "g" the guest. What one sends reaches the other as it is; a new socket of the same
-// player replaces the old one (a phone that reconnected).
+// nobody sends. Tags: "h" the host, "g" the guest, "s" read-only spectators (up to 4). What h/g sends reaches the opponent
+// unchanged, and a tagged copy ([0x53, 'h'|'g', ...payload]) is fanned out to live spectators (~300 B/s).
 export class HiddenLeafRelay {
     constructor(state) {
         this.state = state;
     }
     async fetch(request) {
         const who = request.headers.get("x-hl-who") || "";
-        if (who !== "h" && who !== "g") return new Response("bad request", { status: 400 });
+        if (who !== "h" && who !== "g" && who !== "s") return new Response("bad request", { status: 400 });
+        if (who === "s" && this.state.getWebSockets("s").length >= 4) {
+            return new Response("spectators full", { status: 429 });
+        }
         const pair = new WebSocketPair();
         const [client, server] = Object.values(pair);
-        for (const old of this.state.getWebSockets(who)) {
-            try { old.close(1000, "replaced"); } catch (e) {}
+        if (who === "h" || who === "g") {
+            for (const old of this.state.getWebSockets(who)) {
+                try { old.close(1000, "replaced"); } catch (e) {}
+            }
         }
         this.state.acceptWebSocket(server, [who]);
         return new Response(null, { status: 101, webSocket: client });
@@ -405,10 +690,21 @@ export class HiddenLeafRelay {
     webSocketMessage(ws, message) {
         if (typeof message === "string" || message.byteLength < 1 || message.byteLength > MAX_RELAY_MESSAGE) return;
         const tag = this.state.getTags(ws)[0] || "";
-        const other = tag === "h" ? "g" : tag === "g" ? "h" : "";
-        if (!other) return;
+        if (tag !== "h" && tag !== "g") return; // spectators are strictly read-only
+        const other = tag === "h" ? "g" : "h";
         for (const peer of this.state.getWebSockets(other)) {
             try { peer.send(message); } catch (e) {}
+        }
+        const spectators = this.state.getWebSockets("s");
+        if (spectators.length > 0) {
+            const raw = new Uint8Array(message);
+            const wrapped = new Uint8Array(2 + raw.byteLength);
+            wrapped[0] = 0x53; // 'S' spectator frame marker
+            wrapped[1] = tag === "h" ? 1 : 2;
+            wrapped.set(raw, 2);
+            for (const sp of spectators) {
+                try { sp.send(wrapped.buffer); } catch (e) {}
+            }
         }
     }
     webSocketClose(ws, code) {
