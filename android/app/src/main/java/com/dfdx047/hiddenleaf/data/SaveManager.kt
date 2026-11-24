@@ -45,6 +45,81 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
         return out
     }
 
+    /**
+     * Installs a clean 100% unlocked European save (BESLES-55605NARUTO5) onto mc0, backing up the current card first.
+     * Unlocks all characters, support links, Collection tables and max progress with a valid UN5 checksum, and
+     * propagates to mods (e.g. UN6 A35) via [ModSaves.prepare].
+     */
+    fun install100PercentSave(): Int {
+        backup()
+        val folder = File(paths.saves, BASE_SAVE_FOLDER).apply { mkdirs() }
+        val data1File = File(folder, "data01")
+        val data = if (data1File.exists() && data1File.length() == SLOT_SIZE.toLong()) {
+            val existing = data1File.readBytes()
+            if (existing.any { it != 0xFF.toByte() }) existing else makeCleanSlot()
+        } else {
+            makeCleanSlot()
+        }
+        // Apply 100% unlocks matching hl_game.cpp unlockEverything()
+        for (i in 0x38 until 0x38 + 0x8D0) data[i] = 0xFF.toByte()
+        for (i in 0x909 until 0x971) data[i] = 3
+        for (i in 0x990 until 0xB6D) if ((data[i].toInt() and 0xFF) < 3) data[i] = 3
+        // Progress counter (0x6E = 110)
+        data[0xE68] = 0x6E; data[0xE69] = 0; data[0xE6A] = 0; data[0xE6B] = 0
+        // Recompute UN5 16-bit checksum: sum of bytes [0..1] + [4..9215], stored little-endian at [2..3]
+        var sum = (data[0].toInt() and 0xFF) + (data[1].toInt() and 0xFF)
+        for (i in 4 until SLOT_SIZE) sum += (data[i].toInt() and 0xFF)
+        val cks = sum and 0xFFFF
+        data[2] = (cks and 0xFF).toByte()
+        data[3] = ((cks ushr 8) and 0xFF).toByte()
+
+        data1File.writeBytes(data)
+        File(folder, "data04").writeBytes(data) // autosave mirror
+        val empty = ByteArray(SLOT_SIZE) { 0xFF.toByte() }
+        for (slot in listOf("data02", "data03")) {
+            val f = File(folder, slot)
+            if (!f.exists()) f.writeBytes(empty)
+        }
+        // 64-byte header (4 x 16-byte slot descriptors: slot 1 and slot 4 active with matching checksum)
+        val hdr = ByteArray(64)
+        fun writeSlotDesc(off: Int, active: Boolean) {
+            if (!active) {
+                for (i in 9 until 16) hdr[off + i] = 0xFF.toByte()
+                return
+            }
+            hdr[off] = 1
+            hdr[off + 1] = 0
+            hdr[off + 2] = data[2]
+            hdr[off + 3] = data[3]
+            hdr[off + 4] = data[4]
+            hdr[off + 5] = data[5]
+            hdr[off + 6] = data[6]
+            hdr[off + 7] = data[7]
+            // Timestamp (2026-11-24 00:00:00)
+            hdr[off + 8] = 0; hdr[off + 9] = 0; hdr[off + 10] = 0; hdr[off + 11] = 0
+            hdr[off + 12] = 24; hdr[off + 13] = 11; hdr[off + 14] = (2026 and 0xFF).toByte(); hdr[off + 15] = (2026 ushr 8).toByte()
+        }
+        writeSlotDesc(0, true)
+        writeSlotDesc(16, false)
+        writeSlotDesc(32, false)
+        writeSlotDesc(48, true)
+        File(folder, BASE_SAVE_FOLDER).writeBytes(hdr)
+        runCatching { ModSaves.prepare(paths) }
+        return 1
+    }
+
+    private fun makeCleanSlot(): ByteArray {
+        val b = ByteArray(SLOT_SIZE)
+        b[0] = 0x03; b[1] = 0x00
+        b[4] = 0xA8.toByte(); b[5] = 0x04
+        b[13] = 0x01; b[14] = 0x01
+        b[16] = 0x03; b[17] = 0xFF.toByte(); b[18] = 0x10
+        b[20] = 0x20; b[22] = 0x40
+        b[24] = 0x80.toByte(); b[26] = 0x04
+        b[28] = 0x08; b[30] = 0x01
+        return b
+    }
+
     /** A .ps2 card image or a zip. The saves it has replace those of the same name; the others stay. How many came in. */
     fun importFile(uri: Uri): Int {
         val temp = File(paths.temp, "import.card").apply { parentFile?.mkdirs() }
@@ -161,5 +236,7 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
     companion object {
         private const val KEEP = 10
         private const val MAX_SAVE_FILE = 8L * 1024 * 1024 // the size of a whole PS2 card
+        private const val BASE_SAVE_FOLDER = "BESLES-55605NARUTO5"
+        private const val SLOT_SIZE = 9216
     }
 }

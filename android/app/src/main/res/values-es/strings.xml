@@ -473,6 +473,9 @@
     <string name="saves_empty">Aún no hay partidas en la tarjeta.</string>
     <string name="saves_done">Listo: %d.</string>
     <string name="saves_failed">No funcionó: %s</string>
+    <string name="saves_install_100">Instalar guardado 100%</string>
+    <string name="saves_100_confirm">Instala un guardado 100% desbloqueado (todos los personajes, enlaces y colección) en la tarjeta de memoria. Se hace copia de seguridad de tu guardado actual antes.</string>
+    <string name="saves_100_done">Guardado 100% instalado (copia de seguridad hecha).</string>
     <string name="saves_import_file">Importar tarjeta o zip</string>
     <string name="saves_import_folder">Importar carpeta</string>
     <string name="saves_export_file">Exportar .ps2</string>

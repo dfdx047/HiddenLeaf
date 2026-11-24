@@ -474,6 +474,9 @@
     <string name="saves_empty">There are no saves on the card yet.</string>
     <string name="saves_done">Done: %d.</string>
     <string name="saves_failed">It did not work: %s</string>
+    <string name="saves_install_100">Install 100% save</string>
+    <string name="saves_100_confirm">Installs a 100% unlocked save (all characters, links and collection) onto the memory card. Your current save is backed up first.</string>
+    <string name="saves_100_done">100% save installed (previous save backed up).</string>
     <string name="saves_import_file">Import card or zip</string>
     <string name="saves_import_folder">Import folder</string>
     <string name="saves_export_file">Export .ps2</string>

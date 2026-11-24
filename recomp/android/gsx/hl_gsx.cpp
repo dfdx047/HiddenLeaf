@@ -55,6 +55,11 @@ static inline void ANativeWindow_release(ANativeWindow*) {}
 #include "ps2_live_ring.h"
 
 static std::atomic<bool> g_bt4WideCamera{false}; // (Bt4Gsx_WideCamera, below)
+// VSync-locked FIFO of wideCamera states from EE -> GS replay thread (prevents 1-2 frame race on fight/menu transitions)
+static uint8_t g_wideFifo[128] = {};
+static std::atomic<uint32_t> g_wideWrite{0u};
+static std::atomic<uint32_t> g_wideRead{0u};
+static bool g_wideCurrent = false;
 int bt4gsx_runner_main(int argc, char* argv[]); // pcsx2-gsrunner's main() (Main.cpp, renamed by the build)
 
 namespace
@@ -487,7 +492,7 @@ namespace
 							consume(6ull + length);
 						continue;
 					}
-					if (!hl_native::sceneOn() && !g_bt4WideCamera.load(std::memory_order_relaxed))
+					if (!hl_native::sceneOn() && !g_wideCurrent)
 						hl_native::widen2d(pkt, length);
 					if (zeroCopy)
 						s_deferredConsume = 6ull + length;
@@ -504,6 +509,19 @@ namespace
 					if (!s_dumps.empty())
 						dumpVsync(s_packet[0]);
 					hl_native::vsync();
+					{
+						const uint32_t r = g_wideRead.load(std::memory_order_relaxed);
+						const uint32_t w = g_wideWrite.load(std::memory_order_acquire);
+						if (r != w)
+						{
+							g_wideCurrent = g_wideFifo[r & 127u] != 0u;
+							g_wideRead.store(r + 1u, std::memory_order_release);
+						}
+						else
+						{
+							g_wideCurrent = g_bt4WideCamera.load(std::memory_order_relaxed);
+						}
+					}
 					hashStats();
 					dumpTakeAsked();
 					if (!skipPresent())
@@ -615,7 +633,17 @@ struct Bt4GsxArgs
 __attribute__((visibility("default"))) bool Bt4Gsx_NativeOn() { return hl_native::sceneOn(); }
 // The host: the game's camera is the wide one this vsync (a fight, an Ougi's film, the campaign): its 3D is already in the
 // screen's shape, so the menus' 2D squeeze (hl_native::widen2d) stays off
-__attribute__((visibility("default"))) void Bt4Gsx_WideCamera(bool wide) { g_bt4WideCamera.store(wide, std::memory_order_relaxed); }
+__attribute__((visibility("default"))) void Bt4Gsx_WideCamera(bool wide)
+{
+	g_bt4WideCamera.store(wide, std::memory_order_relaxed);
+	const uint32_t w = g_wideWrite.load(std::memory_order_relaxed);
+	const uint32_t r = g_wideRead.load(std::memory_order_acquire);
+	if (w - r < 127u)
+	{
+		g_wideFifo[w & 127u] = wide ? 1u : 0u;
+		g_wideWrite.store(w + 1u, std::memory_order_release);
+	}
+}
 __attribute__((visibility("default"))) void Bt4Gsx_LiveFight(bool live) { hl_native::liveFight(live); }
 __attribute__((visibility("default"))) int Bt4Gsx_PresentRate() { return hl_native::presentRate(); }
 
@@ -693,6 +721,9 @@ __attribute__((visibility("default"))) int Bt4Gsx_Run(const Bt4GsxArgs* a)
 	s_data = ps2live::ringData(s_ring);
 	s_capacity = s_ring->capacity;
 	s_deferredConsume = 0;
+	g_wideWrite.store(0u, std::memory_order_relaxed);
+	g_wideRead.store(0u, std::memory_order_relaxed);
+	g_wideCurrent = g_bt4WideCamera.load(std::memory_order_relaxed);
 	s_stop = false;
 	{
 		std::lock_guard<std::mutex> lock(s_window_lock);

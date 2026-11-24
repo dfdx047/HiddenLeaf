@@ -7,10 +7,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,9 +41,19 @@ internal fun SavesCard(vm: AppViewModel) {
     val manager = remember { SaveManager(context.applicationContext, vm.paths) }
     var changes by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("") }
-    val saves = remember(changes) { runCatching { manager.saves() }.getOrDefault(emptyList()) }
-    val backups = remember(changes) { runCatching { manager.backupList() }.getOrDefault(emptyList()) }
+    var confirm100 by remember { mutableStateOf(false) }
+    var saves by remember { mutableStateOf<List<Pair<String, Long>>>(emptyList()) }
+    var backups by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    LaunchedEffect(changes) {
+        val (s, b) = withContext(Dispatchers.IO) {
+            runCatching { manager.saves() }.getOrDefault(emptyList()) to
+                runCatching { manager.backupList() }.getOrDefault(emptyList())
+        }
+        saves = s
+        backups = b
+    }
     val done = stringResource(R.string.saves_done)
+    val done100 = stringResource(R.string.saves_100_done)
     val failed = stringResource(R.string.saves_failed)
 
     fun run(work: () -> Int) {
@@ -69,6 +83,7 @@ internal fun SavesCard(vm: AppViewModel) {
             saves.forEach { (name, kb) -> Text("$name · $kb KB", style = MaterialTheme.typography.bodySmall) }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Button(onClick = { confirm100 = true }) { Text(stringResource(R.string.saves_install_100)) }
             OutlinedButton(onClick = { pickFile.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.saves_import_file)) }
             OutlinedButton(onClick = { pickFolder.launch(null) }) { Text(stringResource(R.string.saves_import_folder)) }
             OutlinedButton(onClick = { saveCard.launch("HiddenLeaf-Mcd001.ps2") }, enabled = saves.isNotEmpty()) { Text(stringResource(R.string.saves_export_file)) }
@@ -79,5 +94,23 @@ internal fun SavesCard(vm: AppViewModel) {
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+    }
+    if (confirm100) {
+        AlertDialog(
+            onDismissRequest = { confirm100 = false },
+            title = { Text(stringResource(R.string.saves_install_100)) },
+            text = { Text(stringResource(R.string.saves_100_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm100 = false
+                    scope.launch {
+                        status = runCatching { withContext(Dispatchers.IO) { manager.install100PercentSave() } }
+                            .fold({ done100 }, { failed.format(it.message ?: it.javaClass.simpleName) })
+                        changes++
+                    }
+                }) { Text(stringResource(R.string.saves_install_100)) }
+            },
+            dismissButton = { TextButton(onClick = { confirm100 = false }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 }

@@ -473,6 +473,9 @@
     <string name="saves_empty">Ainda não há saves no cartão.</string>
     <string name="saves_done">Pronto: %d.</string>
     <string name="saves_failed">Não deu certo: %s</string>
+    <string name="saves_install_100">Instalar save 100%</string>
+    <string name="saves_100_confirm">Instala um save 100% desbloqueado (todos os personagens, parcerias e coleção) no memory card. Um backup do seu save atual é feito antes.</string>
+    <string name="saves_100_done">Save 100% instalado (backup do anterior salvo).</string>
     <string name="saves_import_file">Importar cartão ou zip</string>
     <string name="saves_import_folder">Importar pasta</string>
     <string name="saves_export_file">Exportar .ps2</string>

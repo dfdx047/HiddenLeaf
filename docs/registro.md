@@ -61,6 +61,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:22: Fase 3 — Ultrawide sincronizado no stream + `wide2d` multi-tira + Save 100% embutido
+
+- **Ultrawide (`hl_gsx.cpp`, `hl_native.cpp`):**
+  - Estado `wideCamera` sincronizado por VSync via FIFO lock-free (`g_wideFifo[128]`) entre a thread EE (`Bt4Gsx_WideCamera`) e a thread de replay (`kTypeVSync`), eliminando dessincronia de 1–2 quadros nas transições luta ↔ menu/vitória.
+  - `wide2d`: anel `s_targets` ampliado de 8 para 32 FBPs e pré-varredura de largura total em tags PACKED multi-primitiva (`s_tagFullWidth`, para cortinas de transição em tiras preencherem 19.5:9/20:9 sem faixas laterais).
+- **Save 100% embutido (`SaveManager.kt`, `SavesCard.kt`, `strings.xml`):**
+  - Botão **"Instalar save 100%"** na seção Saves (com diálogo de confirmação e backup automático prévio), gerando um save europeu (`BESLES-55605NARUTO5`) 100% em código (sem arquivos do jogo no repositório) com todos os personagens, parcerias, coleção e progresso desbloqueados, checksum de 16 bits válido do UN5 (`sum(bytes[0..1] + bytes[4..9215])`) e propagação automática para mods via `ModSaves.prepare()`.
+  - I/O de listagem de saves/backups em `SavesCard.kt` movido para `LaunchedEffect` + `Dispatchers.IO`.
+- **Verificado nos 3 aparelhos:**
+  - **RG Cube:** instalação do Save 100% pela UI → carregamento real pelo jogo (`Load completed.`) e grade de personagens conferida com `dr_unlock_all=0`.
+  - **Mi A3 (19.5:9, `x 0.615`) e RP5 capado (`sd480p`, 16:9, `x 0.750`):** Mode Select e Luta preenchidos sem barras laterais, 0 crashes, 0 `missing-target`.
+
 ### 2026-11-24 01:13: Fase 2 — correção dos bugs do especial de 1 botão + `NinjaPadView` zero-alloc + paridade `ClassicPadView`
 
 - **Especial de 1 botão (`hl_game.cpp`, `un5_main.cpp`, `TouchBridge.kt`, `GameActivity.kt`, `GameMenu.kt`, `ControlsScreen.kt`):**

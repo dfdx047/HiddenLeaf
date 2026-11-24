@@ -2630,8 +2630,14 @@ namespace wide2d
 {
 	uint32_t s_prim = 0u, s_prmodecont = 1u, s_prmode = 0u;
 	uint32_t s_ofx[2] = {}, s_fbw[2] = {}, s_fbp[2] = {}, s_tbp[2] = {};
-	uint32_t s_targets[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}; // the frames drawn into lately (FBP): a texture at one of them is a copy of a picture
+	uint32_t s_targets[32] = {
+		0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+		0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+		0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+		0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+	}; // the frames drawn into lately (FBP): a texture at one of them is a copy of a picture
 	uint32_t s_targetNext = 0u;
+	bool s_tagFullWidth = false;
 	bool isTarget(uint32_t tbp)
 	{
 		for (uint32_t t : s_targets)
@@ -2732,7 +2738,7 @@ namespace wide2d
 		// a copy of a picture (the game composes the screen in one frame and copies it to the shown one in 64 px
 		// columns): its source was squeezed already, so it is left as it is
 		const bool copy = ((s_prim >> 4) & 1u) && isTarget(s_tbp[ctxt()]);
-		const bool full = copy || hi - lo >= s_dispW * 0.9f;
+		const bool full = s_tagFullWidth || copy || hi - lo >= s_dispW * 0.9f;
 		if (type == 2u || type == 4u || type == 5u)
 			s_runSqueeze = full ? 0 : 1;
 		for (int i = 0; i < s_count; ++i)
@@ -2786,7 +2792,7 @@ namespace wide2d
 				if (!known)
 				{
 					s_targets[s_targetNext] = fbp;
-					s_targetNext = (s_targetNext + 1u) & 7u;
+					s_targetNext = (s_targetNext + 1u) & 31u;
 				}
 				break;
 			}
@@ -2856,6 +2862,32 @@ void widen2d(uint8_t* data, uint32_t size)
 			continue;
 		if ((lo >> 46) & 1u)
 			prim(static_cast<uint32_t>((lo >> 47) & 0x7FFu));
+		// Pre-scan multi-primitive PACKED tags (e.g. campaign transition curtains drawn in vertical strips):
+		// if the tag as a whole spans the full display width (<=8 to >=dispW-8), leave it unsqueezed so it fills 20:9.
+		s_tagFullWidth = false;
+		if (flg == 0u && nloop >= 4u && shown())
+		{
+			float minX = 1e9f, maxX = -1e9f;
+			uint32_t vtxCount = 0u;
+			const float ofx = static_cast<float>(wide2d::s_ofx[ctxt()]);
+			const uint8_t* sq = body;
+			for (uint32_t l = 0; l < nloop; ++l)
+				for (uint32_t r = 0; r < nreg; ++r, sq += 16)
+				{
+					const uint32_t d = (hi >> (4u * r)) & 15u;
+					if (d == 0x4u || d == 0x5u)
+					{
+						uint16_t rawX;
+						std::memcpy(&rawX, sq, 2);
+						const float wx = (static_cast<float>(rawX) - ofx) / 16.0f;
+						if (wx < minX) minX = wx;
+						if (wx > maxX) maxX = wx;
+						++vtxCount;
+					}
+				}
+			if (vtxCount >= 4u && minX <= 8.0f && maxX >= static_cast<float>(s_dispW) - 8.0f)
+				s_tagFullWidth = true;
+		}
 		if (flg == 0u)
 		{
 			uint8_t* q = body;
