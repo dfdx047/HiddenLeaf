@@ -411,7 +411,7 @@ export async function handle(request, env, now) {
         return reply({ key, token: room.session_secret || "", input_mode: roomMode, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) });
     }
 
-    // ---- Ranked profile & bilateral result reporting
+    // ---- Ranked profile & bilateral result reporting (per-character mastery map)
     if (what === "profile") {
         const pid = cleanPlayerId(body.player_id);
         const secret = typeof body.secret === "string" ? body.secret : "";
@@ -421,28 +421,59 @@ export async function handle(request, env, now) {
         const favChar = body.fav_char ? cleanCharId(body.fav_char) : null;
         const hash = await sha256Hex(secret);
         const existing = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
+        const parseMastery = (raw, fallbackChar, fallbackXp) => {
+            let obj = {};
+            try { obj = JSON.parse(raw || "{}"); } catch (e) {}
+            if (!obj || typeof obj !== "object" || Array.isArray(obj)) obj = {};
+            if (fallbackChar && !obj[fallbackChar]) {
+                const xp = Math.max(0, Number(fallbackXp) || 0);
+                obj[fallbackChar] = { xp, lvl: charLevelFromXp(xp), matches: 0 };
+            }
+            return obj;
+        };
+        const mergeClientMastery = (base, clientObj) => {
+            if (!clientObj || typeof clientObj !== "object" || Array.isArray(clientObj)) return base;
+            for (const [k, v] of Object.entries(clientObj)) {
+                const cid = cleanCharId(k);
+                if (!v || typeof v !== "object") continue;
+                const cur = base[cid] || { xp: 0, lvl: 1, matches: 0 };
+                // Cap client-reported XP bump per sync to prevent spoofing while allowing offline/training mastery progress
+                const reqXp = Math.max(0, Math.min(cur.xp + 200, Math.floor(Number(v.xp) || 0)));
+                const nextXp = Math.max(cur.xp, reqXp);
+                base[cid] = { xp: nextXp, lvl: charLevelFromXp(nextXp), matches: Math.max(cur.matches || 0, Math.floor(Number(v.matches) || 0)) };
+            }
+            return base;
+        };
         if (existing) {
             if (existing.auth_hash !== hash) return reply({ error: "unauthorized" }, 403);
+            const mastery = mergeClientMastery(parseMastery(existing.char_mastery, existing.fav_char, existing.fav_char_xp), body.char_mastery);
             const nextChar = favChar || existing.fav_char || "naruto";
-            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, fav_char = ?, updated = ? WHERE player_id = ?")
-                .bind(name, mode, nextChar, now, pid).run();
+            if (!mastery[nextChar]) mastery[nextChar] = { xp: 0, lvl: 1, matches: 0 };
+            const activeXp = mastery[nextChar].xp || 0;
+            const activeLvl = charLevelFromXp(activeXp);
+            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, fav_char = ?, fav_char_lvl = ?, fav_char_xp = ?, char_mastery = ?, updated = ? WHERE player_id = ?")
+                .bind(name, mode, nextChar, activeLvl, activeXp, JSON.stringify(mastery), now, pid).run();
             const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > ? OR (points = ? AND wins > ?)")
                 .bind(existing.points, existing.points, existing.wins).first();
             return reply({
                 player_id: pid, name, points: existing.points, wins: existing.wins, losses: existing.losses,
                 streak: existing.streak, input_mode: mode, fav_char: nextChar,
-                fav_char_lvl: existing.fav_char_lvl || 1, fav_char_xp: existing.fav_char_xp || 0,
+                fav_char_lvl: activeLvl, fav_char_xp: activeXp, char_mastery: mastery,
                 rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(existing.points),
             });
         }
         if (!checkRate(ip, now, "profile", 10)) return reply({ error: "busy" }, 429);
         const initChar = favChar || "naruto";
-        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?, 1, 0, ?)")
-            .bind(pid, hash, name, mode, initChar, now).run();
+        const initMastery = mergeClientMastery({ [initChar]: { xp: 0, lvl: 1, matches: 0 } }, body.char_mastery);
+        const initXp = (initMastery[initChar] && initMastery[initChar].xp) || 0;
+        const initLvl = charLevelFromXp(initXp);
+        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?, ?, ?, ?, ?)")
+            .bind(pid, hash, name, mode, initChar, initLvl, initXp, JSON.stringify(initMastery), now).run();
         const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > 1000 OR (points = 1000 AND wins > 0)").first();
         return reply({
             player_id: pid, name, points: 1000, wins: 0, losses: 0, streak: 0, input_mode: mode,
-            fav_char: initChar, fav_char_lvl: 1, fav_char_xp: 0, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000),
+            fav_char: initChar, fav_char_lvl: initLvl, fav_char_xp: initXp, char_mastery: initMastery,
+            rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000),
         });
     }
 
@@ -501,12 +532,23 @@ export async function handle(request, env, now) {
         const lPts = Math.max(0, loser.points - loss);
         const p1Delta = p1Won ? gain : -loss;
         const p2Delta = p1Won ? -loss : gain;
-        const wXp = (winner.fav_char_xp || 0) + 120;
-        const lXp = (loser.fav_char_xp || 0) + 45;
-        await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, fav_char_xp = ?, fav_char_lvl = ?, updated = ? WHERE player_id = ?")
-            .bind(wPts, wXp, charLevelFromXp(wXp), now, winner.player_id).run();
-        await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, fav_char_xp = ?, fav_char_lvl = ?, updated = ? WHERE player_id = ?")
-            .bind(lPts, lXp, charLevelFromXp(lXp), now, loser.player_id).run();
+        const bumpMastery = (pl, deltaXp) => {
+            const cid = cleanCharId(pl.fav_char || "naruto");
+            let m = {};
+            try { m = JSON.parse(pl.char_mastery || "{}"); } catch (e) {}
+            if (!m || typeof m !== "object" || Array.isArray(m)) m = {};
+            const cur = m[cid] || { xp: pl.fav_char_xp || 0, lvl: pl.fav_char_lvl || 1, matches: 0 };
+            const nextXp = (cur.xp || 0) + deltaXp;
+            const nextLvl = charLevelFromXp(nextXp);
+            m[cid] = { xp: nextXp, lvl: nextLvl, matches: (cur.matches || 0) + 1 };
+            return { nextXp, nextLvl, json: JSON.stringify(m) };
+        };
+        const wM = bumpMastery(winner, 120);
+        const lM = bumpMastery(loser, 45);
+        await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, fav_char_xp = ?, fav_char_lvl = ?, char_mastery = ?, updated = ? WHERE player_id = ?")
+            .bind(wPts, wM.nextXp, wM.nextLvl, wM.json, now, winner.player_id).run();
+        await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, fav_char_xp = ?, fav_char_lvl = ?, char_mastery = ?, updated = ? WHERE player_id = ?")
+            .bind(lPts, lM.nextXp, lM.nextLvl, lM.json, now, loser.player_id).run();
         await env.DB.prepare("UPDATE hl_matches SET winner_id = ?, p1_delta = ?, p2_delta = ?, resolved = 1 WHERE match_id = ?")
             .bind(winner.player_id, p1Delta, p2Delta, matchId).run();
         return reply({
@@ -586,6 +628,47 @@ export async function handle(request, env, now) {
             code, host_id: lobby.host_id, max_players: lobby.max_players,
             allow_spectators: !!lobby.allow_spectators, input_mode: lobby.input_mode,
             active_room: lobby.active_room || null, members: JSON.parse(lobby.members || "[]"),
+        });
+    }
+
+    if (what === "lobby/role") {
+        // Switch who plays (p1/p2/queue) and who spectates in a Casual Custom Lobby.
+        const code = String(body.code ?? "").replace(/\D/g, "");
+        const pid = cleanPlayerId(body.player_id);
+        const targetId = cleanPlayerId(body.target_id) || pid;
+        const reqRole = body.role === "p1" || body.role === "p2" || body.role === "queue" || body.role === "spectator" || body.role === "play" ? body.role : "";
+        if (!pid || !reqRole) return reply({ error: "bad request" }, 400);
+        const lobby = await env.DB.prepare("SELECT * FROM hl_lobbies WHERE code = ?").bind(code).first();
+        if (!lobby || now - lobby.touched >= ROOM_IDLE * 2) return reply({ error: "no room" }, 404);
+        const isHost = lobby.host_id === pid;
+        if (targetId !== pid && !isHost) return reply({ error: "unauthorized" }, 403);
+        const members = JSON.parse(lobby.members || "[]");
+        const target = members.find((m) => m.id === targetId);
+        if (!target) return reply({ error: "no member" }, 404);
+        if (reqRole === "spectator") {
+            if (!lobby.allow_spectators) return reply({ error: "no spectators" }, 403);
+            target.role = "spectator";
+        } else if (reqRole === "play") {
+            if (!members.some((m) => m.role === "p1")) target.role = "p1";
+            else if (!members.some((m) => m.role === "p2")) target.role = "p2";
+            else target.role = "queue";
+        } else if (reqRole === "p1" || reqRole === "p2") {
+            if (!isHost && members.some((m) => m.role === reqRole && m.id !== targetId)) {
+                return reply({ error: "occupied" }, 409);
+            }
+            const prevRole = target.role;
+            const holder = members.find((m) => m.role === reqRole && m.id !== targetId);
+            if (holder) holder.role = prevRole === "p1" || prevRole === "p2" ? prevRole : "queue";
+            target.role = reqRole;
+        } else {
+            target.role = "queue";
+        }
+        await env.DB.prepare("UPDATE hl_lobbies SET members = ?, touched = ? WHERE code = ?")
+            .bind(JSON.stringify(members), now, code).run();
+        return reply({
+            code, player_id: pid, host_id: lobby.host_id, max_players: lobby.max_players,
+            allow_spectators: !!lobby.allow_spectators, input_mode: lobby.input_mode,
+            active_room: lobby.active_room || null, members,
         });
     }
 

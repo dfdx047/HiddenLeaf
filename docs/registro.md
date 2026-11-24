@@ -61,6 +61,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 07:52: Sala Personalizada com troca de papel (P1/P2/Espectador), detecção e exportação automática de personagem + maestria por personagem, filtro de controle na Ranqueada, hold de ↓↓○ e correção do R2 automático
+
+- **Sala Personalizada & Espectador (Casual) interligada (`worker.js`, `OnlineAdvanced.kt`, `OnlineScreen.kt`):**
+  - Novo endpoint `POST /v1/lobby/role` permitindo que qualquer participante alterne entre **Jogar** e **Espectador**, e que o anfitrião defina/troque **P1**, **P2** e **Espectador** em tempo real (polling de 1,5 s).
+  - Botão **"Iniciar Luta (P1 vs P2)"** cria a sala casual interligada (`active_room`), permitindo ao P2 entrar direto na luta e aos espectadores assistirem em tempo real (exclusivo do modo Casual). Verificado em teste fim-a-fim de 3 participantes.
+- **Detecção automática de personagem, exportação de retrato do jogo e Maestria POR PERSONAGEM (`hl_game.cpp`, `un5_main.cpp`, `TouchBridge.kt`, `GameActivity.kt`, `worker.js`, `schema.sql`, `OnlineAdvanced.kt`, `Un5NinjaUi.kt`):**
+  - `hl_game.cpp` lê `fighter+0x68` (ID do personagem do P1, confirmado em `sub_002146A0`) e expõe `TouchBridge.nativeP1CharId()`.
+  - `GameActivity.kt` detecta automaticamente o personagem escolhido pelo P1 na luta, contabiliza XP/nível individual na tabela `char_mastery` (por personagem, não global) e exporta automaticamente o retrato real do HUD da luta via `PixelCopy` para `<root>/portraits/<charKey>.png`.
+- **Ranqueada com separação Touch vs Controle + fallback 15 s (`OnlineScreen.kt`, `Online.kt`):**
+  - Seletor **Filtro de Controle (Ranqueada)** (`Só Tela`, `Só Controle`, `Todos`) e filtro de tabela (`Todos`, `Tela`, `Controle`) diretamente dentro da tela Ranqueada.
+  - Em `QuickSearching`, após 15 s procurando em fila filtrada, exibe **"Demorando? Aceitar qualquer controle"** para liberar a busca para qualquer adversário em 1 toque.
+- **Carregar poder segurando `↓↓○` / `↑↑○` (`TouchConfig.kt`, `NinjaPadView.kt`):**
+  - Adicionado `holdLast = true` em `SPECIAL_DOWN` e `SPECIAL_UP`: ao segurar o botão, o passo final (`○`) permanece pressionado continuamente até soltar o dedo (permitindo carregar golpes/poderes).
+- **Correção do R2 automático no teletransporte/Kawarimi (`NinjaPadView.kt`, `PadMap.kt`, `un5_main.cpp`):**
+  - `Ctl.GUARD` (`Ps2.R2`) excluído da ativação por deslize (`move()`) no touch — só dispara com toque direto intencional.
+  - Zona morta dos gatilhos analógicos L2/R2 aumentada (`0.25 → 0.50` em `PadMap.kt`, `8000 → 16000` em `un5_main.cpp`) e `g_specialOn` travado em `false`.
+  - `libun5.so` e `libun5_v80.so` recompiladas, APK testado e instalado nos 3 dispositivos (RP5, RG Cube, Mi A3).
+
 ### 2026-11-24 07:18: Tela Dedicada de Modo Ranqueado, fila Casual vs Ranqueada separada, retratos reais do jogo e correção de layout
 
 - **Fila Casual vs Ranqueada separadas (`Online.kt`, `OnlineScreen.kt`, `OnlineMenu.kt`):**

@@ -159,8 +159,8 @@ class PadTranslator(var map: PadMap) {
         if (hatX > 0.5f) fromAxes += KeyEvent.KEYCODE_DPAD_RIGHT
         if (hatY < -0.5f) fromAxes += KeyEvent.KEYCODE_DPAD_UP
         if (hatY > 0.5f) fromAxes += KeyEvent.KEYCODE_DPAD_DOWN
-        if (lTrigger > 0.25f) fromAxes += KeyEvent.KEYCODE_BUTTON_L2
-        if (rTrigger > 0.25f) fromAxes += KeyEvent.KEYCODE_BUTTON_R2
+        if (lTrigger > 0.50f) fromAxes += KeyEvent.KEYCODE_BUTTON_L2
+        if (rTrigger > 0.50f) fromAxes += KeyEvent.KEYCODE_BUTTON_R2
         lx = stick(x); ly = stick(y); rx = stick(z); ry = stick(rz)
     }
 

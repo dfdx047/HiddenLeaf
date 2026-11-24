@@ -83,7 +83,12 @@ val UN5_CHARACTERS = listOf(
 )
 
 fun charInfoOf(id: String): NinjaCharInfo =
-    UN5_CHARACTERS.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: UN5_CHARACTERS.first()
+    UN5_CHARACTERS.firstOrNull { it.id.equals(id, ignoreCase = true) }
+        ?: if (id.startsWith("char_")) {
+            NinjaCharInfo(id, "Ninja #${id.removePrefix("char_")}", "Personagem", Color(0xFFFF7A1A), Color(0xFF1A1A22), Color(0xFFFFD54F), Color(0xFF263238))
+        } else {
+            UN5_CHARACTERS.first()
+        }
 
 private val Un5BrushFont = FontFamily(Font(R.font.shojumaru_regular))
 private val Un5BodyFont = FontFamily(Font(R.font.kanit_semibold))
@@ -110,8 +115,9 @@ fun CharacterCutout(
     val info = remember(charId) { charInfoOf(charId) }
     val ctx = LocalContext.current
     val customBmp = remember(charId) {
-        val f = File(GamePaths(ctx).root, "portraits/${info.id}.png")
-        if (f.exists()) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null
+        val dir = File(GamePaths(ctx).root, "portraits")
+        val f = listOf(File(dir, "$charId.png"), File(dir, "${info.id}.png")).firstOrNull { it.exists() }
+        if (f != null) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null
     }
     val shape = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
     Box(
@@ -267,6 +273,14 @@ fun NinjaInfoCard(
                             .fillMaxWidth(xpFrac.coerceAtLeast(0.06f))
                             .height(6.dp)
                             .background(Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep, UN5_GOLD))),
+                    )
+                }
+                val topChars = profile.mastery.entries.sortedByDescending { it.value.xp }.take(4)
+                if (topChars.isNotEmpty()) {
+                    val summary = topChars.joinToString(" · ") { (cid, m) -> "${charInfoOf(cid).name} Lv.${m.lvl}" }
+                    Text(
+                        "Maestrias: $summary",
+                        style = TextStyle(fontFamily = Un5BodyFont, fontSize = 10.sp, color = Konoha.ScrollCream.copy(alpha = 0.72f)),
                     )
                 }
             }

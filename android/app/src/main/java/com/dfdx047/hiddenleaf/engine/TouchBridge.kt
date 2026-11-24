@@ -43,7 +43,12 @@ object TouchBridge {
     /** Direct tap on menu items (normalized 0..1): 0=default CROSS, 1=UP, 2=CROSS, 3=DOWN. */
     @JvmStatic external fun nativeMenuTap(nx: Float, ny: Float): Int
 
+    /** Player 1's active UN5 character ID during a fight (0 if not in a fight). */
+    @JvmStatic external fun nativeP1CharId(): Int
+
     fun menuTap(nx: Float, ny: Float): Int = runCatching { nativeMenuTap(nx, ny) }.getOrDefault(0)
+
+    fun p1CharId(): Int = runCatching { nativeP1CharId() }.getOrDefault(0)
 
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
 

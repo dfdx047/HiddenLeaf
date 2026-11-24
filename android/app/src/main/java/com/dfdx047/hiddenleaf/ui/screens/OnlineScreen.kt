@@ -159,7 +159,16 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
             )
             when (val s = state) {
                 is LobbyState.Waiting -> RoomCode(s.code) { lobby.cancel() }
-                is LobbyState.Searching -> QuickSearching(s.since) { lobby.cancel() }
+                is LobbyState.Searching -> QuickSearching(
+                    since = s.since,
+                    inputMode = Online.effectiveInputMode(prefs.inputMode),
+                    onAcceptAny = {
+                        lobby.cancel()
+                        lobby.update(prefs.copy(inputMode = "any"))
+                        lobby.quick(fp(), ranked = false, inputModeOverride = "any") { vm.play() }
+                    },
+                    onCancel = { lobby.cancel() },
+                )
                 is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
                 is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
                 else -> if (modsOn) ModsOnly(onOpenMods) else {
@@ -235,7 +244,7 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
                     onClick = { showRankedScreen = true },
                 )
             }
-            CustomLobbyCard(prefs, ready, serverSet, fp)
+            CustomLobbyCard(lobby, prefs, ready, serverSet, fp) { vm.play() }
         }
 
         SectionCard(stringResource(R.string.online_guide_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
@@ -407,9 +416,14 @@ private fun RoomCode(code: String, onCancel: () -> Unit) {
     }
 }
 
-/** Quick match: searching, how long so far, and a way out. */
+/** Quick match: searching, how long so far, optional 15s fallback to accept any controller, and a way out. */
 @Composable
-private fun QuickSearching(since: Long, onCancel: () -> Unit) {
+private fun QuickSearching(
+    since: Long,
+    inputMode: String = "any",
+    onAcceptAny: (() -> Unit)? = null,
+    onCancel: () -> Unit,
+) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(since) {
         while (true) {
@@ -418,7 +432,14 @@ private fun QuickSearching(since: Long, onCancel: () -> Unit) {
         }
     }
     val s = ((now - since) / 1000).coerceAtLeast(0)
-    Busy(stringResource(R.string.online_quick_searching, "%d:%02d".format(s / 60, s % 60)), onCancel)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Busy(stringResource(R.string.online_quick_searching, "%d:%02d".format(s / 60, s % 60)), onCancel)
+        if (inputMode != "any" && s >= 15 && onAcceptAny != null) {
+            FilledTonalButton(onClick = onAcceptAny, modifier = Modifier.fillMaxWidth()) {
+                Text("Demorando? Aceitar qualquer controle")
+            }
+        }
+    }
 }
 
 /** A mod is switched on: online and local matches are base game only for now. Instead of the buttons: why, and the way to the Mods page. */
@@ -495,10 +516,12 @@ private fun RankedDedicatedScreen(
     val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.RankedProfile?>(null) }
     var leaderboard by remember { mutableStateOf<List<com.dfdx047.hiddenleaf.data.OnlineAdvanced.LeaderboardEntry>>(emptyList()) }
+    var lbMode by remember { mutableStateOf("all") }
     var loadingRank by remember { mutableStateOf(false) }
     val canPlay = ready && serverSet && !modsOn && prefs.name.isNotBlank()
+    val effectiveMode = Online.effectiveInputMode(prefs.inputMode)
 
-    LaunchedEffect(prefs.server, serverSet) {
+    LaunchedEffect(prefs.server, serverSet, lbMode) {
         if (!serverSet) return@LaunchedEffect
         loadingRank = true
         val srv = Online.cleanServer(prefs.server)
@@ -507,7 +530,7 @@ private fun RankedDedicatedScreen(
                 context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
             )
         }
-        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 50)
         loadingRank = false
     }
 
@@ -517,11 +540,13 @@ private fun RankedDedicatedScreen(
                 com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
                     profile = p,
                     onCycleChar = {
-                        val list = com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS
-                        val idx = list.indexOfFirst { it.id == p.favChar }.let { if (it < 0) 0 else (it + 1) % list.size }
-                        val nextId = list[idx].id
+                        val dynamicKeys = p.mastery.keys.toList()
+                        val allIds = (com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS.map { it.id } + dynamicKeys).distinct()
+                        val idx = allIds.indexOfFirst { it == p.favChar }.let { if (it < 0) 0 else (it + 1) % allIds.size }
+                        val nextId = allIds[idx]
+                        val nextM = p.mastery[nextId]
                         com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveFavChar(context, nextId)
-                        profile = p.copy(favChar = nextId)
+                        profile = p.copy(favChar = nextId, favCharLvl = nextM?.lvl ?: 1, favCharXp = nextM?.xp ?: 0)
                         if (serverSet) {
                             scope.launch {
                                 runCatching {
@@ -534,14 +559,40 @@ private fun RankedDedicatedScreen(
                     },
                 )
             }
+            // Strict Touch vs Gamepad separation directly inside Ranked
+            SectionCard("Filtro de Controle (Ranqueada)", NinjaIcons.Tools, accent = Konoha.SasukeBlueLight) {
+                Text(
+                    "Jogue apenas contra quem usa o mesmo controle. Se demorar 15s, você pode liberar para qualquer um.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((key, label) in listOf("touch" to "Só Tela", "gamepad" to "Só Controle", "any" to "Todos")) {
+                        FilterChip(
+                            selected = prefs.inputMode == key || (prefs.inputMode == "auto" && effectiveMode == key),
+                            onClick = { lobby.update(prefs.copy(inputMode = key)) },
+                            label = { Text(label, maxLines = 1) },
+                        )
+                    }
+                }
+            }
             when (val s = state) {
-                is LobbyState.Searching -> QuickSearching(s.since) { lobby.cancel() }
+                is LobbyState.Searching -> QuickSearching(
+                    since = s.since,
+                    inputMode = effectiveMode,
+                    onAcceptAny = {
+                        lobby.cancel()
+                        lobby.update(prefs.copy(inputMode = "any"))
+                        lobby.quick(fp(), ranked = true, inputModeOverride = "any") { vm.play() }
+                    },
+                    onCancel = { lobby.cancel() },
+                )
                 is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
                 is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
                 else -> {
                     com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
                         title = "Jogar Ranqueada",
-                        subtitle = "Fila competitiva separada · Ganhe RP e Maestria",
+                        subtitle = "Fila competitiva separada · Modo: ${when (effectiveMode) { "touch" -> "Só Tela"; "gamepad" -> "Só Controle"; else -> "Qualquer um" }}",
                         accent = Konoha.NarutoOrange,
                         enabled = canPlay,
                         onClick = { lobby.quick(fp(), ranked = true) { vm.play() } },
@@ -558,7 +609,7 @@ private fun RankedDedicatedScreen(
                                     server = Online.cleanServer(prefs.server),
                                     name = prefs.name,
                                     fp = "${fp()}#ranked",
-                                    inputMode = Online.effectiveInputMode(prefs.inputMode),
+                                    inputMode = effectiveMode,
                                     delay = prefs.delay,
                                     relay = prefs.relay,
                                 )
@@ -580,7 +631,11 @@ private fun RankedDedicatedScreen(
     val rightCol: @Composable () -> Unit = {
         SectionCard("Top 100 Global · Maestria", NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Ranking por RP & Personagem", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((m, lbl) in listOf("all" to "Todos", "touch" to "Tela", "gamepad" to "Controle")) {
+                        FilterChip(selected = lbMode == m, onClick = { lbMode = m }, label = { Text(lbl) })
+                    }
+                }
                 TextButton(
                     enabled = serverSet && !loadingRank,
                     onClick = {
@@ -592,7 +647,7 @@ private fun RankedDedicatedScreen(
                                     context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
                                 )
                             }
-                            leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+                            leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 50)
                             loadingRank = false
                         }
                     },
@@ -663,10 +718,12 @@ private fun RankedDedicatedScreen(
 
 @Composable
 private fun CustomLobbyCard(
+    lobby: OnlineLobby,
     prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
     ready: Boolean,
     serverSet: Boolean,
     fp: () -> String,
+    start: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -674,21 +731,165 @@ private fun CustomLobbyCard(
     var lobbyCode by remember { mutableStateOf("") }
     var lobbyMax by remember { mutableStateOf(4) }
     var lobbyErr by remember { mutableStateOf<String?>(null) }
+    var spectatingCode by remember { mutableStateOf<String?>(null) }
 
-    SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
-        Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // Live polling while inside a Casual Custom Lobby so all friends see joins, role swaps & match start in real time
+    LaunchedEffect(customLobby?.code, prefs.server) {
+        val code = customLobby?.code ?: return@LaunchedEffect
+        val srv = Online.cleanServer(prefs.server)
+        while (true) {
+            delay(1500)
+            runCatching {
+                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.pollLobby(context, srv, code)
+            }.onFailure {
+                if (it.message == "no room") customLobby = null
+            }
+        }
+    }
+
+    SectionCard("Sala Personalizada & Espectador (Casual)", NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
+        Text(
+            "Exclusivo para Partida Casual: entre com amigos na mesma sala, escolha quem luta (P1/P2) e quem assiste ao vivo (Espectador), e troque de papel quando quiser.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         val cur = customLobby
         if (cur != null) {
-            Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
-            for (m in cur.members) {
-                Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
-            }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
-                    customLobby = null
+            val isHost = cur.playerId == cur.hostId
+            val myMember = cur.members.firstOrNull { it.id == cur.playerId }
+            val p1 = cur.members.firstOrNull { it.role == "p1" }
+            val p2 = cur.members.firstOrNull { it.role == "p2" }
+            val srv = Online.cleanServer(prefs.server)
+
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("Sala #${cur.code.chunked(3).joinToString(" ")}", style = MaterialTheme.typography.titleLarge, color = Konoha.NarutoOrange)
+                    Text("${cur.members.size}/${cur.maxPlayers} participantes · Casual com Espectador", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, srv, cur.code)
+                        customLobby = null
+                        spectatingCode = null
+                    }
+                }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
+            }
+
+            // Interactive role switcher for every member in the room
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (m in cur.members) {
+                    val roleLabel = when (m.role) {
+                        "p1" -> "JOGADOR 1"
+                        "p2" -> "JOGADOR 2"
+                        "spectator" -> "ESPECTADOR"
+                        else -> "NA FILA"
+                    }
+                    val roleColor = when (m.role) {
+                        "p1" -> Konoha.NarutoOrange
+                        "p2" -> Konoha.SasukeBlueLight
+                        "spectator" -> Konoha.ChakraAmber
+                        else -> Konoha.LeeGreen
+                    }
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .background(com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
+                            .border(1.dp, roleColor.copy(alpha = 0.5f), MaterialTheme.shapes.small)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                m.name + (if (m.id == cur.hostId) " ★" else "") + (if (m.id == cur.playerId) " (Você)" else ""),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD,
+                            )
+                            Text(roleLabel, style = MaterialTheme.typography.labelSmall, color = roleColor)
+                        }
+                        if (isHost) {
+                            if (m.role != "p1") {
+                                FilterChip(selected = false, onClick = {
+                                    scope.launch { runCatching { customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.setLobbyRole(context, srv, cur.code, m.id, "p1") } }
+                                }, label = { Text("P1") })
+                            }
+                            if (m.role != "p2") {
+                                FilterChip(selected = false, onClick = {
+                                    scope.launch { runCatching { customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.setLobbyRole(context, srv, cur.code, m.id, "p2") } }
+                                }, label = { Text("P2") })
+                            }
+                            if (m.role != "spectator") {
+                                FilterChip(selected = false, onClick = {
+                                    scope.launch { runCatching { customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.setLobbyRole(context, srv, cur.code, m.id, "spectator") } }
+                                }, label = { Text("Assistir") })
+                            }
+                        } else if (m.id == cur.playerId) {
+                            val wantRole = if (m.role == "spectator") "play" else "spectator"
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    scope.launch { runCatching { customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.setLobbyRole(context, srv, cur.code, m.id, wantRole) } }
+                                },
+                                label = { Text(if (m.role == "spectator") "Quero Jogar" else "Virar Espectador") },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Linked Casual Match launch & live Spectator join
+            if (isHost && p1 != null && p2 != null) {
+                com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                    title = "Iniciar Luta (${p1.name} vs ${p2.name})",
+                    subtitle = "Abre a partida casual interligada para P1, P2 e Espectadores",
+                    accent = Konoha.NarutoOrange,
+                    enabled = ready && serverSet,
+                    onClick = {
+                        lobby.createForLobby(
+                            fp = fp(),
+                            onCode = { roomCode ->
+                                scope.launch {
+                                    runCatching { com.dfdx047.hiddenleaf.data.OnlineAdvanced.pollLobby(context, srv, cur.code, activeRoom = roomCode) }
+                                }
+                            },
+                            start = start,
+                        )
+                    },
+                )
+            } else if (cur.activeRoom != null) {
+                val active = cur.activeRoom
+                if (myMember?.role == "p2") {
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Entrar na Luta Agora (P2)",
+                        subtitle = "Sala de luta #$active pronta · Toque para lutar",
+                        accent = Konoha.LeeGreen,
+                        enabled = ready,
+                        onClick = { lobby.join(active, fp(), start) },
+                    )
+                } else {
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Assistir Luta Ao Vivo (Sala #$active)",
+                        subtitle = "Stream de Espectador em tempo real (somente leitura)",
+                        accent = Konoha.ChakraAmber,
+                        enabled = true,
+                        onClick = { spectatingCode = active },
+                    )
+                }
+            } else {
+                Text(
+                    if (p1 == null || p2 == null) "Aguardando definir Jogador 1 e Jogador 2 na sala..."
+                    else "Aguardando o anfitrião iniciar a luta (${p1.name} vs ${p2.name})...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            spectatingCode?.let { sc ->
+                Text(
+                    "Conectado como Espectador na sala #$sc (${com.dfdx047.hiddenleaf.data.OnlineAdvanced.spectatorRelayUrl(srv, sc)})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Konoha.ChakraAmber,
+                )
+            }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (n in listOf(2, 4, 6, 8)) {

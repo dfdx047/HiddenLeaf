@@ -20,8 +20,11 @@ const seed = [
     ["seed_06", "hash6", "GaaraSuna", 1185, 15, 11, 1, "gamepad", "gaara", 14, 2680],
     ["seed_07", "hash7", "SakuraHaruno", 1045, 8, 6, 0, "touch", "sakura", 9, 1650],
 ];
-const ins = db.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-for (const r of seed) ins.run(...r, now);
+const ins = db.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+for (const r of seed) {
+    const mastery = JSON.stringify({ [r[8]]: { xp: r[10], lvl: r[9], matches: r[4] + r[5] } });
+    ins.run(...r, mastery, now);
+}
 
 const D1 = {
     prepare(sql) {

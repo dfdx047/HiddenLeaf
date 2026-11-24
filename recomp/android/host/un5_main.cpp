@@ -375,9 +375,9 @@ namespace
             for (const auto &m : kMap)
                 if (SDL_GetGamepadButton(g_pad, m.b))
                     buttons |= m.bit;
-            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000)
+            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000)
                 buttons |= 0x0100u;
-            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000)
+            if (SDL_GetGamepadAxis(g_pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000)
                 buttons |= 0x0200u;
             if ((axes & 0xFFFFu) == 0x8080u)
             {   // (the touch stick is at rest: the gamepad's)
@@ -493,7 +493,9 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 {
     if (hl_online::active()) // (an online match plays by the game's own rules on both phones: hl_online.cpp)
         return;
-    hl_game::g_specialOn.store(specialOne != 0, std::memory_order_relaxed);
+    // One-button special was removed per user request; keep disabled even if legacy settings.json had it on
+    (void)specialOne;
+    hl_game::g_specialOn.store(false, std::memory_order_relaxed);
     if (specialButton != 0)
         hl_game::g_specialMask.store(static_cast<uint32_t>(specialButton), std::memory_order_relaxed);
     hl_game::g_mashPercent.store(mashPercent, std::memory_order_relaxed);
@@ -507,6 +509,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeOnlineMenu(JNIEnv *, jclass) { return hl_game::g_onlineMenu.load(std::memory_order_relaxed); }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuTap(JNIEnv *, jclass, jfloat nx, jfloat ny) { return hl_game::menuTap(nx, ny); }
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeP1CharId(JNIEnv *, jclass) { return hl_game::g_p1CharId.load(std::memory_order_relaxed); }
 // The online menu open over the game (OnlineMenu.kt): the controller and the touch pad move the menu, not the game behind it
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPadHeld(JNIEnv *, jclass, jboolean held)
 {

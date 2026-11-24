@@ -216,10 +216,12 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
      * it ([ownsDirs]: the specials' ↑ ↑ ○) owns the D-pad while it plays, so a thumb resting on the D-pad does not turn
      * its ↑ ↑ into a diagonal or fill the gap between the two presses.
      */
-    private inner class Player(val steps: List<MacroStep>, val repeat: Boolean) {
+    private inner class Player(val steps: List<MacroStep>, val repeat: Boolean, val holdLast: Boolean = false) {
         var held = false
         var mask = 0
-        val ownsDirs = steps.any { it.buttons and Ps2.DIRECTIONS != 0 }
+        private var holdingLast = false
+        private val hasDirs = steps.any { it.buttons and Ps2.DIRECTIONS != 0 }
+        val ownsDirs get() = hasDirs && !holdingLast
         private var index = 0
         var running = false
             private set
@@ -227,6 +229,12 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             override fun run() {
                 if (steps.isEmpty()) return finish()
                 if (index >= steps.size) {
+                    if (holdLast && held) {
+                        holdingLast = true
+                        mask = steps.last().buttons
+                        recompute()
+                        return
+                    }
                     if (repeat && held) index = 0 else return finish()
                 }
                 val s = steps[index++]
@@ -240,12 +248,14 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             held = true
             if (running) return
             running = true
+            holdingLast = false
             index = 0
             handler.post(step)
         }
 
         fun release() {
             held = false
+            if (holdingLast) finish()
         }
 
         fun cancel() {
@@ -255,6 +265,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
 
         private fun finish() {
             running = false
+            holdingLast = false
             mask = 0
             recompute()
         }
@@ -511,7 +522,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     private fun press(e: El) {
         if (e.kind == CtlKind.MACRO) {
             val steps = e.macro?.steps ?: e.ctl?.steps ?: return
-            players.getOrPut(e.key) { Player(steps, e.macro?.repeat ?: false) }.start()
+            val holdLast = e.ctl?.holdLast ?: false
+            players.getOrPut(e.key) { Player(steps, e.macro?.repeat ?: false, holdLast) }.start()
         } else {
             pressedAt[e] = SystemClock.uptimeMillis()
         }
@@ -550,8 +562,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val e = t.el
         val kinds = slideKinds()
         if (e == null) {
-            // a finger that landed between buttons and slides onto one presses it
-            find(x, y, 1.0f, kinds)?.let { n ->
+            // a finger that landed between buttons and slides onto one presses it (never auto-slide onto GUARD/R2)
+            find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD }?.let { n ->
                 t.el = n; press(n)
             }
             return
@@ -565,9 +577,9 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             }
             CtlKind.STICK -> stick(e, t, x, y)
             in kinds -> if (!e.hit(x, y, max(1.25f, touchSlack() + 0.13f))) {
-                // sliding across the buttons: the one under the finger now (attack into chakra, into the jutsu in Pro…)
+                // sliding across the buttons: the one under the finger now (never auto-slide onto GUARD/R2 to prevent accidental Kawarimi)
                 letGo(t, e)
-                val n = find(x, y, 1.0f, kinds)
+                val n = find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD }
                 t.el = n
                 if (n != null) press(n)
             }

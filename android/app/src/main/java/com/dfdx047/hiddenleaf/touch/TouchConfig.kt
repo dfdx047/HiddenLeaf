@@ -87,7 +87,7 @@ data class MacroStep(val buttons: Int, val ms: Int)
  * 2026-11-09): the D-pad, attack, jump, chakra, item, guard, jutsu, Ougi and START. R3 (AWAKEN) was never seen doing
  * anything in UN5, so it starts hidden ([PadDefaults.FIGHT]); the layout editor still shows it.
  */
-enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List<MacroStep> = emptyList()) {
+enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List<MacroStep> = emptyList(), val holdLast: Boolean = false) {
     DPAD(CtlKind.DPAD, 0, 140f),
     STICK(CtlKind.STICK, 0, 150f),
     ATTACK(CtlKind.BUTTON, Ps2.CIRCLE, 88f),
@@ -100,10 +100,10 @@ enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List
     )),
     SPECIAL_UP(CtlKind.MACRO, 0, 56f, listOf(
         MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
-    )),
+    ), holdLast = true),
     SPECIAL_DOWN(CtlKind.MACRO, 0, 56f, listOf(
         MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
-    )),
+    ), holdLast = true),
     GUARD(CtlKind.BUTTON, Ps2.R2, 60f),
     AWAKEN(CtlKind.BUTTON, Ps2.R3, 52f),
     ITEM_PREV(CtlKind.SHOULDER, Ps2.L1, 72f),

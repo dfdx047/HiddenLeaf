@@ -474,7 +474,10 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens the room and waits for someone; [start] runs on the main thread once the session file is written. */
-    fun create(fp: String, start: () -> Unit) {
+    fun create(fp: String, start: () -> Unit) = createForLobby(fp, null, start)
+
+    /** Opens a room and optionally notifies [onCode] as soon as the 6-digit code is assigned (used by Casual Custom Lobbies with spectators). */
+    fun createForLobby(fp: String, onCode: ((String) -> Unit)?, start: () -> Unit) {
         if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         val server = Online.cleanServer(p.server)
@@ -490,6 +493,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 room = r
                 roomServer = server
                 _state.value = LobbyState.Waiting(r.code)
+                onCode?.invoke(r.code)
                 ActivityLog.info("online", "room ${r.code} open (input=$mode)")
                 waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE)
             } catch (e: Online.Failure) {
@@ -536,17 +540,18 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
      * waits longest, or gives it a room of its own that waits in the queue (polled as a created room is); a waiting room the service let
      * go (no poll for 15 s: the network was away) is searched again. It gives up after [QUICK_MAX_MS]. [start] as for [create].
      */
-    fun quick(fp: String, ranked: Boolean = false, start: () -> Unit) {
+    fun quick(fp: String, ranked: Boolean = false, inputModeOverride: String? = null, start: () -> Unit) {
         if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         val server = Online.cleanServer(p.server)
         val queueFp = if (ranked) "${fp}#ranked" else fp
+        val forcedMode = inputModeOverride
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
                 _state.value = LobbyState.Working(R.string.online_step_address)
                 val s = openSocket()
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
-                ActivityLog.info("online", "quick match (ranked=$ranked): own addresses ${addrs.joinToString()}")
+                ActivityLog.info("online", "quick match (ranked=$ranked, mode=${forcedMode ?: p.inputMode}): own addresses ${addrs.joinToString()}")
                 val began = System.currentTimeMillis()
                 _state.value = LobbyState.Searching(began)
                 while (isActive) {
@@ -556,7 +561,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                         closeRoom()
                         return@launch
                     }
-                    val mode = Online.effectiveInputMode(p.inputMode)
+                    val mode = forcedMode ?: Online.effectiveInputMode(p.inputMode)
                     val q = Online.quick(server, p.name, queueFp, addrs, Online.Opts(p.delay, p.relay), who, mode)
                     if (q.host != null) {
                         ActivityLog.info("online", "quick match: in room ${q.code} of ${q.host.name} (${q.host.seen}), addresses ${q.host.addrs.joinToString()}")

@@ -59,6 +59,7 @@ class GameActivity : SDLActivity() {
 
     /** How many times "Naruto Online" was chosen in the game's Mode Select when this start began (hl_game.cpp's counter). */
     private var onlineChosen = -1
+    private var lastDetectedCharId = 0
 
     private val watchMenu = object : Runnable {
         override fun run() {
@@ -73,8 +74,49 @@ class GameActivity : SDLActivity() {
                     openOnlineMenu()
                 }
             }
+            // Auto-detect Player 1's chosen character in battle, credit per-character mastery XP, and export real HUD portrait
+            val cid = TouchBridge.p1CharId()
+            if (cid > 0 && cid != lastDetectedCharId && TouchBridge.scene() == 2) {
+                lastDetectedCharId = cid
+                val charKey = com.dfdx047.hiddenleaf.data.OnlineAdvanced.charKeyForGameId(cid)
+                com.dfdx047.hiddenleaf.data.OnlineAdvanced.recordLocalCharFight(this@GameActivity, charKey, xpGain = 60)
+                scheduleAutoPortraitExport(charKey)
+            }
             handler.postDelayed(this, 50)
         }
+    }
+
+    /** Captures Player 1's real in-game character portrait directly from the battle HUD into <root>/portraits/<charKey>.png. */
+    private fun scheduleAutoPortraitExport(charKey: String) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return
+        val outFile = File(File(paths.root, "portraits"), "$charKey.png")
+        if (outFile.exists() && outFile.length() > 1024L) return
+        handler.postDelayed({
+            runCatching {
+                val layout = SDLActivity.getContentView() as? ViewGroup ?: return@runCatching
+                val surf = (0 until layout.childCount).map { layout.getChildAt(it) }.firstOrNull { it is SDLSurface } as? SDLSurface ?: return@runCatching
+                if (surf.width <= 0 || surf.height <= 0 || !surf.holder.surface.isValid) return@runCatching
+                val full = android.graphics.Bitmap.createBitmap(surf.width, surf.height, android.graphics.Bitmap.Config.ARGB_8888)
+                android.view.PixelCopy.request(surf, full, { res ->
+                    if (res == android.view.PixelCopy.SUCCESS) {
+                        runCatching {
+                            // Top-left P1 HUD portrait box in UN5 battle screen (works in both 16:9 and 4:3/1:1)
+                            val x = (full.width * 0.025f).toInt().coerceIn(0, full.width - 16)
+                            val y = (full.height * 0.045f).toInt().coerceIn(0, full.height - 16)
+                            val side = (minOf(full.width, full.height) * 0.145f).toInt().coerceIn(32, minOf(full.width - x, full.height - y))
+                            val crop = android.graphics.Bitmap.createBitmap(full, x, y, side, side)
+                            val scaled = android.graphics.Bitmap.createScaledBitmap(crop, 128, 128, true)
+                            outFile.parentFile?.mkdirs()
+                            outFile.outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 92, it) }
+                            scaled.recycle()
+                            crop.recycle()
+                            android.util.Log.i("un5", "portrait: auto-exported $charKey -> ${outFile.name}")
+                        }
+                    }
+                    full.recycle()
+                }, handler)
+            }
+        }, 1800L)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -412,7 +454,7 @@ class GameActivity : SDLActivity() {
             }
             EngineSettings.SPECIAL_ONE, EngineSettings.SPECIAL_BUTTON, EngineSettings.MASH_PERCENT ->
                 TouchBridge.setAssist(
-                    es.get(EngineSettings.SPECIAL_ONE, 0),
+                    0,
                     es.get(EngineSettings.SPECIAL_BUTTON, 0x20),
                     es.get(EngineSettings.MASH_PERCENT, 100),
                 )

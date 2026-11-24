@@ -46,6 +46,7 @@ namespace hl_game
     std::atomic<int> g_mashPercent{100};
     std::atomic<bool> g_menuOnline{false};
     std::atomic<int> g_onlineMenu{0};
+    std::atomic<int> g_p1CharId{0};
     bool (*g_nativeOn)() = nullptr;
     void (*g_liveFight)(bool) = nullptr;
     void (*g_wideCameraOut)(bool) = nullptr;
@@ -1315,6 +1316,13 @@ namespace
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
         noteFightStart();
+        // Track Player 1's active character ID (fighter+0x68, verified in sub_002146A0) for automatic portrait export & per-character mastery
+        if (humanFighter(f) && (read16(f + kFighterKind) & 1u) == 0u)
+        {
+            const uint32_t cid = read32(f + 0x68u);
+            if (cid > 0u && cid < 256u)
+                hl_game::g_p1CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
+        }
         {
             // HL_SP_LOG: which fighter is the human one, its chakra and action, twice a second
             static const bool s_spLog = std::getenv("HL_SP_LOG") != nullptr;

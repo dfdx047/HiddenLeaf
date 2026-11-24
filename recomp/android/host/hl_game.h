@@ -22,6 +22,7 @@ namespace hl_game
     extern std::atomic<int> g_mashPercent;     // what a tap is worth in the steps of pressing repeatedly: 100, 125, 150, 165, 200
     extern std::atomic<bool> g_menuOnline;     // "Naruto Online" in the game's Mode Select (also HL_MENU_ONLINE=1; docs/menu-online.md)
     extern std::atomic<int> g_onlineMenu;      // how many times it was chosen (the launcher opens its lobby when this goes up)
+    extern std::atomic<int> g_p1CharId;        // Player 1's active UN5 character ID (read from fighter+0x68 during fights)
     int overlay();                             // the mode's code in memory: 0 none yet, 1 BTL (fight), 2 ADV (campaign), 3 other
     int menuTap(float nx, float ny);           // direct touch on Mode Select wooden boards: 0=default CROSS, 1=UP, 2=CROSS, 3=DOWN
 

@@ -15,6 +15,8 @@ import org.json.JSONObject
  */
 object OnlineAdvanced {
 
+    data class CharMastery(val xp: Int, val lvl: Int, val matches: Int)
+
     data class RankedProfile(
         val playerId: String,
         val name: String,
@@ -27,6 +29,7 @@ object OnlineAdvanced {
         val favChar: String = "naruto",
         val favCharLvl: Int = 1,
         val favCharXp: Int = 0,
+        val mastery: Map<String, CharMastery> = emptyMap(),
     )
 
     data class LeaderboardEntry(
@@ -79,14 +82,77 @@ object OnlineAdvanced {
         context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).edit().putString("fav_char", charId).apply()
     }
 
+    /** Maps UN5 internal character ID (fighter+0x68) to a stable slug; unknown/mod IDs map to "char_<id>". */
+    fun charKeyForGameId(gameCharId: Int): String = when (gameCharId) {
+        1 -> "naruto"
+        2 -> "sasuke"
+        3 -> "sakura"
+        4 -> "kakashi"
+        5 -> "lee"
+        6 -> "neji"
+        7 -> "gaara"
+        8 -> "sai"
+        9 -> "jiraiya"
+        10 -> "itachi"
+        11 -> "deidara"
+        12 -> "minato"
+        else -> "char_$gameCharId"
+    }
+
+    fun localMastery(context: Context): Map<String, CharMastery> {
+        val raw = context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).getString("char_mastery", "{}") ?: "{}"
+        return parseMasteryJson(runCatching { JSONObject(raw) }.getOrNull())
+    }
+
+    /** Records a fight played with [charKey] locally (per-character XP & level) and marks [charKey] as the active character. */
+    fun recordLocalCharFight(context: Context, charKey: String, xpGain: Int = 60): CharMastery {
+        val p = context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE)
+        val map = localMastery(context).toMutableMap()
+        val cur = map[charKey] ?: CharMastery(0, 1, 0)
+        val nextXp = cur.xp + xpGain
+        val next = CharMastery(nextXp, (1 + nextXp / 200).coerceIn(1, 99), cur.matches + 1)
+        map[charKey] = next
+        val obj = JSONObject()
+        for ((k, v) in map) obj.put(k, JSONObject().put("xp", v.xp).put("lvl", v.lvl).put("matches", v.matches))
+        p.edit().putString("fav_char", charKey).putString("char_mastery", obj.toString()).apply()
+        return next
+    }
+
+    private fun parseMasteryJson(o: JSONObject?): Map<String, CharMastery> {
+        if (o == null) return emptyMap()
+        val out = LinkedHashMap<String, CharMastery>()
+        val keys = o.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val v = o.optJSONObject(k) ?: continue
+            val xp = v.optInt("xp", 0).coerceAtLeast(0)
+            val lvl = v.optInt("lvl", (1 + xp / 200).coerceIn(1, 99))
+            val matches = v.optInt("matches", 0).coerceAtLeast(0)
+            out[k] = CharMastery(xp, lvl, matches)
+        }
+        return out
+    }
+
     suspend fun syncProfile(context: Context, server: String, name: String, inputMode: String, favChar: String = savedFavChar(context)): RankedProfile = withContext(Dispatchers.IO) {
         val (pid, secret) = identity(context)
+        val local = localMastery(context)
+        val localObj = JSONObject()
+        for ((k, v) in local) localObj.put(k, JSONObject().put("xp", v.xp).put("lvl", v.lvl).put("matches", v.matches))
         val r = postJson(server, "/v1/profile", JSONObject()
             .put("player_id", pid)
             .put("secret", secret)
             .put("name", Online.cleanName(name).ifEmpty { "Ninja" })
             .put("input_mode", inputMode)
-            .put("fav_char", favChar))
+            .put("fav_char", favChar)
+            .put("char_mastery", localObj))
+        val merged = parseMasteryJson(r.optJSONObject("char_mastery"))
+        if (merged.isNotEmpty()) {
+            val saveObj = JSONObject()
+            for ((k, v) in merged) saveObj.put(k, JSONObject().put("xp", v.xp).put("lvl", v.lvl).put("matches", v.matches))
+            context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).edit().putString("char_mastery", saveObj.toString()).apply()
+        }
+        val activeChar = r.optString("fav_char", favChar)
+        val activeM = merged[activeChar]
         RankedProfile(
             playerId = r.optString("player_id", pid),
             name = r.optString("name", name),
@@ -96,9 +162,10 @@ object OnlineAdvanced {
             streak = r.optInt("streak", 0),
             rank = r.optInt("rank", 1),
             tier = r.optString("tier", "Genin"),
-            favChar = r.optString("fav_char", favChar),
-            favCharLvl = r.optInt("fav_char_lvl", 1),
-            favCharXp = r.optInt("fav_char_xp", 0),
+            favChar = activeChar,
+            favCharLvl = activeM?.lvl ?: r.optInt("fav_char_lvl", 1),
+            favCharXp = activeM?.xp ?: r.optInt("fav_char_xp", 0),
+            mastery = merged,
         )
     }
 
@@ -184,9 +251,21 @@ object OnlineAdvanced {
         parseLobby(r, pid)
     }
 
-    suspend fun pollLobby(context: Context, server: String, code: String): CustomLobby = withContext(Dispatchers.IO) {
+    suspend fun pollLobby(context: Context, server: String, code: String, activeRoom: String? = null): CustomLobby = withContext(Dispatchers.IO) {
         val (pid, _) = identity(context)
-        val r = postJson(server, "/v1/lobby/state", JSONObject().put("code", code).put("player_id", pid))
+        val body = JSONObject().put("code", code).put("player_id", pid)
+        if (!activeRoom.isNullOrEmpty()) body.put("active_room", activeRoom)
+        val r = postJson(server, "/v1/lobby/state", body)
+        parseLobby(r, pid)
+    }
+
+    suspend fun setLobbyRole(context: Context, server: String, code: String, targetId: String, role: String): CustomLobby = withContext(Dispatchers.IO) {
+        val (pid, _) = identity(context)
+        val r = postJson(server, "/v1/lobby/role", JSONObject()
+            .put("code", code)
+            .put("player_id", pid)
+            .put("target_id", targetId)
+            .put("role", role))
         parseLobby(r, pid)
     }
 
