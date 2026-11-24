@@ -363,8 +363,12 @@ class GameActivity : SDLActivity() {
                 orientation = value.coerceIn(0, 2)
                 requestedOrientation = orientationFlag()
             }
-            EngineSettings.SPECIAL_ONE, EngineSettings.MASH_PERCENT ->
-                TouchBridge.setAssist(es.get(EngineSettings.SPECIAL_ONE, 1), es.get(EngineSettings.MASH_PERCENT, 100))
+            EngineSettings.SPECIAL_ONE, EngineSettings.SPECIAL_BUTTON, EngineSettings.MASH_PERCENT ->
+                TouchBridge.setAssist(
+                    es.get(EngineSettings.SPECIAL_ONE, 0),
+                    es.get(EngineSettings.SPECIAL_BUTTON, 0x20),
+                    es.get(EngineSettings.MASH_PERCENT, 100),
+                )
             EngineSettings.RENDERER -> runCatching { Renderer.apply(es, paths) }
         }
         menu?.state?.engine = es.snapshot()

@@ -14,6 +14,7 @@ import android.os.Looper
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import com.dfdx047.hiddenleaf.R
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -130,6 +131,22 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
 
     private val dp = resources.displayMetrics.density
     private val els = mutableListOf<El>()
+    private var insetL = 0f
+    private var insetT = 0f
+    private var insetR = 0f
+    private var insetB = 0f
+    private val safeW get() = (width - insetL - insetR).coerceAtLeast(1f)
+    private val safeH get() = (height - insetT - insetB).coerceAtLeast(1f)
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        val cut = insets.displayCutout
+        insetL = (cut?.safeInsetLeft ?: 0).toFloat()
+        insetT = (cut?.safeInsetTop ?: 0).toFloat()
+        insetR = (cut?.safeInsetRight ?: 0).toFloat()
+        insetB = (cut?.safeInsetBottom ?: 0).toFloat()
+        rebuild()
+        return super.onApplyWindowInsets(insets)
+    }
 
     private fun baseSize(kind: ClassicKind, size: Float): Pair<Float, Float> = when (kind) {
         ClassicKind.SHOULDER -> size to size * 0.52f
@@ -139,22 +156,28 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
 
     private fun rebuild() {
         els.clear()
-        val w = width.toFloat()
-        val h = height.toFloat()
-        if (w <= 0f || h <= 0f) return
+        if (width <= 0 || height <= 0) return
+        val w = safeW
+        val h = safeH
         val all = config.scale
         for (c in ClassicCtl.entries) {
             val p = config.classicPlaces[c.name]
             val s = p?.scale ?: 1f
             val (bw, bh) = baseSize(c.kind, c.size)
-            val cx = p?.x?.times(w) ?: (c.x * w + c.dx * dp * all)
-            val cy = p?.y?.times(h) ?: (c.y * h + c.dy * dp * all)
-            els += El(c.name, c, null, c.kind, cx, cy, bw * dp * all * s, bh * dp * all * s, s, p?.visible ?: c.shownByDefault)
+            val ew = bw * dp * all * s
+            val eh = bh * dp * all * s
+            val rawX = p?.x?.let { insetL + it * w } ?: (insetL + c.x * w + c.dx * dp * all)
+            val rawY = p?.y?.let { insetT + it * h } ?: (insetT + c.y * h + c.dy * dp * all)
+            val mx = (ew / 2 + 6 * dp).coerceAtMost(w / 2)
+            val my = (eh / 2 + 6 * dp).coerceAtMost(h / 2)
+            val cx = rawX.coerceIn(insetL + mx, width - insetR - mx)
+            val cy = rawY.coerceIn(insetT + my, height - insetB - my)
+            els += El(c.name, c, null, c.kind, cx, cy, ew, eh, s, p?.visible ?: c.shownByDefault)
         }
         config.macros.forEachIndexed { i, m ->
             val mp = m.place ?: PadDefaults.macroPlace(i)
             val size = 58f * dp * all * mp.scale
-            els += El("M:" + m.id, null, m, ClassicKind.MACRO, mp.x * w, mp.y * h, size, size, mp.scale, mp.visible)
+            els += El("M:" + m.id, null, m, ClassicKind.MACRO, insetL + mp.x * w, insetT + mp.y * h, size, size, mp.scale, mp.visible)
         }
         invalidate()
     }
@@ -184,8 +207,10 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
     private inner class MacroPlayer(val macro: Macro) {
         var held = false
         var mask = 0
+        val ownsDirs = macro.steps.any { it.buttons and Ps2.DIRECTIONS != 0 }
         private var index = 0
-        private var running = false
+        var running = false
+            private set
         private val step = object : Runnable {
             override fun run() {
                 if (macro.steps.isEmpty()) {
@@ -240,7 +265,8 @@ class ClassicPadView(context: Context, initial: TouchConfig, editing: Boolean = 
     }
 
     private fun recompute() {
-        var b = dpadBits
+        val macroOwnsDirs = players.values.any { it.running && it.ownsDirs }
+        var b = if (macroOwnsDirs) 0 else dpadBits
         for (e in pressedEls) if (e.ctl != null) b = b or e.ctl.bit
         macroMask = 0
         for (p in players.values) macroMask = macroMask or p.mask

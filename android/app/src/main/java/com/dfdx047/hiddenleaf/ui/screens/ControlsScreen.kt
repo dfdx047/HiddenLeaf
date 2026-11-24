@@ -202,7 +202,7 @@ internal fun ControlsContent(
         if (mobile) TouchProSection(c, onChange = onTouch, onEditLayout = { editing = true })
 
         SectionCard(stringResource(R.string.special_one), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
-            val specialOn = (engine[EngineSettings.SPECIAL_ONE] ?: 1) != 0
+            val specialOn = (engine[EngineSettings.SPECIAL_ONE] ?: 0) != 0
             ToggleRow(stringResource(R.string.special_one), stringResource(R.string.special_one_text), specialOn) {
                 onSetting(EngineSettings.SPECIAL_ONE, if (it) 1 else 0)
             }

@@ -41,7 +41,7 @@ namespace hl_game
     std::atomic<float> g_cameraXScale{1.0f};
     std::atomic<uint32_t> g_vsync{0u};
     std::atomic<bool> g_unlockAll{false};
-    std::atomic<bool> g_specialOn{true};
+    std::atomic<bool> g_specialOn{false};
     std::atomic<uint32_t> g_specialMask{0x20u};
     std::atomic<int> g_mashPercent{100};
     std::atomic<bool> g_menuOnline{false};
@@ -503,7 +503,7 @@ namespace
     constexpr uint32_t kPadCurrent = 0x64u, kPadPressed = 0x68u, kPadRepeat = 0x70u;
     constexpr uint32_t kFighterAction = 0x18Eu, kFighterController = 0x24u, kFighterKind = 0x60u, kFighterChakra = 0x70u, kFighterWord = 0x338u;
     constexpr uint32_t kFighterMove = 0xA4Cu, kFighterDispute = 0xB00u;
-    constexpr uint32_t kMoveSpecial = 0x00FF0000u; // (0xF0000 the jutsu, 0xF00000 the ougi)
+    constexpr uint32_t kMoveOugi = 0x00F00000u; // (0xF0000 the jutsu, 0xF00000 the ougi)
     constexpr uint32_t kInChakra = 0x08000000u, kInAttack = 0x40001000u, kInDirections = 0xFFFu;
     constexpr uint32_t kPadFace = 0x00F0u, kPadDirections = 0xF000u, kPadCircle = 0x20u;
     constexpr uint32_t kChakraTap = 5u;
@@ -515,6 +515,8 @@ namespace
     int g_padCredit[2] = {};        // hundredths of a press still to give
     uint32_t g_padSynthetic[2] = {}; // the presses of this frame that are ours
     uint32_t g_padSpecialDown[2] = {}; // the special button came down in this frame (g_padTapped is taken by the fighter)
+    uint64_t g_padSpecialTick[2] = {}; // vsync of the last latch of g_padSpecialDown
+    uint64_t g_padDirTick[2] = {};     // vsync of the last directional input (avoids hijacking ↑↑○ / ↓↓○)
     int g_testTap = 0;              // HL_SP_TAP: a tap of the special button every so many vsyncs, for testing
     int g_testCpu = 0;              // HL_SP_CPU: the second fighter does an Ougi when it can, every so many vsyncs
     uint64_t g_nextCpu = 0u;
@@ -541,6 +543,8 @@ namespace
             }
         }
         std::memset(g_fighters, 0, sizeof(g_fighters)); // (a new fight)
+        for (int i = 0; i < 4; ++i)
+            g_sequence[i] = Sequence{0u, -1, 0, 0.0f};
         g_fighters[0] = f;
         g_sequence[0] = Sequence{f, -1, 0, 0.0f};
         return 0;
@@ -550,16 +554,16 @@ namespace
 
     inline bool humanFighter(uint32_t f) { return ((read16(f + kFighterKind) >> 5) & 0xFu) == 0u; }
 
-    // An Ougi on the screen, or a dispute: from then on the taps answer the game's prompts. Only while the fight lives (a
-    // fighter read its input or an Ougi's prompt read the pad in the last 5 s): after the fight BTL.BIN stays in memory
-    // under the character select, and the fighters left there (one in an Ougi or a dispute when it ended) kept the
-    // fight's controls, the wide camera and the answers on the menus (docs/registro.md, 2026-11-05).
+    // An Ougi on the screen, or a dispute: from then on the taps answer the game's prompts. Only while the fight lives
+    // (a fighter read its input or an Ougi's prompt read the pad in the last 0.5 s) and not on the round-end panel.
     bool ougiOnScreen()
     {
         if (hl_game::overlay() != 1)
             return false;
+        if (read32(kRoundEndPanel) != 0u)
+            return false;
         const uint64_t live = g_fighterTick > g_ougiTick ? g_fighterTick : g_ougiTick;
-        if (live == 0u || g_tick - live > 250u)
+        if (live == 0u || g_tick - live > 25u)
             return false;
         for (int i = 0; i < 4; ++i)
         {
@@ -569,7 +573,7 @@ namespace
             if ((read32(f + kFighterDispute) & 0xFF00u) != 0u)
                 return true;
             const uint32_t move = read32(f + kFighterMove);
-            if (read16(f + kFighterAction) == 8u && validAddress(move) && (read32(move + 0x10u) & kMoveSpecial) != 0u)
+            if (read16(f + kFighterAction) == 8u && validAddress(move) && (read32(move + 0x10u) & kMoveOugi) != 0u)
                 return true;
         }
         return false;
@@ -1128,9 +1132,20 @@ namespace
             current |= mask;
             g_padAdded[index] |= mask;
         }
+        if ((current & kPadDirections) != 0u)
+            g_padDirTick[index] = g_tick;
         const bool tapped = (pressed & mask) != 0u;
-        g_padTapped[index] = tapped ? 1u : 0u;
-        g_padSpecialDown[index] = tapped ? 1u : 0u;
+        if (tapped)
+        {
+            g_padTapped[index] = 1u;
+            g_padSpecialDown[index] = 1u;
+            g_padSpecialTick[index] = g_tick;
+        }
+        else if (g_padSpecialTick[index] != g_tick)
+        {
+            g_padTapped[index] = 0u;
+            g_padSpecialDown[index] = 0u;
+        }
         g_padSynthetic[index] = 0u;
         if (!ougiOnScreen())
         {
@@ -1180,8 +1195,9 @@ namespace
                 g_padTapped[index] = 0u;
                 const uint32_t mask = hl_game::g_specialMask.load(std::memory_order_relaxed);
                 const uint32_t action = read16(f + kFighterAction);
-                // (the circle is also the attack: with a direction, or in the middle of anything, it stays the attack)
-                const bool plain = mask != kPadCircle || (read32(pad + kPadCurrent) & kPadDirections) == 0u;
+                // (the circle is also the attack: with a direction, or right after a directional macro like ↑↑○/↓↓○, stay attack)
+                const bool recentDir = g_padDirTick[index] != 0u && (g_tick - g_padDirTick[index] <= 10u);
+                const bool plain = mask != kPadCircle || ((read32(pad + kPadCurrent) & kPadDirections) == 0u && !recentDir);
                 start = q.step < 0 && (action == 0u || (action == 1u && mask != kPadCircle)) && plain && readf(f + kFighterChakra) >= static_cast<float>(kChakraTap);
             }
         }
@@ -1202,15 +1218,17 @@ namespace
         }
         if (q.step < 0)
             return;
-        // (the first tap of chakra refused, the game has its reasons: then it was a plain press)
-        if (q.step == 2 && readf(f + kFighterChakra) >= q.chakra)
+        // (abort if hit/interrupted or if the first tap of chakra was refused)
+        const uint32_t curAction = read16(f + kFighterAction);
+        if ((q.step > 0 && curAction != 0u && curAction != 1u && curAction != 8u) ||
+            (q.step == 2 && readf(f + kFighterChakra) >= q.chakra))
         {
             q.step = -1;
             return;
         }
         const int t = q.length - q.step; // (from the end: attack, attack, nothing)
         const uint32_t bits = q.length == 6 ? kJutsu[q.step] : (q.step < 2 || (t <= 5 && t >= 4)) ? kInChakra : (t <= 3 && t >= 2) ? kInAttack : 0u;
-        word = (word & kInDirections) | bits;
+        word |= bits;
         std::memcpy(g_rdram + f + kFighterWord, &word, 4);
         if (++q.step >= q.length)
             q.step = -1;
@@ -1372,7 +1390,7 @@ namespace
         {"resultado", DumpBy::Vsync, 8950u, 0},     {"campanha_vila", DumpBy::Vsync, 8150u, 2},
         {"campanha_cortina", DumpBy::Vsync, 9080u, 2},
     };
-    constexpr uint32_t kMoveOugi = 0x00F00000u;
+    // (kMoveOugi defined above at line 506)
 
     struct DumpWanted
     {

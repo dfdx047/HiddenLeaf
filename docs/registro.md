@@ -61,6 +61,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:13: Fase 2 — correção dos bugs do especial de 1 botão + `NinjaPadView` zero-alloc + paridade `ClassicPadView`
+
+- **Especial de 1 botão (`hl_game.cpp`, `un5_main.cpp`, `TouchBridge.kt`, `GameActivity.kt`, `GameMenu.kt`, `ControlsScreen.kt`):**
+  - Desligado por padrão (`g_specialOn = false`) para não sequestrar combos neutros em `○` nem macros `↑↑○`/`↓↓○`; mesmo quando ligado em `○`, ignora os 10 vsyncs seguintes a uma direção (`g_padDirTick`).
+  - `ougiOnScreen()` agora checa `kMoveOugi` (`0x00F00000`) em vez de `kMoveSpecial`, reduz a janela pós-luta de 250 para 25 vsyncs e checa `kRoundEndPanel == 0` (para não injetar `○` nos menus pós-luta).
+  - `special(f)` preserva pulo/guarda/substituição (`word |= bits`) e aborta se o lutador for atingido; `fighterSlot(f)` limpa os 4 slots de `g_sequence`; `g_padSpecialDown` fica travado durante o vsync inteiro; `special_button` atualiza ao vivo via `nativeSetAssist(specialOne, specialButton, mashPercent)` sem reiniciar.
+- **Controles touch (`NinjaPadView.kt`, `ClassicPadView.kt`):**
+  - `NinjaPadView.onDraw()`: `RadialGradient`, `LinearGradient` e `Path.Op.UNION` do D-pad agora são cacheados por elemento (`El`), e `icon()` reaproveita `rect` (zero alocações de `Shader`/`Path`/`RectF` por frame de toque).
+  - `ClassicPadView`: adicionados `onApplyWindowInsets()` (display cutouts/notch) e `ownsDirs` nos macros direcionais.
+- **Verificado nos 3 aparelhos (rota `hl_env_v3.txt` com `HL_SP_LOG=1` e toque na tela, 0 crashes, 0 `missing-target`, prints conferidos):**
+  - **Mi A3:** 49,8 fps (mín 44,9), **RG Cube:** 50,0 fps (mín 50,0), **RP5 capado (`sd480p`):** 50,0 fps (mín 47,8).
+
 ### 2026-11-24 01:05: Fase 1 — otimização do motor (Nominum VU1 zero-copy, ring buffer zero-copy, GS split, GpuProfiles reais)
 
 - **Nominum VU1 zero-copy (`0109-nominum-vu1-zero-copy.patch`, `hl_nominum_vu1.cpp`):** `PS2Memory` agora aponta `getVU1Code()`/`getVU1Data()` direto para os buffers internos de `nominum::core::Vif1` (sincronizados por `HL_VU_SYNC()` em `mapVuMemory()`), eliminando 48 KB de `memcmp`/`memcpy` por transferência VIF1 (`micro memory loaded by address 1 times` nos 3 aparelhos).

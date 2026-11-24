@@ -114,6 +114,16 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         var scale: Float,
         var visible: Boolean,
         var opacity: Int,
+        var cacheK: Float = -1f,
+        var cacheDown: Boolean = false,
+        var cacheGlass: Boolean = false,
+        var cacheCol: Int = 0,
+        var bodyShader: Shader? = null,
+        var rimShader: Shader? = null,
+        var dpadPath: Path? = null,
+        var dpadCx: Float = Float.NaN,
+        var dpadCy: Float = Float.NaN,
+        var dpadW: Float = Float.NaN,
     ) {
         val round: Boolean get() = kind != CtlKind.DPAD && kind != CtlKind.PILL && kind != CtlKind.SHOULDER
         fun hit(x: Float, y: Float, slack: Float): Boolean =
@@ -789,17 +799,26 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val col = colorOf(e)
         val r = e.w / 2 * (if (down) 0.94f else 1f)
         val glass = config.style == PadStyle.GLASS
+        // Cached shaders per El (eliminates ~22 Shader allocations per touch frame on weak GPUs)
+        if (editing || e.bodyShader == null || e.cacheK != k || e.cacheDown != down || e.cacheGlass != glass || e.cacheCol != col) {
+            e.cacheK = k
+            e.cacheDown = down
+            e.cacheGlass = glass
+            e.cacheCol = col
+            e.bodyShader = RadialGradient(
+                e.cx - r * 0.3f, e.cy - r * 0.35f, r * 1.3f,
+                if (down) a(col, 0.75f * k) else if (glass) a(Color.argb(70, 255, 255, 255), k) else a(Color.argb(200, 30, 33, 44), k),
+                if (down) a(col, 0.45f * k) else if (glass) a(Color.argb(25, 255, 255, 255), k) else a(Color.argb(170, 10, 12, 18), k),
+                Shader.TileMode.CLAMP,
+            )
+            e.rimShader = LinearGradient(e.cx, e.cy - r, e.cx, e.cy + r, a(lighten(col), k), a(col, 0.55f * k), Shader.TileMode.CLAMP)
+        }
         // body
-        fill.shader = RadialGradient(
-            e.cx - r * 0.3f, e.cy - r * 0.35f, r * 1.3f,
-            if (down) a(col, 0.75f * k) else if (glass) a(Color.argb(70, 255, 255, 255), k) else a(Color.argb(200, 30, 33, 44), k),
-            if (down) a(col, 0.45f * k) else if (glass) a(Color.argb(25, 255, 255, 255), k) else a(Color.argb(170, 10, 12, 18), k),
-            Shader.TileMode.CLAMP,
-        )
+        fill.shader = e.bodyShader
         c.drawCircle(e.cx, e.cy, r, fill)
         fill.shader = null
         // rim: the colour, brighter at the top
-        stroke.shader = LinearGradient(e.cx, e.cy - r, e.cx, e.cy + r, a(lighten(col), k), a(col, 0.55f * k), Shader.TileMode.CLAMP)
+        stroke.shader = e.rimShader
         stroke.strokeWidth = max(2f * dp, r * 0.07f)
         c.drawCircle(e.cx, e.cy, r - stroke.strokeWidth / 2, stroke)
         stroke.shader = null
@@ -897,9 +916,15 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val arm = s * 0.36f
         fill.color = a(Color.argb(60, 0, 0, 0), k)
         c.drawCircle(ox, oy, s * 1.02f, fill)
-        val v = Path().apply { addRoundRect(RectF(ox - arm, oy - s, ox + arm, oy + s), arm * 0.45f, arm * 0.45f, Path.Direction.CW) }
-        val hz = Path().apply { addRoundRect(RectF(ox - s, oy - arm, ox + s, oy + arm), arm * 0.45f, arm * 0.45f, Path.Direction.CW) }
-        v.op(hz, Path.Op.UNION)
+        var v = e.dpadPath
+        if (v == null || e.dpadCx != ox || e.dpadCy != oy || e.dpadW != e.w) {
+            val vert = Path().apply { addRoundRect(ox - arm, oy - s, ox + arm, oy + s, arm * 0.45f, arm * 0.45f, Path.Direction.CW) }
+            val hz = Path().apply { addRoundRect(ox - s, oy - arm, ox + s, oy + arm, arm * 0.45f, arm * 0.45f, Path.Direction.CW) }
+            vert.op(hz, Path.Op.UNION)
+            e.dpadPath = vert
+            e.dpadCx = ox; e.dpadCy = oy; e.dpadW = e.w
+            v = vert
+        }
         fill.color = a(if (config.style == PadStyle.GLASS) Color.argb(60, 255, 255, 255) else Color.argb(190, 18, 20, 28), k)
         c.drawPath(v, fill)
         stroke.color = a(STEEL, 0.55f * k)
@@ -989,9 +1014,9 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             Ctl.JUTSU -> {
                 // an orb of chakra, with its swirl
                 c.drawCircle(x, y, r * 0.85f, stroke)
+                rect.set(x - r * 0.55f, y - r * 0.55f, x + r * 0.55f, y + r * 0.55f)
                 for (i in 0 until 3) {
-                    val o = RectF(x - r * 0.55f, y - r * 0.55f, x + r * 0.55f, y + r * 0.55f)
-                    c.drawArc(o, i * 120f, 80f, false, stroke)
+                    c.drawArc(rect, i * 120f, 80f, false, stroke)
                 }
                 c.drawCircle(x, y, r * 0.14f, fill)
             }
@@ -1014,7 +1039,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                 val h = r * 0.8f
                 rect.set(x - w / 2, y - h / 2, x + w / 2, y + h / 2)
                 c.drawRoundRect(rect, h / 2, h / 2, stroke)
-                c.drawOval(RectF(x + w / 2 - h * 0.55f, y - h / 2, x + w / 2 + h * 0.05f, y + h / 2), stroke)
+                rect.set(x + w / 2 - h * 0.55f, y - h / 2, x + w / 2 + h * 0.05f, y + h / 2)
+                c.drawOval(rect, stroke)
                 c.drawLine(x - w * 0.3f, y - h * 0.1f, x + w * 0.05f, y - h * 0.1f, stroke)
             }
             Ctl.SPECIAL_UP, Ctl.SPECIAL_DOWN -> {

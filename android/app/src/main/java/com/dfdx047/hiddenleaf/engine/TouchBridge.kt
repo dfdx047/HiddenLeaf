@@ -28,8 +28,8 @@ object TouchBridge {
     /** The game frozen (the EE, the IOP and the sound together) or going on. */
     @JvmStatic external fun nativeSetPaused(paused: Boolean)
 
-    /** The one-tap special (0/1) and what a tap is worth where the game asks to press repeatedly (100..200 %), at once. */
-    @JvmStatic external fun nativeSetAssist(specialOne: Int, mashPercent: Int)
+    /** The one-tap special (0/1), its button mask, and what a tap is worth where the game asks to press repeatedly (100..200 %), at once. */
+    @JvmStatic external fun nativeSetAssist(specialOne: Int, specialButton: Int, mashPercent: Int)
 
     /** Resolution (quarters: 4 = 1x), screen filter, the picture's shape and the frame rate, in effect from the next frame. */
     @JvmStatic external fun nativeSetVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int)
@@ -57,8 +57,8 @@ object TouchBridge {
         runCatching { nativeSetPaused(paused) }
     }
 
-    fun setAssist(specialOne: Int, mashPercent: Int) {
-        runCatching { nativeSetAssist(specialOne, mashPercent) }
+    fun setAssist(specialOne: Int, specialButton: Int, mashPercent: Int) {
+        runCatching { nativeSetAssist(specialOne, specialButton, mashPercent) }
     }
 
     fun setVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int) {

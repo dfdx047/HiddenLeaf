@@ -400,13 +400,13 @@ private fun GameTab(state: GameMenuState, actions: GameMenuActions) {
     MenuButton(stringResource(R.string.panel_resume), Icons.Rounded.PlayArrow, primary = true) { actions.resume() }
     if (state.online) Hint(stringResource(R.string.gm_online_running_text))
 
-    val specialOn = state.get(EngineSettings.SPECIAL_ONE, 1) != 0
+    val specialOn = state.get(EngineSettings.SPECIAL_ONE, 0) != 0
     Section(stringResource(R.string.gp_assists))
     Toggle(stringResource(R.string.special_one), stringResource(R.string.special_one_text), specialOn) {
         actions.setting(EngineSettings.SPECIAL_ONE, if (it) 1 else 0)
     }
     if (specialOn) {
-        Label(stringResource(R.string.special_button), restart = true)
+        Label(stringResource(R.string.special_button))
         Chips(
             listOf("○" to 0x20, "□" to 0x80, "△" to 0x10, "✕" to 0x40, "L1" to 0x04, "R1" to 0x08, "L2" to 0x01, "R2" to 0x02),
             state.get(EngineSettings.SPECIAL_BUTTON, 0x20),

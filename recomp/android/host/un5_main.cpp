@@ -488,12 +488,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
     g_settings = {scale4, filter, aspectMilli, fpsMode};
     applyVideo();
 }
-// The game menu's Controls tab: the one-tap special and what a tap is worth where the game asks to press repeatedly, at once
-extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetAssist(JNIEnv *, jclass, jint specialOne, jint mashPercent)
+// The game menu's Controls tab: the one-tap special, its button, and what a tap is worth where the game asks to press repeatedly, at once
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetAssist(JNIEnv *, jclass, jint specialOne, jint specialButton, jint mashPercent)
 {
     if (hl_online::active()) // (an online match plays by the game's own rules on both phones: hl_online.cpp)
         return;
     hl_game::g_specialOn.store(specialOne != 0, std::memory_order_relaxed);
+    if (specialButton != 0)
+        hl_game::g_specialMask.store(static_cast<uint32_t>(specialButton), std::memory_order_relaxed);
     hl_game::g_mashPercent.store(mashPercent, std::memory_order_relaxed);
 }
 // "Naruto Online" in the game's Mode Select (hl_game.cpp, docs/menu-online.md): the entry on or off, and how many times the
