@@ -153,10 +153,9 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
         val isoSha = GameDataInstaller.imageSha256(iso) { percent ->
             onProgress(context.getString(R.string.detail_image_checksum, percent))
         }
-        if (known != null && known.isoSha256.isNotEmpty() && isoSha !in known.isoSha256) {
-            throw Stop(context.getString(R.string.err_mod_image, known.name, isoSha, known.isoSha256.first()))
-        }
-        val id = known?.id ?: "mod-${elfSha.take(8)}"
+        val isoVariant = known != null && known.isoSha256.isNotEmpty() && isoSha !in known.isoSha256
+        // Unknown data mods share the European ELF SHA, so key them by ISO SHA to avoid overwriting each other.
+        val id = known?.id ?: "mod-${isoSha.take(12)}"
         val dir = File(paths.modLibrary, id)
         val disc = File(dir, "disc")
         dir.deleteRecursively()
@@ -204,6 +203,7 @@ class Mods(private val context: Context, private val paths: GamePaths, private v
         p["bytes"] = bytes.toString()
         p["code"] = if (code) "1" else "0"
         p["known"] = if (known != null) "1" else "0"
+        if (isoVariant) p["iso_variant"] = "1"
         File(dir, "mod.properties").outputStream().use { p.store(it, "Hidden Leaf mod") }
         // a new mod comes switched on (and a code mod switches off the other one)
         val mod = listMods().first { it.id == id }

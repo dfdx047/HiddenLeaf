@@ -37,11 +37,14 @@ struct Un5Overlay
 namespace
 {
     constexpr size_t kOverlayCount = sizeof(kOverlays) / sizeof(kOverlays[0]);
-    const Un5Overlay *g_resident[4] = {}; // the last one found per load address (up to four addresses)
-    uint32_t g_residentAddr[4] = {};
+    constexpr int kResidentSlots = 16;
+    const Un5Overlay *g_resident[kResidentSlots] = {}; // the last one found per load address
+    uint32_t g_residentAddr[kResidentSlots] = {};
 
     bool resident(const uint8_t *rdram, const Un5Overlay &o)
     {
+        if (o.sigCount <= 0)
+            return false;
         for (int i = 0; i < o.sigCount; ++i)
         {
             const uint32_t at = (o.addr + o.sig[i].offset) & 0x1FFFFFFu;
@@ -65,7 +68,7 @@ namespace
 
     int cacheIndex(uint32_t addr)
     {
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < kResidentSlots; ++i)
         {
             if (g_residentAddr[i] == addr || g_residentAddr[i] == 0u)
             {

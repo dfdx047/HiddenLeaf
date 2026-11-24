@@ -1,0 +1,100 @@
+--- a/ps2xRuntime/src/lib/hl_image.cpp
++++ b/ps2xRuntime/src/lib/hl_image.cpp
+@@ -19,6 +19,7 @@
+ #include <fcntl.h>
+ #include <filesystem>
+ #include <map>
++#include <mutex>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <vector>
+@@ -37,10 +38,46 @@
+         uint64_t size;
+         uint32_t lbn, sectors;
+         int fd;
++        uint64_t lastUse;
+     };
+     std::vector<ModFile> s_mods;               // by lbn
+     std::map<std::string, size_t> s_modByPath; // the disc's path (upper case, '/') -> s_mods
+     uint64_t s_virtualSize = 0;                 // the image and the mods' sectors after it
++    std::mutex s_modFdMutex;
++    uint64_t s_modFdTick = 0;
++    uint32_t s_modOpenCount = 0;
++    constexpr uint32_t kMaxModFds = 32u;
++
++    int acquireModFd(ModFile &m)
++    {
++        if (m.fd >= 0)
++        {
++            m.lastUse = ++s_modFdTick;
++            return m.fd;
++        }
++        if (s_modOpenCount >= kMaxModFds)
++        {
++            ModFile *oldest = nullptr;
++            for (ModFile &other : s_mods)
++            {
++                if (other.fd >= 0 && (oldest == nullptr || other.lastUse < oldest->lastUse))
++                    oldest = &other;
++            }
++            if (oldest != nullptr)
++            {
++                ::close(oldest->fd);
++                oldest->fd = -1;
++                --s_modOpenCount;
++            }
++        }
++        m.fd = ::open(m.host.c_str(), O_RDONLY | O_CLOEXEC);
++        if (m.fd >= 0)
++        {
++            m.lastUse = ++s_modFdTick;
++            ++s_modOpenCount;
++        }
++        return m.fd;
++    }
+     void loadMods();
+ 
+     bool baseRead(uint64_t offset, void *dst, size_t bytes)
+@@ -138,7 +175,7 @@
+         return true;
+     auto *out = static_cast<uint8_t *>(dst);
+     const uint64_t end = offset + bytes;
+-    for (const ModFile &m : s_mods)
++    for (ModFile &m : s_mods)
+     {
+         const uint64_t from = static_cast<uint64_t>(m.lbn) * kSector, to = from + static_cast<uint64_t>(m.sectors) * kSector;
+         if (to <= offset || from >= end)
+@@ -146,9 +183,13 @@
+         const uint64_t a = std::max(from, offset), b = std::min(to, end);
+         std::memset(out + (a - offset), 0, static_cast<size_t>(b - a));
+         const uint64_t fileEnd = std::min(b, from + m.size);
++        std::lock_guard<std::mutex> lock(s_modFdMutex);
++        const int fd = acquireModFd(m);
++        if (fd < 0)
++            return false;
+         for (uint64_t at = a; at < fileEnd;)
+         {
+-            const ssize_t n = ::pread(m.fd, out + (at - offset), static_cast<size_t>(fileEnd - at), static_cast<off_t>(at - from));
++            const ssize_t n = ::pread(fd, out + (at - offset), static_cast<size_t>(fileEnd - at), static_cast<off_t>(at - from));
+             if (n <= 0)
+                 return false;
+             at += static_cast<uint64_t>(n);
+@@ -206,8 +247,7 @@
+         next = (next + 15u) & ~15u;
+         for (const auto &[key, file] : files)
+         {
+-            const int fd = ::open(file.first.c_str(), O_RDONLY | O_CLOEXEC);
+-            if (fd < 0)
++            if (::access(file.first.c_str(), R_OK) != 0)
+             {
+                 std::fprintf(stderr, "[hl] mod file cannot be read: %s\n", file.first.c_str());
+                 continue;
+@@ -221,7 +261,7 @@
+                 next += (sectors + 15u) & ~15u;
+             }
+             s_modByPath[key] = s_mods.size();
+-            s_mods.push_back({file.first, file.second, lbn, sectors, fd});
++            s_mods.push_back({file.first, file.second, lbn, sectors, -1, 0u});
+             std::fprintf(stderr, "[hl] mod: %s %s (%llu bytes, lbn %u)\n", key.c_str(), inPlace ? "in place" : "after the disc",
+                          static_cast<unsigned long long>(file.second), lbn);
+         }

@@ -32,9 +32,11 @@ def mwo3(raw):
 
 def signature(o):
     """Windows of the code that tell overlays at the same address apart: near the start, the middle, the end."""
-    text = o["text"]
-    offs = sorted({min(max(0, off), max(0, text - SIG_LEN)) & ~3 for off in (0x100, text // 2, text - 0x40)})
-    return [(off, o["body"][off:off + SIG_LEN]) for off in offs if off + SIG_LEN <= text]
+    span = o["text"] if o["text"] >= SIG_LEN else len(o["body"])
+    if span < SIG_LEN:
+        return []
+    offs = sorted({min(max(0, off), max(0, span - SIG_LEN)) & ~3 for off in (0x100, span // 2, span - 0x40)})
+    return [(off, o["body"][off:off + SIG_LEN]) for off in offs if off + SIG_LEN <= span]
 
 
 def one(name, binpath, outdir, dest):

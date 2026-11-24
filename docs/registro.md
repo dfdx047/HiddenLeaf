@@ -61,6 +61,20 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:36: Fase 5 — correções e robustez do sistema de mods
+
+- **Importação e identificação (`Mods.kt`):**
+  - ID de mods desconhecidos trocado de `mod-${elfSha.take(8)}` para `mod-${isoSha.take(12)}`, eliminando a colisão destrutiva que sobrescrevia mods de dados/tradução diferentes com o mesmo ELF europeu.
+  - Validação de mods conhecidos flexibilizada para aceitar ISOs repacotadas com o mesmo `elfSha` (marcando `iso_variant=1` em `mod.properties` em vez de bloquear).
+- **Motor e overlays (`un5_main.cpp`, `un5_overlays.cpp`, `recomp/overlays.py`, `0110-mod-fd-lru-cache.patch`):**
+  - Prioridade de ELF de mod corrigida em `un5_main.cpp` (último mod vence, igual ao `hl_image.cpp`) e fallback para o ELF base quando um code pack só altera overlays.
+  - `un5_overlays.cpp`: `resident()` agora retorna `false` quando `sigCount <= 0` e cache ampliado de 4 para 16 slots; `overlays.py` extrai assinaturas do corpo inteiro se `text < 32`.
+  - `hl_image.cpp` (patch `0110`): cache LRU thread-safe de até 32 FDs abertos para arquivos de mods (elimina vazamento de descritores em mods com muitos arquivos).
+- **Verificado nos 3 aparelhos (0 crashes, 0 `missing-target`, capturas conferidas):**
+  - **Mi A3 (Alpha 1.1X, `libun5_v80.so`):** luta rodando a 44–49 fps com `un6-a11x`.
+  - **RP5 capado (`sd480p`, UN6 Alpha 3.5, `libun5_un6_a35.so`):** luta rodando a **60,0 fps cravados** (NTSC, 9,5 ms idle).
+  - **RG Cube (jogo base):** luta rodando a **50,0 fps cravados** (12,5 ms idle).
+
 ### 2026-11-24 01:29: Fase 4 — otimização das animações da launcher + verificação de resoluções/filtros/60 fps
 
 - **Otimização da Launcher (`TrainingGround.kt`, `HomeScreen.kt`, `Common.kt`):**

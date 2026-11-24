@@ -573,8 +573,8 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
                     continue;
                 dirs += root + "/" + dir + "\n";
 #ifndef HL_PACK_ID
-                // the base engine: a mod with the base's boot program changed only in its data runs with that program
-                if (modElf.empty() && access((root + "/" + dir + "/SLES_556.05").c_str(), R_OK) == 0)
+                // the base engine: a mod with the base's boot program changed only in its data runs with that program (last mod wins)
+                if (access((root + "/" + dir + "/SLES_556.05").c_str(), R_OK) == 0)
                 {
                     const std::string candidate = root + "/" + dir + "/SLES_556.05";
                     if (sameCodeAsBase(data + "/SLES_556.05", candidate))
@@ -589,6 +589,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
 #ifdef HL_PACK_ID
                 const std::string id = dir.size() > 12 && dir.compare(0, 7, "modlib/") == 0 ? dir.substr(7, dir.find('/', 7) - 7) : "";
                 if (id == HL_PACK_ID)
+                {
                     if (FILE *p = std::fopen((root + "/modlib/" + id + "/mod.properties").c_str(), "r"))
                     {
                         char prop[256];
@@ -600,9 +601,14 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
                                     boot.pop_back();
                                 if (access((root + "/" + dir + "/" + boot).c_str(), R_OK) == 0)
                                     modElf = root + "/" + dir + "/" + boot;
+                                else if (access((data + "/" + boot).c_str(), R_OK) == 0)
+                                    modElf = data + "/" + boot;
                             }
                         std::fclose(p);
                     }
+                    if (modElf.empty() && access((data + "/SLES_556.05").c_str(), R_OK) == 0)
+                        modElf = data + "/SLES_556.05";
+                }
 #endif
             }
             std::fclose(f);
