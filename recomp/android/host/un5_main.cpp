@@ -506,6 +506,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
     hl_game::g_menuOnline.store(on != JNI_FALSE && !hl_online::active(), std::memory_order_relaxed);
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeOnlineMenu(JNIEnv *, jclass) { return hl_game::g_onlineMenu.load(std::memory_order_relaxed); }
+extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuTap(JNIEnv *, jclass, jfloat nx, jfloat ny) { return hl_game::menuTap(nx, ny); }
 // The online menu open over the game (OnlineMenu.kt): the controller and the touch pad move the menu, not the game behind it
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPadHeld(JNIEnv *, jclass, jboolean held)
 {

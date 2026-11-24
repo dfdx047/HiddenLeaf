@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.TouchApp
@@ -204,6 +205,7 @@ interface GameMenuActions {
     fun touch(c: TouchConfig)
     fun padMap(m: PadMap)
     fun editLayout()
+    fun openGraphicsMenu() {}
     fun resume()
     fun quit()
 }
@@ -455,6 +457,7 @@ internal fun scaleLabel(q: Int): String = if (q % 4 == 0) "${q / 4}x" else "${q 
 
 @Composable
 private fun GraphicsTab(state: GameMenuState, actions: GameMenuActions) {
+    MenuButton(stringResource(R.string.un5_gfx_open), Icons.Rounded.Tune, primary = true) { actions.openGraphicsMenu() }
     Section(stringResource(R.string.renderer))
     Text(
         stringResource(R.string.gm_renderer_now, state.rendererInUse),

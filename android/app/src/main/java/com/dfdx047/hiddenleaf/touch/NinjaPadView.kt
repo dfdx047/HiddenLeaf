@@ -428,18 +428,15 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                 } else if (hypot(dx, dy) > slide) {
                     val dir = if (abs(dx) > abs(dy)) (if (dx < 0) Ps2.LEFT else Ps2.RIGHT) else (if (dy < 0) Ps2.UP else Ps2.DOWN)
                     handler.removeCallbacks(gHold)
+                    gDone = true
+                    // Native smooth drag-scrolling: every slide step immediately moves one menu item and resets the drag anchor
+                    gDownX = x; gDownY = y
+                    pulse(dir)
                     if (dir != gDir) {
-                        // a new direction: one step now, then steps while the finger stays out
-                        gDir = dir; gDone = true
+                        gDir = dir
                         handler.removeCallbacks(gRepeat)
-                        pulse(dir)
                         handler.postDelayed(gRepeat, MENU_REPEAT_FIRST_MS)
                     }
-                    // back over the start: one more slide starts again from here
-                } else if (gDir != 0) {
-                    gDir = 0
-                    handler.removeCallbacks(gRepeat)
-                    gDownX = x; gDownY = y
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {}
@@ -453,7 +450,11 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
                     pulse(when {
                         gFingers >= 3 -> Ps2.START
                         gFingers == 2 -> Ps2.TRIANGLE
-                        else -> Ps2.CROSS
+                        else -> when (TouchBridge.menuTap(ev.x / width.coerceAtLeast(1), ev.y / height.coerceAtLeast(1))) {
+                            1 -> Ps2.UP
+                            3 -> Ps2.DOWN
+                            else -> Ps2.CROSS
+                        }
                     })
                 }
             }

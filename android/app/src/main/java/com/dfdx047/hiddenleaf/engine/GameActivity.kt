@@ -62,7 +62,7 @@ class GameActivity : SDLActivity() {
 
     private val watchMenu = object : Runnable {
         override fun run() {
-            pad?.suppressed = menu?.isOpen == true || onlineMenu != null
+            pad?.suppressed = menu?.isOpen == true || onlineMenu != null || graphicsMenu != null
             // "Naruto Online" in the game's own Mode Select (docs/menu-online.md; the developer, 2026-11-14: a menu of its own
             // inside the game, never out to the launcher): the online menu over the game (OnlineMenu.kt)
             if (online == null) {
@@ -265,6 +265,35 @@ class GameActivity : SDLActivity() {
         return true
     }
 
+    // ---- the native-styled UN5 Graphics menu (GraphicsMenu.kt): live game behind it, wooden boards
+    private var graphicsMenu: GraphicsMenuHost? = null
+
+    private fun openGraphicsMenu() {
+        closeMenu()
+        if (graphicsMenu != null) return
+        val layout = SDLActivity.getContentView() as? ViewGroup ?: return
+        releaseInputs()
+        TouchBridge.setPadHeld(true)
+        val host = GraphicsMenuHost(
+            this, es.snapshot(), rendererInUse,
+            onSetting = { k, v -> applySetting(k, v) },
+            close = ::closeGraphicsMenu,
+        )
+        host.installOwners(window.decorView, layout)
+        layout.addView(host, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        graphicsMenu = host
+        pad?.suppressed = true
+        host.post { host.focus() }
+    }
+
+    private fun closeGraphicsMenu() {
+        val host = graphicsMenu ?: return
+        (host.parent as? ViewGroup)?.removeView(host)
+        graphicsMenu = null
+        TouchBridge.setPadHeld(false)
+        focusGame()
+    }
+
     // ---- the game menu (GameMenu, a drawer at the left): it freezes the game while open (not an online match)
     private var menu: GameMenuHost? = null
 
@@ -273,6 +302,7 @@ class GameActivity : SDLActivity() {
         override fun touch(c: TouchConfig) = setTouch(c)
         override fun padMap(m: PadMap) = setPadMap(m)
         override fun editLayout() = startLayoutEdit()
+        override fun openGraphicsMenu() = this@GameActivity.openGraphicsMenu()
         override fun resume() = closeMenu()
         override fun quit() = quitToApp()
     }
@@ -821,6 +851,23 @@ class GameActivity : SDLActivity() {
             return if (fromPad) true else super.dispatchKeyEvent(event)
         }
         onlineMenu?.let { return onlineMenuKey(it, event) }
+        graphicsMenu?.let { host ->
+            val down = event.action == KeyEvent.ACTION_DOWN
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER ->
+                    return super.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount))
+                KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
+                    if (!down) host.back()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_CENTER -> {
+                    host.focus()
+                    return super.dispatchKeyEvent(event)
+                }
+            }
+            return true
+        }
         val m = menu
         if (m != null && m.isShowing) return menuKey(m, event, fromPad)
         if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_MODE) {

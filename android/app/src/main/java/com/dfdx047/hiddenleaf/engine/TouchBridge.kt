@@ -40,6 +40,11 @@ object TouchBridge {
     /** How many times the player chose "Naruto Online" there; the lobby opens when it goes up (not wired yet). */
     @JvmStatic external fun nativeOnlineMenu(): Int
 
+    /** Direct tap on menu items (normalized 0..1): 0=default CROSS, 1=UP, 2=CROSS, 3=DOWN. */
+    @JvmStatic external fun nativeMenuTap(nx: Float, ny: Float): Int
+
+    fun menuTap(nx: Float, ny: Float): Int = runCatching { nativeMenuTap(nx, ny) }.getOrDefault(0)
+
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
 
     fun divider(): Int = runCatching { nativeDivider() }.getOrDefault(2)

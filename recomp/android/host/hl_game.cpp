@@ -867,6 +867,8 @@ namespace
     bool g_onlineSound = false;
     uint64_t g_onlineSoundTick = 0u;
     int g_onlineStringsOk = -1;
+    std::atomic<uint32_t> g_modeSelectObj{0u};
+    std::atomic<uint64_t> g_modeSelectTick{0u};
 
     bool menuOnline()
     {
@@ -999,6 +1001,8 @@ namespace
     {
         const uint32_t menu = GPR_U32(ctx, 4);
         g_msBuildOriginal(rdram, ctx, runtime);
+        g_modeSelectObj.store(menu, std::memory_order_relaxed);
+        g_modeSelectTick.store(g_tick, std::memory_order_relaxed);
         if (!menuOnline())
             return;
         const uint32_t count = read32(menu + kMsCount);
@@ -1841,4 +1845,19 @@ int hl_game::scene()
             return 4;
     }
     return s_scene;
+}
+
+int hl_game::menuTap(float nx, float ny)
+{
+    if (overlay() != 0 || g_modeSelectObj.load(std::memory_order_relaxed) == 0u)
+        return 0;
+    const float xScale = g_cameraXScale.load(std::memory_order_relaxed);
+    const float x43 = xScale > 0.01f && xScale < 0.999f ? 0.5f + (nx - 0.5f) / xScale : nx;
+    if (x43 >= 0.08f && x43 <= 0.58f)
+    {
+        if (ny >= 0.16f && ny < 0.37f) return 1; // UP (top board)
+        if (ny >= 0.37f && ny <= 0.64f) return 2; // CROSS (center board)
+        if (ny > 0.64f && ny <= 0.86f) return 3; // DOWN (bottom board)
+    }
+    return 0;
 }

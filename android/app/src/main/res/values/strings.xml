@@ -490,4 +490,12 @@
     <string name="special_button_text">Standing still and without a direction, the circle is the special while there is chakra; with a direction or in a combo it is still the attack. The other buttons lose what they do in a fight.</string>
     <string name="mash_multiplier">Each press is worth</string>
     <string name="mash_multiplier_text">In the steps that ask to press repeatedly.</string>
+    <string name="tc_menu_touch">Direct touch in menus</string>
+    <string name="tc_menu_touch_text">Tap menu items and drag to scroll natively instead of showing the virtual pad in menus.</string>
+    <string name="un5_gfx_title">Graphics Options</string>
+    <string name="un5_gfx_video">Resolution &amp; Aspect</string>
+    <string name="un5_gfx_filters">Filters &amp; Frame Rate</string>
+    <string name="un5_gfx_engine">Engine &amp; Performance</string>
+    <string name="un5_gfx_help">Tap or D-pad: choose  ·  ✕: OK  ·  △ / Back: return</string>
+    <string name="un5_gfx_open">Open in-game UN5 Graphics Menu</string>
 </resources>

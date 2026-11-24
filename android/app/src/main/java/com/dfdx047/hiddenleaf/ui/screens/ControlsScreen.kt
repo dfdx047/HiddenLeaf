@@ -193,6 +193,7 @@ internal fun ControlsContent(
             StepSlider(stringResource(R.string.opacity), { "${it * 10}%" }, c.opacity / 10, 1..10) { onTouch(c.copy(opacity = it * 10)) }
             StepSlider(stringResource(R.string.touch_size), { "${it * 10}%" }, (c.scale * 10).roundToInt(), 5..20) { onTouch(c.copy(scale = it / 10f)) }
             if (mobile) {
+                ToggleRow(stringResource(R.string.tc_menu_touch), stringResource(R.string.tc_menu_touch_text), c.menuTouch) { onTouch(c.copy(menuTouch = it)) }
                 ToggleRow(stringResource(R.string.tc_show_names), stringResource(R.string.tc_show_names_text), c.showNames) { onTouch(c.copy(showNames = it)) }
             }
             ToggleRow(stringResource(R.string.touch_haptics), stringResource(R.string.touch_haptics_text), c.haptics) { onTouch(c.copy(haptics = it)) }

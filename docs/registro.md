@@ -61,6 +61,19 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:52: Fase 6 — toque nativo nos menus do jogo + Menu Gráfico estilo UN5 in-game
+
+- **Toque nativo nos menus (`hl_game.cpp`, `un5_main.cpp`, `TouchBridge.kt`, `TouchConfig.kt`, `NinjaPadView.kt`, `ControlsScreen.kt`):**
+  - `TouchConfig.menuTouch` ativado por padrão e exposto na tela de Controles ("Toque direto nos menus").
+  - `NinjaPadView.menuGesture()` evoluído para rolagem contínua por arraste (cada passo de arraste move imediatamente um item e reseta a âncora, além do auto-repeat) + `TouchBridge.menuTap(nx, ny)` que mapeia toques diretos nas placas de madeira do Mode Select (topo → Cima, centro → Confirmar/✕, base → Baixo) em 4:3, 16:9 e 20:9.
+- **Menu Gráfico estilo UN5 in-game (`GraphicsMenu.kt`, `GameMenu.kt`, `GameActivity.kt`, `strings.xml` en/pt/es):**
+  - Novo `GraphicsMenuHost` com visual idêntico ao menu do UN5 (tábuas de madeira chanfradas com gradiente, borda, tipografia Shojumaru dourada com sombra, faixa de ajuda azul-escuro no rodapé, animações suaves, jogo rodando vivo atrás) organizado em 3 categorias: *Resolução e Proporção*, *Filtros e Taxa de Quadros* e *Motor e Desempenho*.
+  - Mantido intacto o overlay `GameMenu` original (com botão **"Abrir menu gráfico (estilo UN5)"** no topo da aba Gráficos). Suporta tanto toque direto quanto controle físico.
+- **Verificado nos 3 aparelhos (capturas conferidas, 0 crashes, `./gradlew testDebugUnitTest` verde):**
+  - **Mi A3 (19.5:9):** `GameMenu` → aba Gráficos → `GraphicsMenu` UN5 → submenu *Resolução e Proporção* → retorno limpo ao jogo a 50,0 fps.
+  - **RG Cube (1:1 720×720):** arraste nativo no menu de idioma (`ENGLISH` → `FRANÇAIS`, sem D-pad) + `GraphicsMenu` UN5 sem cortes nem overflow.
+  - **RP5 capado (`sd480p`, 16:9 1920×1080):** arraste nativo (`ENGLISH` → `FRANÇAIS`) + `GraphicsMenu` UN5 renderizando limpo sobre o jogo.
+
 ### 2026-11-24 01:36: Fase 5 — correções e robustez do sistema de mods
 
 - **Importação e identificação (`Mods.kt`):**

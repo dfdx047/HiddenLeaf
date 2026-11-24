@@ -489,4 +489,12 @@
     <string name="special_button_text">Parado e sem direção, o círculo é o especial enquanto houver chakra; com direção ou no combo continua sendo o ataque. Os outros botões perdem o que fazem na luta.</string>
     <string name="mash_multiplier">Cada toque vale</string>
     <string name="mash_multiplier_text">Nas etapas de apertar repetido.</string>
+    <string name="tc_menu_touch">Toque direto nos menus</string>
+    <string name="tc_menu_touch_text">Toque nas opções e arraste para rolar os menus do jogo sem precisar dos botões virtuais.</string>
+    <string name="un5_gfx_title">Opções Gráficas</string>
+    <string name="un5_gfx_video">Resolução e Proporção</string>
+    <string name="un5_gfx_filters">Filtros e Taxa de Quadros</string>
+    <string name="un5_gfx_engine">Motor e Desempenho</string>
+    <string name="un5_gfx_help">Toque ou direcional: navegar  ·  ✕: OK  ·  △ / Voltar: sair</string>
+    <string name="un5_gfx_open">Abrir menu gráfico (estilo UN5)</string>
 </resources>

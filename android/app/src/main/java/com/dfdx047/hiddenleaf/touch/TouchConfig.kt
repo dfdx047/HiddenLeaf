@@ -202,10 +202,8 @@ data class TouchConfig(
     val autoMode: Boolean = true,   // the scene follows the game (the SCENE button still overrides)
     val classicPlaces: Map<String, Placement> = emptyMap(), // the classic layout's own moved controls (by ClassicCtl name)
     val macros: List<Macro> = emptyList(),
-    // the game's menus by gestures, no buttons on screen (NinjaPadView.menuGesture). Off: the virtual pad in the menus too
-    // (2026-11-10, for the launch; tapping a menu item directly comes later). Stored as "menuGestures": the "menuTouch"
-    // that earlier versions saved as true is not read, so everyone gets the pad.
-    val menuTouch: Boolean = false,
+    // Native touch in menus (tap items directly + drag to scroll smoothly, no D-pad clutter). Toggleable in Controls.
+    val menuTouch: Boolean = true,
     val showNames: Boolean = false, // the action's name under each fight button (off: the icon and the console letter)
     val pro: ProTouch = ProTouch(),
 ) {
