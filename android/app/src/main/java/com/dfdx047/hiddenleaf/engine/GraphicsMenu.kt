@@ -247,7 +247,7 @@ private fun GraphicsMenuContent(
                             val aspect = get(EngineSettings.ASPECT, 0)
                             WoodOptionRow(
                                 label = stringResource(R.string.resolution),
-                                value = "${scaleLabel(q)} (${128 * q}×${112 * q})",
+                                value = "${scaleLabel(q)} (${128 * q}×${112 * q}) · reinicie",
                                 kanit = kanit, pulse = pulse.value,
                                 modifier = Modifier.focusRequester(firstFocus),
                                 onPrev = {
@@ -291,7 +291,7 @@ private fun GraphicsMenuContent(
                             val rates = listOf(30, 50, 60, 90, 120)
                             WoodOptionRow(
                                 label = stringResource(R.string.panel_fps_limit),
-                                value = "$fps FPS",
+                                value = if (fps > 50) "$fps FPS (interp · reinicie)" else "$fps FPS",
                                 kanit = kanit, pulse = pulse.value,
                                 onPrev = {
                                     val idx = rates.indexOf(fps).let { if (it <= 0) rates.lastIndex else it - 1 }

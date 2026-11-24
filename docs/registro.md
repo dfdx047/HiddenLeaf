@@ -61,6 +61,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 14:18: Revisão geral pré-vídeo — correção do loop de salvar em mods, pular logos + abertura, FPS interpolado funcional e Modo Leve automático em GPUs fracas
+
+- **Correção do bug de salvar sozinho no menu (UN6 A35 / mods) + Pular Logos e Abertura (`0111-skip-logos-and-safe-stop.patch`, `Pad.cpp`, `EeScheduler.cpp`):**
+  - Causa raiz: `applySkipIntro` apertava `START` até `g_hlMoviesBegun == 3`. Em mods com menos de 3 vídeos (como UN6 A35), o contador nunca chegava a 3 e o emulador ficava pressionando `START` 4x/s para sempre em todos os menus (inclusive tela de salvar).
+  - Correção aplicada em `libun5.so`, `libun5_v80.so`, `libun5_un6_a35.so` e `libun5_un6_a35_v80.so`: aguarda na tela de idioma até o jogador confirmar (`✕`/`○`/`START`) ou iniciar o 1º vídeo (NTSC/mods), ativa fast-forward (`g_hlFastForwardIntro`) + `START` para pular logos da Bandai/CRIWARE/CyberConnect2 e filmes direto para New Game / Load Game, com parada rígida permanente (`tick > 3400`, `+1400` após início, fim dos vídeos ou qualquer direcional).
+- **Correção do FPS Interpolado 60/90/120 fps (`un5_main.cpp`, `GraphicsMenu.kt`):**
+  - Causa raiz: `un5_main.cpp` forçava `HL_NATIVE=0` sempre que `native_render` estava desligado (padrão), impedindo `hl_native` de rodar a interpolação em 60/90/120 fps.
+  - Agora `g_settings.fpsMode > 50` (em Vulkan) ativa `HL_NATIVE=1` automaticamente. Validado no RP5 (`hl_native: waiting for a fight`, `bt4gsx: vulkan, 2x`). Adicionado aviso explícito `reinicie` no menu gráfico in-game para Resolução e FPS Interpolado.
+- **Modo Leve (`light_mode=1`) automático em GPUs fracas (`AppViewModel.kt`, `un5_main.cpp`):**
+  - GPUs tier 0–1 (Adreno 3xx–620 incl. SD665/Adreno 610, Mali-G31/G51/G52/G57/G68/G71/G72/T-series, PowerVR, Xclipse 5xx) gravam `light_mode=1` (e 1x no tier 0) automaticamente na primeira abertura, sem depender do diálogo, mantendo-se ativo também no Modo Online (Nominum VU1 determinístico + `GSBackThreadMode=1` expandido para `mt676*`/`mt678*`/`mt683*`/`exynos*`/`ums*`/`sc9863*`).
+  - Forçado `g_specialOn = false` em `loadSettings()` para ignorar `special_one=1` de `un5_settings.txt` antigos.
+
 ### 2026-11-24 07:52: Sala Personalizada com troca de papel (P1/P2/Espectador), detecção e exportação automática de personagem + maestria por personagem, filtro de controle na Ranqueada, hold de ↓↓○ e correção do R2 automático
 
 - **Sala Personalizada & Espectador (Casual) interligada (`worker.js`, `OnlineAdvanced.kt`, `OnlineScreen.kt`):**

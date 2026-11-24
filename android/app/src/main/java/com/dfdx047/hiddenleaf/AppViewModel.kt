@@ -315,9 +315,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             _gpuName.value = runCatching { Renderer.gpuName(paths) }.getOrDefault("")
             runCatching { Renderer.apply(settings, paths) }
+            // Weak GPUs (tier 0-1: Adreno 3xx-620 incl. SD665/Adreno 610, Mali-G31/G51/G52/G57/G68/G71/G72, PowerVR, Xclipse 5xx):
+            // automatically persist light_mode=1 (and 1x scale on tier 0) if not explicitly configured yet, including for Online play.
+            val p = GpuProfiles.profile(_gpuName.value)
+            if (p != null && p.tier <= 1) {
+                val snap = settings.snapshot()
+                if (EngineSettings.LIGHT_MODE !in snap) settings.set(EngineSettings.LIGHT_MODE, 1)
+                if (p.tier == 0 && EngineSettings.SCALE4 !in snap) {
+                    settings.set(EngineSettings.SCALE4, p.scale4)
+                    settings.set(EngineSettings.SCALE, EngineSettings.wholeScale(p.scale4))
+                }
+            }
             _settings.value = settings.snapshot()
             // the GPU's recommended settings, offered once (GpuProfiles)
-            val p = GpuProfiles.profile(_gpuName.value)
             if (p != null && settings.get(EngineSettings.GPU_TIER, -1) == -1) _gpuOffer.value = p
             _perf.value = runCatching { PerfReport.read(paths) }.getOrNull()
         }

@@ -209,7 +209,7 @@ namespace
             else if (!std::strcmp(line, "dr_unlock_all"))
                 hl_game::g_unlockAll = v != 0;
             else if (!std::strcmp(line, "special_one"))
-                hl_game::g_specialOn = v != 0;
+                hl_game::g_specialOn = false; // removed per user request
             else if (!std::strcmp(line, "special_button"))
                 hl_game::g_specialMask = static_cast<uint32_t>(v);
             else if (!std::strcmp(line, "mash_percent"))
@@ -228,9 +228,11 @@ namespace
         // under a test route (its buttons are by vsync) or a value of hl_env.txt
         if (skipIntro && std::getenv("HL_PADROUTE") == nullptr)
             setenv("HL_SKIP_INTRO", "1", 0);
-        // the renderer: PCSX2's GS draws everything unless the player turns the native one on (a value of hl_env.txt wins).
-        // 2026-11-12 on the Mi A3 at 1x the GS gave 42/36 fps against the native's 44/38 and draws every effect.
-        if (!nativeRender)
+        // Interpolated 60/90/120 fps requires the native 3D renderer (hl_native) on Vulkan to present the interpolated frames.
+        // At 30/50 fps, PCSX2's GS draws everything unless the player explicitly enabled nativeRender.
+        if (g_settings.fpsMode > 50 && gpuApi != 1)
+            setenv("HL_NATIVE", "1", 0);
+        else if (!nativeRender)
             setenv("HL_NATIVE", "0", 0);
         // PCSX2's GS on Vulkan or OpenGL ES, as chosen in the launcher (a value of hl_env.txt wins; without a line, Vulkan)
         if (gpuApi >= 0)
@@ -311,8 +313,10 @@ namespace
             __system_property_get("ro.board.platform", platform);
             const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
             const bool splitPlatform = std::strcmp(platform, "trinket") == 0 || std::strcmp(platform, "bengal") == 0 ||
-                                       std::strcmp(platform, "khaje") == 0 || std::strcmp(platform, "ums9620") == 0 ||
-                                       std::strncmp(platform, "mt676", 5) == 0 || std::strncmp(platform, "mt678", 5) == 0;
+                                       std::strcmp(platform, "khaje") == 0 || std::strncmp(platform, "ums", 3) == 0 ||
+                                       std::strncmp(platform, "mt676", 5) == 0 || std::strncmp(platform, "mt678", 5) == 0 ||
+                                       std::strncmp(platform, "mt683", 5) == 0 || std::strncmp(platform, "exynos", 6) == 0 ||
+                                       std::strncmp(platform, "sc9863", 6) == 0;
             const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && splitPlatform;
             if (on)
             {
