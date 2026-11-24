@@ -205,6 +205,7 @@ class OnlineGame private constructor(
         }
         val r = activity.resources
         coverLine?.text = when {
+            phase == "spectating" -> "Conectando ao vivo: $peer..."
             phase != "playing" -> r.getString(R.string.ingame_cover_linking, peer)
             field >= ENTRY_END -> r.getString(R.string.online_waiting_peer, peer)
             else -> r.getString(R.string.ingame_cover_entering)
@@ -235,6 +236,7 @@ class OnlineGame private constructor(
         val r = activity.resources
         val line = when (phase) {
             "starting", "linking" -> r.getString(R.string.online_game_linking, peer)
+            "spectating" -> "👁 Espectador ao vivo · $peer"
             "playing" -> {
                 val rtt = s["rtt"]?.toIntOrNull() ?: -1
                 val side = if (s["p1"] == "1") "P1" else "P2"
@@ -317,7 +319,7 @@ class OnlineGame private constructor(
         fun from(activity: Activity, paths: GamePaths): OnlineGame? {
             val s = Online.readSession(paths)
             if (s.isEmpty() || s["v"]?.firstOrNull()?.toIntOrNull() != Online.NET_VERSION) return null
-            val relay = s["relay_url"]?.firstOrNull()?.takeIf { s["relay"]?.firstOrNull() == "1" && it.startsWith("https://") }
+            val relay = s["relay_url"]?.firstOrNull()?.takeIf { s["relay"]?.firstOrNull() == "1" && Online.isAllowedServer(it) }
             val peer = s["peer"]?.firstOrNull().orEmpty().ifEmpty { "?" }
             val touchOnly = s["input_mode"]?.firstOrNull() == "touch"
             Log.i("un5", "online: match against $peer, relay ${if (relay != null) "lazy" else "off"}, touchOnly=$touchOnly")

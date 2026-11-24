@@ -19,7 +19,7 @@ import javax.net.ssl.SSLSocketFactory
  * has none built in. Ported from Dragon Rage (engine/RelaySocket.kt there).
  */
 class RelaySocket private constructor(
-    private val socket: SSLSocket,
+    private val socket: java.net.Socket,
     private val input: InputStream,
     private val output: OutputStream,
     private val onMessage: (ByteArray) -> Unit,
@@ -137,17 +137,26 @@ class RelaySocket private constructor(
         private const val OUTBOX = 256
         private const val KEEP_ALIVE_S = 15L
 
-        /** Opens the WebSocket at [url] ("https://host/path?query"); null when it could not. Blocks for the handshake. */
+        /** Opens the WebSocket at [url] ("https://..." or local "http://..."); null when it could not. Blocks for the handshake. */
         fun connect(url: String, onMessage: (ByteArray) -> Unit): RelaySocket? = try {
             val u = URI(url)
-            val port = if (u.port > 0) u.port else 443
-            val s = SSLSocketFactory.getDefault().createSocket() as SSLSocket
-            s.connect(java.net.InetSocketAddress(u.host, port), 10_000)
-            s.soTimeout = 15_000 // (the handshake and the answer's header)
-            s.tcpNoDelay = true
-            // the certificate must be this host's: the room's key travels in the address
-            s.sslParameters = s.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
-            s.startHandshake()
+            val isTls = u.scheme.equals("https", ignoreCase = true) || u.scheme.equals("wss", ignoreCase = true)
+            val port = if (u.port > 0) u.port else if (isTls) 443 else 80
+            val s: java.net.Socket = if (isTls) {
+                (SSLSocketFactory.getDefault().createSocket() as SSLSocket).apply {
+                    connect(java.net.InetSocketAddress(u.host, port), 10_000)
+                    soTimeout = 15_000
+                    tcpNoDelay = true
+                    sslParameters = sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+                    startHandshake()
+                }
+            } else {
+                java.net.Socket().apply {
+                    connect(java.net.InetSocketAddress(u.host, port), 10_000)
+                    soTimeout = 15_000
+                    tcpNoDelay = true
+                }
+            }
             val out = s.outputStream
             val input = BufferedInputStream(s.inputStream)
             val key = Base64.getEncoder().encodeToString(ByteArray(16).also { SecureRandom().nextBytes(it) })

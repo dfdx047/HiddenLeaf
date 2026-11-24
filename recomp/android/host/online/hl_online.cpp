@@ -19,6 +19,9 @@
 // phones: compare them with tools/ramdiff.py or cmp).
 #include "hl_online.h"
 #include "match_session.h"
+#include <array>
+#include <map>
+#include <thread>
 #include "net_version.h"
 #include "../hl_game.h"
 #include "../hl_host_pad.h"
@@ -107,7 +110,7 @@ namespace
         s << "phase=" << phase << ";me=" << g_file.myName << ";peer=" << g_file.peerName << ";host=" << (g_file.host ? 1 : 0)
           << ";p1=" << (g_match.iAmPlayer1() ? 1 : 0) << ";rtt=" << g_match.roundTripMs() << ";delay=" << g_match.delay()
           << ";field=" << g_match.field() << ";waits=" << g_match.waits() << ";desyncs=" << g_match.desyncs()
-          << ";relay=" << (g_match.viaRelay() ? 1 : 0) << ";want_relay=" << (g_match.wantsRelay() ? 1 : 0)
+          << ";relay=" << (g_match.viaRelay() ? 1 : 0) << ";want_relay=" << ((g_match.wantsRelay() || g_file.broadcastSpec || g_file.spectator) ? 1 : 0)
           << ";linked=" << (g_match.linked() ? 1 : 0) << ";input_mode=" << g_file.inputMode
           << ";reason=" << (g_match.ended() ? g_match.endReason() : std::string());
         std::lock_guard<std::mutex> lock(g_statusMutex);
@@ -316,6 +319,29 @@ namespace
             g_pads[0].store(pack(p1), std::memory_order_release);
             g_pads[1].store(pack(p2), std::memory_order_release);
             g_padsOn.store(true, std::memory_order_release);
+            // Broadcast authoritative [field, p1, p2] to live spectators when hosting a Custom Lobby match
+            if (g_file.broadcastSpec && g_match.iAmPlayer1() && g_match.field() >= kEntryEnd)
+            {
+                const uint32_t f = g_match.field();
+                std::vector<uint8_t> sp(20);
+                sp[0] = 0x53u; // 'S'
+                sp[1] = 0x50u; // 'P'
+                sp[2] = 0u;
+                sp[3] = 0u;
+                sp[4] = static_cast<uint8_t>(f);
+                sp[5] = static_cast<uint8_t>(f >> 8);
+                sp[6] = static_cast<uint8_t>(f >> 16);
+                sp[7] = static_cast<uint8_t>(f >> 24);
+                std::memcpy(sp.data() + 8, p1, 6);
+                std::memcpy(sp.data() + 14, p2, 6);
+                {
+                    std::lock_guard<std::mutex> lock(g_relayMutex);
+                    if (g_relayOut.size() >= kRelayQueue)
+                        g_relayOut.pop_front();
+                    g_relayOut.push_back(std::move(sp));
+                }
+                g_relayOutReady.notify_one();
+            }
         }
         else if (g_match.ended())
         {   // (the developer, 2026-11-14: after a drop each phone went on alone, both choosing 1P vs 2P. A match that is over stands
@@ -335,6 +361,110 @@ namespace
         }
         if (tick % 10u == 0u || g_match.ended())
             publishNow();
+    }
+
+    // ---- Live Spectator playback (read-only: replays host's [field, p1, p2] frames in real time)
+    std::atomic<bool> g_specQuit{false};
+    std::map<uint32_t, std::array<uint8_t, 12>> g_specFrames;
+    uint32_t g_specField = 0u;
+
+    void drainSpecPackets()
+    {
+        std::deque<std::vector<uint8_t>> batch;
+        {
+            std::lock_guard<std::mutex> lock(g_relayMutex);
+            batch.swap(g_relayIn);
+        }
+        for (const auto &pkt : batch)
+        {
+            for (std::size_t off = 0; off + 20u <= pkt.size(); off += 20u)
+            {
+                if (pkt[off] != 0x53u || pkt[off + 1u] != 0x50u)
+                    break;
+                const uint32_t f = static_cast<uint32_t>(pkt[off + 4u]) |
+                                   (static_cast<uint32_t>(pkt[off + 5u]) << 8) |
+                                   (static_cast<uint32_t>(pkt[off + 6u]) << 16) |
+                                   (static_cast<uint32_t>(pkt[off + 7u]) << 24);
+                std::array<uint8_t, 12> pads{};
+                std::memcpy(pads.data(), pkt.data() + off + 8u, 12u);
+                g_specFrames[f] = pads;
+            }
+        }
+    }
+
+    void publishSpectator(const char *phase, const char *reason = "")
+    {
+        std::ostringstream s;
+        s << "phase=" << phase << ";me=" << g_file.myName << ";peer=" << g_file.peerName
+          << ";host=0;p1=0;rtt=0;delay=0;field=" << g_specField
+          << ";waits=0;desyncs=0;relay=1;want_relay=1;linked=1;spectator=1;reason=" << reason;
+        std::lock_guard<std::mutex> lock(g_statusMutex);
+        g_status = s.str();
+    }
+
+    void onSpectatorVsync(PS2Runtime *runtime, uint64_t tick)
+    {
+        if (g_prevVsync)
+            g_prevVsync(runtime, tick);
+        if (g_specQuit.load(std::memory_order_acquire))
+        {
+            const uint8_t still[6] = {0u, 0u, 0x80u, 0x80u, 0x80u, 0x80u};
+            g_pads[0].store(pack(still), std::memory_order_release);
+            g_pads[1].store(pack(still), std::memory_order_release);
+            g_padsOn.store(true, std::memory_order_release);
+            publishSpectator("over", "the player left");
+            return;
+        }
+        const uint32_t f = g_specField++;
+        if (f < kEntryEnd)
+        {
+            uint8_t p1[6], p2[6];
+            entryPads(f, p1, p2);
+            g_pads[0].store(pack(p1), std::memory_order_release);
+            g_pads[1].store(pack(p2), std::memory_order_release);
+            g_padsOn.store(true, std::memory_order_release);
+            if (f % 15u == 0u)
+                publishSpectator("spectating");
+            return;
+        }
+        static bool s_specHeard = false;
+        if (!s_specHeard)
+        {
+            s_specHeard = true;
+            hl_spu2_mute(false);
+        }
+        // Wait for the host's [field, p1, p2] frame from the spectator WebSocket
+        const auto waitStart = std::chrono::steady_clock::now();
+        for (;;)
+        {
+            drainSpecPackets();
+            auto it = g_specFrames.find(f);
+            if (it != g_specFrames.end())
+            {
+                g_pads[0].store(pack(it->second.data()), std::memory_order_release);
+                g_pads[1].store(pack(it->second.data() + 6), std::memory_order_release);
+                g_padsOn.store(true, std::memory_order_release);
+                g_specFrames.erase(g_specFrames.begin(), std::next(it));
+                break;
+            }
+            if (g_specQuit.load(std::memory_order_acquire))
+            {
+                publishSpectator("over", "the player left");
+                return;
+            }
+            const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - waitStart).count();
+            if (elapsedMs > 45000)
+            {
+                g_specQuit.store(true, std::memory_order_release);
+                publishSpectator("over", "the other game stopped answering");
+                return;
+            }
+            if ((elapsedMs % 500) < 10)
+                publishSpectator("spectating");
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        if (f % 10u == 0u)
+            publishSpectator("spectating");
     }
 
     std::string readFile(const std::string &path)
@@ -427,15 +557,18 @@ bool hl_online::setup(const std::string &root)
     g_pads[1].store(pack(rest));
     g_padsOn.store(true);
     g_prevVsync = g_hlVsyncHook;
-    g_hlVsyncHook = &onVsync;
+    g_hlVsyncHook = file.spectator ? &onSpectatorVsync : &onVsync;
     g_hlPadPortHook = &padPortHook;
     std::string addrs;
     for (const auto &a : file.addresses)
         addrs += " " + a;
-    log("online: " + std::string(file.host ? "hosting" : "joining") + " room " + file.code + " against " + file.peerName + ", network version " +
+    log("online: " + std::string(file.spectator ? "spectating" : file.host ? "hosting" : "joining") + " room " + file.code + " (" + file.peerName + "), network version " +
         std::to_string(HL_NET_VERSION) + ", delay " + (file.delayFrames ? std::to_string(file.delayFrames) + " frames" : std::string("automatic")) +
-        ", relay " + (file.relay ? "on" : "off") + ", addresses" + (addrs.empty() ? " none" : addrs));
-    publish("starting");
+        ", relay " + (file.relay ? "on" : "off") + ", broadcastSpec " + (file.broadcastSpec ? "on" : "off") + ", addresses" + (addrs.empty() ? " none" : addrs));
+    if (file.spectator)
+        publishSpectator("spectating");
+    else
+        publish("starting");
     return true;
 }
 
@@ -460,7 +593,12 @@ extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_OnlineBr
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_OnlineBridge_nativeLeave(JNIEnv *, jclass)
 {
     if (g_active)
-        g_match.requestLeave();
+    {
+        if (g_file.spectator)
+            g_specQuit.store(true, std::memory_order_release);
+        else
+            g_match.requestLeave();
+    }
 }
 
 // A packet that came through the room's relay (the app's WebSocket).
@@ -469,7 +607,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_OnlineBridg
     if (!g_active || data == nullptr)
         return;
     const jsize n = env->GetArrayLength(data);
-    if (n <= 0 || n > 1600)
+    if (n <= 0 || n > 4096)
         return;
     std::vector<uint8_t> packet(static_cast<std::size_t>(n));
     env->GetByteArrayRegion(data, 0, n, reinterpret_cast<jbyte *>(packet.data()));

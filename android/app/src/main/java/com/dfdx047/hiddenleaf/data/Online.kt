@@ -312,7 +312,7 @@ object Online {
     data class Session(
         val host: Boolean, val port: Int, val code: String, val me: String, val peer: String,
         val addrs: List<String>, val delay: Int, val relay: Boolean, val relayUrl: String,
-        val token: String = "", val inputMode: String = "any",
+        val token: String = "", val inputMode: String = "any", val broadcastSpec: Boolean = false,
     )
 
     fun writeSession(paths: GamePaths, s: Session) {
@@ -327,13 +327,38 @@ object Online {
             append("me=${cleanName(s.me)}\n")
             append("peer=${cleanName(s.peer)}\n")
             append("delay=${s.delay.coerceIn(0, 4)}\n")
-            append("relay=${if (s.relay) 1 else 0}\n")
-            if (s.relay) append("relay_url=${s.relayUrl}\n")
+            append("relay=${if (s.relay || s.broadcastSpec) 1 else 0}\n")
+            if (s.relay || s.broadcastSpec) append("relay_url=${s.relayUrl}\n")
+            if (s.broadcastSpec) append("broadcast_spec=1\n")
             if (s.token.isNotEmpty()) append("token=${s.token}\n")
             if (s.inputMode.isNotEmpty()) append("input_mode=${s.inputMode}\n")
             s.addrs.forEach { append("addr=$it\n") }
         }
         // (written aside and renamed: the engine must never read half of it)
+        val aside = File(f.parentFile, "session.tmp")
+        aside.writeText(text)
+        if (!aside.renameTo(f)) {
+            f.delete()
+            aside.renameTo(f)
+        }
+    }
+
+    /** Writes a read-only live Spectator session file so the engine opens the game and replays P1 vs P2 in real time. */
+    fun writeSpectatorSession(paths: GamePaths, code: String, me: String, matchLabel: String, relayUrl: String) {
+        val f = sessionFile(paths)
+        f.parentFile?.mkdirs()
+        val text = buildString {
+            append("v=$NET_VERSION\n")
+            append("role=spectator\n")
+            append("at=${System.currentTimeMillis() / 1000}\n")
+            append("port=0\n")
+            append("code=$code\n")
+            append("me=${cleanName(me)}\n")
+            append("peer=${matchLabel.take(40)}\n")
+            append("delay=0\n")
+            append("relay=1\n")
+            append("relay_url=$relayUrl\n")
+        }
         val aside = File(f.parentFile, "session.tmp")
         aside.writeText(text)
         if (!aside.renameTo(f)) {
@@ -495,7 +520,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 _state.value = LobbyState.Waiting(r.code)
                 onCode?.invoke(r.code)
                 ActivityLog.info("online", "room ${r.code} open (input=$mode)")
-                waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE)
+                waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE, broadcastSpec = true)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "room failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))
@@ -511,7 +536,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
      * The host's wait in its room [r]: a poll every 2 s (up to [maxBackoff] apart while the service does not answer), the router's
      * mapping kept alive, and the match once someone has joined. True once it started; false at [until] (ms) with nobody.
      */
-    private suspend fun waitForGuest(server: String, r: Online.Room, s: DatagramSocket, p: OnlinePrefs.State, start: () -> Unit, maxBackoff: Long, until: Long): Boolean {
+    private suspend fun waitForGuest(server: String, r: Online.Room, s: DatagramSocket, p: OnlinePrefs.State, start: () -> Unit, maxBackoff: Long, until: Long, broadcastSpec: Boolean = false): Boolean {
         var every = 2000L
         var lastStun = System.currentTimeMillis()
         while (System.currentTimeMillis() < until) {
@@ -523,7 +548,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
             }
             if (guest != null) {
                 ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
-                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key), r.token, r.inputMode), start)
+                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay || broadcastSpec, Online.relayUrl(server, r.code, r.key), r.token, r.inputMode, broadcastSpec = broadcastSpec), start)
                 room = null // (the room stays on the service for the relay's connection; it goes by itself)
                 return true
             }

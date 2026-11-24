@@ -16,7 +16,7 @@ bool parseSessionFile(const std::string& text, SessionFile& out) {
         const auto eq = line.find('=');
         if (eq == std::string::npos) continue;
         const std::string key = line.substr(0, eq), value = line.substr(eq + 1);
-        if (key == "role") {out.host = value == "host"; role = value == "host" || value == "guest";}
+        if (key == "role") {out.host = value == "host"; out.spectator = value == "spectator"; role = value == "host" || value == "guest" || value == "spectator";}
         else if (key == "at") out.at = std::strtoll(value.c_str(), nullptr, 10);
         else if (key == "port") out.port = std::uint16_t(std::strtoul(value.c_str(), nullptr, 10));
         else if (key == "code") out.code = value;
@@ -25,11 +25,12 @@ bool parseSessionFile(const std::string& text, SessionFile& out) {
         else if (key == "addr" && !value.empty() && out.addresses.size() < 8) out.addresses.push_back(value);
         else if (key == "delay") {const unsigned long d = std::strtoul(value.c_str(), nullptr, 10); out.delayFrames = d <= 4 ? unsigned(d) : 0;}
         else if (key == "relay") out.relay = value == "1";
+        else if (key == "broadcast_spec") out.broadcastSpec = value == "1";
         else if (key == "v") out.version = unsigned(std::strtoul(value.c_str(), nullptr, 10));
         else if (key == "token") out.token = value;
         else if (key == "input_mode") out.inputMode = value;
     }
-    return role && !out.code.empty() && (!out.addresses.empty() || out.relay);
+    return role && !out.code.empty() && (!out.addresses.empty() || out.relay || out.spectator);
 }
 
 std::string formatSessionFile(const SessionFile& f) {

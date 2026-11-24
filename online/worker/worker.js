@@ -773,6 +773,7 @@ export default {
 export class HiddenLeafRelay {
     constructor(state) {
         this.state = state;
+        this.specHistory = []; // 20-byte 'SP' [field, p1, p2] frames for live & late-joining spectators
     }
     async fetch(request) {
         const who = request.headers.get("x-hl-who") || "";
@@ -788,25 +789,45 @@ export class HiddenLeafRelay {
             }
         }
         this.state.acceptWebSocket(server, [who]);
+        if (who === "s" && this.specHistory.length > 0) {
+            // Replay buffered SP frames in chunks of 50 (1000 bytes) so late-joining spectators catch up to live
+            for (let i = 0; i < this.specHistory.length; i += 50) {
+                const slice = this.specHistory.slice(i, i + 50);
+                const chunk = new Uint8Array(slice.length * 20);
+                for (let j = 0; j < slice.length; j++) chunk.set(slice[j], j * 20);
+                try { server.send(chunk.buffer); } catch (e) {}
+            }
+        }
         return new Response(null, { status: 101, webSocket: client });
     }
     webSocketMessage(ws, message) {
         if (typeof message === "string" || message.byteLength < 1 || message.byteLength > MAX_RELAY_MESSAGE) return;
         const tag = this.state.getTags(ws)[0] || "";
         if (tag !== "h" && tag !== "g") return; // spectators are strictly read-only
+        const raw = new Uint8Array(message);
+        // Host spectator frame ('S','P' + 18 bytes): store & broadcast ONLY to spectators, never to guest P2
+        if (tag === "h" && raw.byteLength === 20 && raw[0] === 0x53 && raw[1] === 0x50) {
+            const copy = new Uint8Array(raw);
+            if (this.specHistory.length < 15000) this.specHistory.push(copy);
+            for (const sp of this.state.getWebSockets("s")) {
+                try { sp.send(copy.buffer); } catch (e) {}
+            }
+            return;
+        }
         const other = tag === "h" ? "g" : "h";
         for (const peer of this.state.getWebSockets(other)) {
             try { peer.send(message); } catch (e) {}
         }
-        const spectators = this.state.getWebSockets("s");
-        if (spectators.length > 0) {
-            const raw = new Uint8Array(message);
-            const wrapped = new Uint8Array(2 + raw.byteLength);
-            wrapped[0] = 0x53; // 'S' spectator frame marker
-            wrapped[1] = tag === "h" ? 1 : 2;
-            wrapped.set(raw, 2);
-            for (const sp of spectators) {
-                try { sp.send(wrapped.buffer); } catch (e) {}
+        if (this.specHistory.length === 0) {
+            const spectators = this.state.getWebSockets("s");
+            if (spectators.length > 0) {
+                const wrapped = new Uint8Array(2 + raw.byteLength);
+                wrapped[0] = 0x53;
+                wrapped[1] = tag === "h" ? 1 : 2;
+                wrapped.set(raw, 2);
+                for (const sp of spectators) {
+                    try { sp.send(wrapped.buffer); } catch (e) {}
+                }
             }
         }
     }

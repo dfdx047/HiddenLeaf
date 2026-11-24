@@ -549,7 +549,7 @@ private fun CasualDedicatedScreen(
     }
 
     val rightCol: @Composable () -> Unit = {
-        CustomLobbyCard(lobby, prefs, ready, serverSet, fp) { vm.play() }
+        CustomLobbyCard(vm.paths, lobby, prefs, ready, serverSet, fp) { vm.play() }
     }
 
     val cfg = androidx.compose.ui.platform.LocalConfiguration.current
@@ -794,6 +794,7 @@ private fun RankedDedicatedScreen(
 
 @Composable
 private fun CustomLobbyCard(
+    paths: com.dfdx047.hiddenleaf.data.GamePaths,
     lobby: OnlineLobby,
     prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
     ready: Boolean,
@@ -943,12 +944,23 @@ private fun CustomLobbyCard(
                         onClick = { lobby.join(active, fp(), start) },
                     )
                 } else {
+                    val matchTitle = listOfNotNull(p1?.name, p2?.name).joinToString(" vs ").ifEmpty { "Sala #$active" }
                     com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
                         title = "Assistir Luta Ao Vivo (Sala #$active)",
-                        subtitle = "Stream de Espectador em tempo real (somente leitura)",
+                        subtitle = "Abre o jogo em tempo real como Espectador (somente leitura)",
                         accent = Konoha.ChakraAmber,
-                        enabled = true,
-                        onClick = { spectatingCode = active },
+                        enabled = ready,
+                        onClick = {
+                            spectatingCode = active
+                            Online.writeSpectatorSession(
+                                paths,
+                                code = active,
+                                me = prefs.name.ifBlank { "Espectador" },
+                                matchLabel = matchTitle,
+                                relayUrl = com.dfdx047.hiddenleaf.data.OnlineAdvanced.spectatorRelayUrl(srv, active),
+                            )
+                            start()
+                        },
                     )
                 }
             } else {

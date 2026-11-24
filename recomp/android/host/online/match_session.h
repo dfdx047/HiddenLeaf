@@ -33,6 +33,8 @@ struct SessionFile {
     unsigned version = 0;                       // the app's network version: must be HL_NET_VERSION
     std::string token;                          // optional room session secret for UDP anti-spoof
     std::string inputMode;                      // optional input mode ("touch", "gamepad", "any")
+    bool spectator = false;                     // read-only live spectator (plays received [field, p1, p2] frames)
+    bool broadcastSpec = false;                 // host streams [field, p1, p2] frames over relay WS for live spectators
 };
 bool parseSessionFile(const std::string& text, SessionFile& out);
 std::string formatSessionFile(const SessionFile& file);
