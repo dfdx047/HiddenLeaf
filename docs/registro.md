@@ -61,6 +61,14 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 19:52: Correção de gráficos/efeitos faltando no Modo Leve e reversão do HL_NATIVE automático em 60+ FPS
+
+- **Causa raiz:** (1) `HL_NATIVE=1` ativado automaticamente em `fps_mode > 50` trocava o PCSX2 GS pelo renderizador nativo incompleto (que perde efeitos e quebra com filtros/resoluções); (2) `light_mode` estava ligado por padrão até em GPUs fortes (tier 2–4, como RP5/SD865) e o aliasing zero-copy (`g_vu1Code`/`g_vu1Data`) em `hl_nominum_vu1.cpp` podia pular o `memcmp` de microcódigo VU1.
+- **Correção:**
+  - `un5_main.cpp`: `HL_NATIVE=0` restaurado (PCSX2 GS com 100% dos efeitos, filtros e resoluções); `g_lightMode = false` por padrão.
+  - `hl_nominum_vu1.cpp`: aliasing zero-copy desativado (`g_vu1Code = g_vu1Data = nullptr`) para sempre sincronizar microcódigo/dados VU1 com segurança quando `light_mode=1` estiver ligado.
+  - `GpuProfiles.kt` + UI (`SettingsScreen.kt`, `GameMenu.kt`, `GraphicsMenu.kt`, `GameActivity.kt`): `light_mode=1` automático **somente** em GPUs fracas (tier 0–1: Adreno 3xx–620 incl. SD665/Mi A3, Mali-G31/G51/G52/G57/G68/G71/G72, PowerVR, Xclipse 5xx); GPUs médias/fortes (tier 2–4, como RP5) ficam em `light_mode=0`.
+
 ### 2026-11-24 14:18: Revisão geral pré-vídeo — correção do loop de salvar em mods, pular logos + abertura, FPS interpolado funcional e Modo Leve automático em GPUs fracas
 
 - **Correção do bug de salvar sozinho no menu (UN6 A35 / mods) + Pular Logos e Abertura (`0111-skip-logos-and-safe-stop.patch`, `Pad.cpp`, `EeScheduler.cpp`):**

@@ -130,7 +130,7 @@ class GameActivity : SDLActivity() {
             Renderer.apply(es, paths)
             rendererInUse = (if (es.get(EngineSettings.GPU_API, 0) == 1) "OpenGL ES" else "Vulkan") +
                 (if (es.get(EngineSettings.NATIVE_RENDER, 0) == 1) " · " + getString(R.string.gm_renderer_native) else "") +
-                if (es.get(EngineSettings.LIGHT_MODE, 1) == 1) " · " + getString(R.string.light_mode_short) else ""
+                if (es.get(EngineSettings.LIGHT_MODE, 0) == 1) " · " + getString(R.string.light_mode_short) else ""
             // the in-game menu's language: the launcher's (0 English, 1 Portuguese, 2 Spanish)
             val lang = when (resources.configuration.locales[0].language) { "pt" -> 1; "es" -> 2; else -> 0 }
             if (es.get(EngineSettings.LANG, -1) != lang) es.set(EngineSettings.LANG, lang)

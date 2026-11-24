@@ -73,9 +73,9 @@ object GpuProfiles {
         return when (t) {
             0 -> Profile(gpu, 0, scale4 = 4, fpsMode = 50, lightMode = 1, filter = 0)
             1 -> Profile(gpu, 1, scale4 = 5, fpsMode = 50, lightMode = 1, filter = 0)
-            2 -> Profile(gpu, 2, scale4 = 6, fpsMode = 50, lightMode = 1, filter = 0)
-            3 -> Profile(gpu, 3, scale4 = 8, fpsMode = 50, lightMode = 1, filter = 0)
-            4 -> Profile(gpu, 4, scale4 = 12, fpsMode = 60, lightMode = 1, filter = 0)
+            2 -> Profile(gpu, 2, scale4 = 6, fpsMode = 50, lightMode = 0, filter = 0)
+            3 -> Profile(gpu, 3, scale4 = 8, fpsMode = 50, lightMode = 0, filter = 0)
+            4 -> Profile(gpu, 4, scale4 = 12, fpsMode = 50, lightMode = 0, filter = 0)
             else -> null
         }
     }

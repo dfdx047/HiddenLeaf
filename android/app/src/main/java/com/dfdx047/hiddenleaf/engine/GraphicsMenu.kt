@@ -215,7 +215,7 @@ private fun GraphicsMenuContent(
                             val aspect = get(EngineSettings.ASPECT, 0)
                             val filter = get(EngineSettings.FILTER, 0)
                             val fps = get(EngineSettings.FPS_MODE, 50)
-                            val light = get(EngineSettings.LIGHT_MODE, 1) == 1
+                            val light = get(EngineSettings.LIGHT_MODE, 0) == 1
                             WoodBoard(
                                 title = stringResource(R.string.un5_gfx_video),
                                 subtitle = "${scaleLabel(q)} · ${aspectName(aspect)}",
@@ -305,7 +305,7 @@ private fun GraphicsMenuContent(
                             WoodBoard(stringResource(R.string.cancel), null, shojumaru, kanit, pulse.value, onClick = onBack)
                         }
                         3 -> {
-                            val light = get(EngineSettings.LIGHT_MODE, 1) == 1
+                            val light = get(EngineSettings.LIGHT_MODE, 0) == 1
                             val nat = get(EngineSettings.NATIVE_RENDER, 0) == 1
                             val meter = get(EngineSettings.METER, 0)
                             val api = get(EngineSettings.RENDERER, Renderer.AUTO)

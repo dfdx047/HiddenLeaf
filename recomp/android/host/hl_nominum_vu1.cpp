@@ -87,16 +87,9 @@ namespace hl_nominum_vu1
         s_vif = std::make_unique<nominum::core::Vif1>();
         s_vif->setSink([](int path, const uint8_t *d, uint32_t s, bool directHl) { s_gif(s_ctx, path, d, s, directHl); });
         s_vif->setPath3MaskCallback([](bool masked) { s_mask(s_ctx, masked); });
-        hl_nvu1::g_vu1Code = s_vif->code();
-        hl_nvu1::g_vu1Data = s_vif->data();
-        hl_nvu1::g_vu1CodeDirty = []()
-        {
-            if (s_vif)
-            {
-                s_vif->codeChanged();
-                ++s_codeLoads;
-            }
-        };
+        hl_nvu1::g_vu1Code = nullptr;
+        hl_nvu1::g_vu1Data = nullptr;
+        hl_nvu1::g_vu1CodeDirty = nullptr;
         hl_nvu1::g_transfer = transfer;
         const char *rec = std::getenv("NOMINUM_VU1_REC");
         std::fprintf(stderr, "[nvu1] Nominum's VIF1 and VU1 (core/vif1, %s) in place of the runtime's\n",

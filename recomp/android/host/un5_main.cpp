@@ -178,10 +178,9 @@ namespace
         int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
     };
     Settings g_settings;
-    // The launcher's "Modo leve" (light_mode=1, on by default since 0107/0108 fixed the DIRECT-PACKED bug):
-    // Nominum's VIF1 and VU1 (zero-copy) and, on weak/mid 4-big-core SoCs, the GS in two threads.
-    // NOMINUM_VU1 and HL_GS_SPLIT in hl_env.txt still decide over it.
-    bool g_lightMode = true;
+    // The launcher's "Modo leve" (light_mode=1): Nominum's VIF1 and VU1 and, on weak 4-big-core SoCs, the GS in two threads.
+    // Off by default on mid/strong GPUs (keeps runtime's accurate VU1 with 100% of effects); auto-enabled on tier 0-1 weak GPUs.
+    bool g_lightMode = false;
 
     void loadSettings(const std::string &path)
     {
@@ -228,11 +227,8 @@ namespace
         // under a test route (its buttons are by vsync) or a value of hl_env.txt
         if (skipIntro && std::getenv("HL_PADROUTE") == nullptr)
             setenv("HL_SKIP_INTRO", "1", 0);
-        // Interpolated 60/90/120 fps requires the native 3D renderer (hl_native) on Vulkan to present the interpolated frames.
-        // At 30/50 fps, PCSX2's GS draws everything unless the player explicitly enabled nativeRender.
-        if (g_settings.fpsMode > 50 && gpuApi != 1)
-            setenv("HL_NATIVE", "1", 0);
-        else if (!nativeRender)
+        // the renderer: PCSX2's GS draws 100% of effects, filters and resolutions cleanly unless the player explicitly enables nativeRender.
+        if (!nativeRender)
             setenv("HL_NATIVE", "0", 0);
         // PCSX2's GS on Vulkan or OpenGL ES, as chosen in the launcher (a value of hl_env.txt wins; without a line, Vulkan)
         if (gpuApi >= 0)

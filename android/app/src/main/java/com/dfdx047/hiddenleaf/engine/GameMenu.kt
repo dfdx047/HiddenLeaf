@@ -462,7 +462,7 @@ private fun GraphicsTab(state: GameMenuState, actions: GameMenuActions) {
     ) { actions.setting(EngineSettings.NATIVE_RENDER, if (it) 1 else 0) }
     Toggle(
         stringResource(R.string.light_mode), stringResource(R.string.light_mode_text),
-        state.get(EngineSettings.LIGHT_MODE, 1) == 1, restart = true,
+        state.get(EngineSettings.LIGHT_MODE, 0) == 1, restart = true,
     ) { actions.setting(EngineSettings.LIGHT_MODE, if (it) 1 else 0) }
 
     val q = state.get(EngineSettings.SCALE4, 0).takeIf { it > 0 } ?: (state.get(EngineSettings.SCALE, EngineSettings.SCALE_DEFAULT) * 4)
