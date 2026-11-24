@@ -175,7 +175,7 @@ private fun OnlineMenu(lobby: OnlineLobby, fp: String, page: OnlinePage, go: (On
                                 OnlinePage.MAIN -> MainBoards(lobby, fp, go, start)
                                 OnlinePage.CODE -> CodePad(onJoin = { code -> lobby.join(code, fp, start) })
                                 OnlinePage.LAN -> LanBoards(lobby, fp, start)
-                                OnlinePage.RANKED -> RankedBoards(lobby)
+                                OnlinePage.RANKED -> RankedBoards(lobby, fp, start)
                                 OnlinePage.LOBBY -> CustomLobbyBoards(lobby, fp)
                             }
                             LobbyState.LanSearching -> LanFound(lobby, fp, start, back)
@@ -205,7 +205,7 @@ private fun MainBoards(lobby: OnlineLobby, fp: String, go: (OnlinePage) -> Unit,
         Modifier.widthIn(max = 520.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(7.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Board(stringResource(R.string.online_quick), stringResource(R.string.online_quick_hint), Modifier.focusRequester(first), small = true) { lobby.quick(fp, start) }
+        Board(stringResource(R.string.online_quick), stringResource(R.string.online_quick_hint), Modifier.focusRequester(first), small = true) { lobby.quick(fp, start = start) }
         Board(stringResource(R.string.online_train_while_queue), stringResource(R.string.online_training_searching), small = true) {
             val paths = com.dfdx047.hiddenleaf.data.GamePaths(ctx)
             TrainingQueue.arm(
@@ -235,7 +235,7 @@ private fun MainBoards(lobby: OnlineLobby, fp: String, go: (OnlinePage) -> Unit,
 }
 
 @Composable
-private fun RankedBoards(lobby: OnlineLobby) {
+private fun RankedBoards(lobby: OnlineLobby, fp: String, start: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs by lobby.prefs.state.collectAsState()
     var profile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.RankedProfile?>(null) }
@@ -259,6 +259,9 @@ private fun RankedBoards(lobby: OnlineLobby) {
         verticalArrangement = Arrangement.spacedBy(7.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(stringResource(R.string.online_ranked_board_title), style = carved(18))
+        Board("Jogar Ranqueada", "Fila competitiva separada · Ganhe RP e Maestria", small = true) {
+            lobby.quick(fp, ranked = true, start = start)
+        }
         profile?.let { p ->
             com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
                 profile = p,

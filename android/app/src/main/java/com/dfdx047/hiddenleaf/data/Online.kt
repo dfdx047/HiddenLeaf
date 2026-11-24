@@ -536,16 +536,17 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
      * waits longest, or gives it a room of its own that waits in the queue (polled as a created room is); a waiting room the service let
      * go (no poll for 15 s: the network was away) is searched again. It gives up after [QUICK_MAX_MS]. [start] as for [create].
      */
-    fun quick(fp: String, start: () -> Unit) {
+    fun quick(fp: String, ranked: Boolean = false, start: () -> Unit) {
         if (job?.isActive == true || !baseGameOnly()) return
         val p = prefs.state.value
         val server = Online.cleanServer(p.server)
+        val queueFp = if (ranked) "${fp}#ranked" else fp
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
                 _state.value = LobbyState.Working(R.string.online_step_address)
                 val s = openSocket()
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
-                ActivityLog.info("online", "quick match: own addresses ${addrs.joinToString()}")
+                ActivityLog.info("online", "quick match (ranked=$ranked): own addresses ${addrs.joinToString()}")
                 val began = System.currentTimeMillis()
                 _state.value = LobbyState.Searching(began)
                 while (isActive) {
@@ -556,7 +557,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                         return@launch
                     }
                     val mode = Online.effectiveInputMode(p.inputMode)
-                    val q = Online.quick(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), who, mode)
+                    val q = Online.quick(server, p.name, queueFp, addrs, Online.Opts(p.delay, p.relay), who, mode)
                     if (q.host != null) {
                         ActivityLog.info("online", "quick match: in room ${q.code} of ${q.host.name} (${q.host.seen}), addresses ${q.host.addrs.joinToString()}")
                         launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key), q.token, q.inputMode), start)

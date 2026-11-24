@@ -61,6 +61,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 07:18: Tela Dedicada de Modo Ranqueado, fila Casual vs Ranqueada separada, retratos reais do jogo e correção de layout
+
+- **Fila Casual vs Ranqueada separadas (`Online.kt`, `OnlineScreen.kt`, `OnlineMenu.kt`):**
+  - Adicionado parâmetro `ranked: Boolean` em `OnlineLobby.quick(fp, ranked, start)` (usa chave de fila `${fp}#ranked` separada da fila Casual).
+  - Nova **Tela Dedicada de Modo Ranqueado (`RankedDedicatedScreen`)** em tela cheia (2 colunas na horizontal / 1 na vertical), com **Cartão Ninja**, botão **"Jogar Ranqueada"**, **"Treinar na Fila Ranqueada"** e **Top 100 Global** com retratos reais dos personagens + nível de maestria `Lv.XX`. Botão **"Jogar Ranqueada"** adicionado também no menu in-game `OnlineMenu.kt`.
+- **Retratos reais dos personagens do jogo:** recortados em alta resolução da tela de Seleção de Personagem 1080p do jogo (`naruto`, `sasuke`, `kakashi`, `lee`, `neji`, `gaara`, `sakura`, `sai`) e instalados em `<root>/portraits/` nos 3 aparelhos (carregados automaticamente por `CharacterCutout`, sem nenhum asset do jogo no git).
+- **Correção de layout da Sala Personalizada (`CustomLobbyCard`):** campo `"Código da sala"` agora ocupa largura total (`fillMaxWidth()`) com botões `Entrar` e `Assistir` em linha própria logo abaixo, sem cortar em nenhuma DPI/largura de tela.
+- **Todos os 3 aparelhos no mesmo servidor live (`http://127.0.0.1:8787` via `adb reverse`):** `RP5_Kage`, `Cube_Ninja` e `MiA3_Ninja` prontos para testes e gravação de vídeo.
+
 ### 2026-11-24 07:05: Tela Online estilo UN5 (recortes de personagens + Nível de Maestria) e gestos de menu opcionais com guia animado
 
 - **Sistema de Personagem Favorito & Nível de Maestria (`worker.js`, `schema.sql`, `dev_server.mjs`, `OnlineAdvanced.kt`):**

@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -99,7 +101,23 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
     // (online and local matches are base game only for now: the launcher's list, and the engine's own as a check)
     val modsOn = remember(fileMods) { fileMods.any { it.enabled } || Online.modsOn(vm.paths) }
     var code by rememberSaveable { mutableStateOf("") }
+    var showRankedScreen by rememberSaveable { mutableStateOf(false) }
     val fp = { Online.fingerprint(context, vm.paths) }
+
+    if (showRankedScreen && !prefs.lan) {
+        RankedDedicatedScreen(
+            vm = vm,
+            lobby = lobby,
+            prefs = prefs,
+            state = state,
+            ready = ready,
+            serverSet = serverSet,
+            modsOn = modsOn,
+            fp = fp,
+            onBack = { showRankedScreen = false },
+        )
+        return
+    }
 
     // (a local match or search stops with the page: nobody would see the other player arrive)
     DisposableEffect(lobby) { onDispose { lobby.leaveScreen() } }
@@ -202,7 +220,23 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
             }
         }
 
-        if (!prefs.lan) RankedAndLobbySection(prefs, ready, serverSet, fp)
+        if (!prefs.lan) {
+            SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
+                Text(
+                    "Modo Ranqueado separado da Partida Casual: ganhe RP, suba de Genin até Kage, evolua a Maestria do seu personagem e entre no Top 100 Global.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                    title = "Abrir Modo Ranqueado",
+                    subtitle = "Jogar Ranqueada · Top 100 Global · Maestria de Personagem",
+                    accent = Konoha.ChakraAmber,
+                    enabled = serverSet,
+                    onClick = { showRankedScreen = true },
+                )
+            }
+            CustomLobbyCard(prefs, ready, serverSet, fp)
+        }
 
         SectionCard(stringResource(R.string.online_guide_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
             Text(stringResource(if (prefs.lan) R.string.lan_guide else R.string.online_guide), style = MaterialTheme.typography.bodyMedium)
@@ -446,23 +480,24 @@ private fun Busy(text: String, onCancel: (() -> Unit)?) {
 }
 
 @Composable
-private fun RankedAndLobbySection(
+private fun RankedDedicatedScreen(
+    vm: AppViewModel,
+    lobby: OnlineLobby,
     prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
+    state: LobbyState,
     ready: Boolean,
     serverSet: Boolean,
+    modsOn: Boolean,
     fp: () -> String,
+    onBack: () -> Unit,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.RankedProfile?>(null) }
     var leaderboard by remember { mutableStateOf<List<com.dfdx047.hiddenleaf.data.OnlineAdvanced.LeaderboardEntry>>(emptyList()) }
     var loadingRank by remember { mutableStateOf(false) }
-    var customLobby by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.CustomLobby?>(null) }
-    var lobbyCode by remember { mutableStateOf("") }
-    var lobbyMax by remember { mutableStateOf(4) }
-    var lobbyErr by remember { mutableStateOf<String?>(null) }
+    val canPlay = ready && serverSet && !modsOn && prefs.name.isNotBlank()
 
-    // Auto-load ranked profile & Top 100 leaderboard when server is ready
     LaunchedEffect(prefs.server, serverSet) {
         if (!serverSet) return@LaunchedEffect
         loadingRank = true
@@ -476,9 +511,8 @@ private fun RankedAndLobbySection(
         loadingRank = false
     }
 
-    // Ranked & Top 100 Global + Custom Lobby (2-8) in official UN5 wood/scroll look, responsive Landscape (2-col) / Portrait (1-col)
-    val rankedContent: @Composable () -> Unit = {
-        SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
+    val leftCol: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             profile?.let { p ->
                 com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
                     profile = p,
@@ -500,31 +534,75 @@ private fun RankedAndLobbySection(
                     },
                 )
             }
-            com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
-                title = stringResource(R.string.online_ranked_refresh),
-                subtitle = "Top 100 Global · Nível de Maestria por Personagem",
-                accent = Konoha.ChakraAmber,
-                enabled = serverSet && !loadingRank,
-                onClick = {
-                    if (!serverSet) return@Un5WoodActionBoard
-                    loadingRank = true
-                    scope.launch {
-                        val srv = Online.cleanServer(prefs.server)
-                        runCatching {
-                            profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
-                                context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
+            when (val s = state) {
+                is LobbyState.Searching -> QuickSearching(s.since) { lobby.cancel() }
+                is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
+                is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
+                else -> {
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Jogar Ranqueada",
+                        subtitle = "Fila competitiva separada · Ganhe RP e Maestria",
+                        accent = Konoha.NarutoOrange,
+                        enabled = canPlay,
+                        onClick = { lobby.quick(fp(), ranked = true) { vm.play() } },
+                    )
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Treinar na Fila Ranqueada",
+                        subtitle = "Pula direto para Seleção de Personagem enquanto busca",
+                        accent = Konoha.ChakraAmber,
+                        enabled = canPlay,
+                        onClick = {
+                            com.dfdx047.hiddenleaf.engine.TrainingQueue.arm(
+                                vm.paths,
+                                com.dfdx047.hiddenleaf.engine.TrainingQueue.Request(
+                                    server = Online.cleanServer(prefs.server),
+                                    name = prefs.name,
+                                    fp = "${fp()}#ranked",
+                                    inputMode = Online.effectiveInputMode(prefs.inputMode),
+                                    delay = prefs.delay,
+                                    relay = prefs.relay,
+                                )
                             )
+                            vm.play()
+                        },
+                    )
+                    if (s is LobbyState.Failed) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(s.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { lobby.dismiss() }) { Text(stringResource(R.string.online_dismiss)) }
                         }
-                        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
-                        loadingRank = false
                     }
-                },
-            )
+                }
+            }
+        }
+    }
+
+    val rightCol: @Composable () -> Unit = {
+        SectionCard("Top 100 Global · Maestria", NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Ranking por RP & Personagem", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(
+                    enabled = serverSet && !loadingRank,
+                    onClick = {
+                        loadingRank = true
+                        scope.launch {
+                            val srv = Online.cleanServer(prefs.server)
+                            runCatching {
+                                profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                    context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
+                                )
+                            }
+                            leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+                            loadingRank = false
+                        }
+                    },
+                ) { Text(stringResource(R.string.online_ranked_refresh)) }
+            }
             if (leaderboard.isEmpty()) {
                 Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (e in leaderboard.take(15)) {
+                    for (e in leaderboard.take(20)) {
                         val tc = rankTierColor(e.tier)
                         val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(e.favChar)
                         val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
@@ -533,13 +611,13 @@ private fun RankedAndLobbySection(
                             Modifier.fillMaxWidth()
                                 .clip(MaterialTheme.shapes.small)
                                 .background(if (e.rank <= 3) tc.copy(alpha = 0.16f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
-                                .border(1.dp, if (e.rank <= 3) tc.copy(alpha = 0.6f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
+                                .border(1.dp, if (e.rank <= 3) tc.copy(alpha = 0.65f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(30.dp))
-                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 44)
+                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 46)
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(e.name, style = MaterialTheme.typography.bodyMedium, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
@@ -548,7 +626,7 @@ private fun RankedAndLobbySection(
                                 Text(
                                     "${ch.name} Lv.${e.favCharLvl} · ${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else ""),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Konoha.ScrollCream.copy(alpha = 0.78f),
+                                    color = Konoha.ScrollCream.copy(alpha = 0.8f),
                                 )
                             }
                             Text("${e.points} RP", style = MaterialTheme.typography.titleSmall, color = tc)
@@ -559,96 +637,124 @@ private fun RankedAndLobbySection(
         }
     }
 
-    val lobbyContent: @Composable () -> Unit = {
-        SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
-            Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            val cur = customLobby
-            if (cur != null) {
-                Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
-                for (m in cur.members) {
-                    Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onBack) { Text("← Voltar") }
+            Column(Modifier.weight(1f)) {
+                Text("Modo Ranqueado", style = MaterialTheme.typography.headlineSmall, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                Text("Genin → Kage · Maestria de Personagem · Top 100 Global", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (cfg.screenWidthDp >= 680) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.weight(0.95f)) { leftCol() }
+                Column(Modifier.weight(1.05f)) { rightCol() }
+            }
+        } else {
+            leftCol()
+            rightCol()
+        }
+    }
+}
+
+@Composable
+private fun CustomLobbyCard(
+    prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
+    ready: Boolean,
+    serverSet: Boolean,
+    fp: () -> String,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var customLobby by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.CustomLobby?>(null) }
+    var lobbyCode by remember { mutableStateOf("") }
+    var lobbyMax by remember { mutableStateOf(4) }
+    var lobbyErr by remember { mutableStateOf<String?>(null) }
+
+    SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
+        Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val cur = customLobby
+        if (cur != null) {
+            Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
+            for (m in cur.members) {
+                Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
+            }
+            OutlinedButton(onClick = {
+                scope.launch {
+                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
+                    customLobby = null
                 }
-                OutlinedButton(onClick = {
+            }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (n in listOf(2, 4, 6, 8)) {
+                    FilterChip(selected = lobbyMax == n, onClick = { lobbyMax = n }, label = { Text("${n}P") })
+                }
+            }
+            com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                title = stringResource(R.string.online_custom_lobby_create),
+                subtitle = "Até ${lobbyMax} jogadores · Rei da Mesa · Espectador",
+                accent = Konoha.SasukeBlueLight,
+                enabled = ready && serverSet && prefs.name.isNotBlank(),
+                onClick = {
+                    lobbyErr = null
                     scope.launch {
-                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
-                        customLobby = null
+                        runCatching {
+                            customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
+                                context, Online.cleanServer(prefs.server), prefs.name, fp(), lobbyMax, true,
+                                Online.effectiveInputMode(prefs.inputMode),
+                            )
+                        }.onFailure { lobbyErr = it.message }
                     }
-                }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (n in listOf(2, 4, 6, 8)) {
-                        FilterChip(selected = lobbyMax == n, onClick = { lobbyMax = n }, label = { Text("${n}P") })
-                    }
-                }
-                com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
-                    title = stringResource(R.string.online_custom_lobby_create),
-                    subtitle = "Até ${lobbyMax} jogadores · Rei da Mesa · Espectador",
-                    accent = Konoha.SasukeBlueLight,
-                    enabled = ready && serverSet && prefs.name.isNotBlank(),
+                },
+            )
+            // Full-width room code field + balanced Entrar / Assistir row below so it NEVER clips on any DPI or screen width
+            OutlinedTextField(
+                value = lobbyCode,
+                onValueChange = { lobbyCode = it.filter { c -> c.isDigit() }.take(6) },
+                label = { Text(stringResource(R.string.online_code)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
                     onClick = {
                         lobbyErr = null
                         scope.launch {
                             runCatching {
-                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
-                                    context, Online.cleanServer(prefs.server), prefs.name, fp(), lobbyMax, true,
-                                    Online.effectiveInputMode(prefs.inputMode),
+                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                    Online.effectiveInputMode(prefs.inputMode), spectator = false,
                                 )
                             }.onFailure { lobbyErr = it.message }
                         }
                     },
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = lobbyCode,
-                        onValueChange = { lobbyCode = it.filter { c -> c.isDigit() }.take(6) },
-                        label = { Text(stringResource(R.string.online_code)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Button(
-                        onClick = {
-                            lobbyErr = null
-                            scope.launch {
-                                runCatching {
-                                    customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
-                                        context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
-                                        Online.effectiveInputMode(prefs.inputMode), spectator = false,
-                                    )
-                                }.onFailure { lobbyErr = it.message }
-                            }
-                        },
-                        enabled = ready && serverSet && lobbyCode.length == 6,
-                    ) { Text(stringResource(R.string.online_custom_lobby_join)) }
-                    OutlinedButton(
-                        onClick = {
-                            lobbyErr = null
-                            scope.launch {
-                                runCatching {
-                                    customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
-                                        context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
-                                        Online.effectiveInputMode(prefs.inputMode), spectator = true,
-                                    )
-                                }.onFailure { lobbyErr = it.message }
-                            }
-                        },
-                        enabled = ready && serverSet && lobbyCode.length == 6,
-                    ) { Text(stringResource(R.string.online_custom_lobby_spectate)) }
-                }
-                lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    enabled = ready && serverSet && lobbyCode.length == 6,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.online_custom_lobby_join)) }
+                OutlinedButton(
+                    onClick = {
+                        lobbyErr = null
+                        scope.launch {
+                            runCatching {
+                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                    Online.effectiveInputMode(prefs.inputMode), spectator = true,
+                                )
+                            }.onFailure { lobbyErr = it.message }
+                        }
+                    },
+                    enabled = ready && serverSet && lobbyCode.length == 6,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.online_custom_lobby_spectate)) }
             }
+            lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
-    }
-
-    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
-    if (cfg.screenWidthDp >= 700) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1.15f)) { rankedContent() }
-            Column(Modifier.weight(0.85f)) { lobbyContent() }
-        }
-    } else {
-        rankedContent()
-        lobbyContent()
     }
 }
 
