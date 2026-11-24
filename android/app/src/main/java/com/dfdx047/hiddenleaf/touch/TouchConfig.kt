@@ -202,15 +202,15 @@ data class TouchConfig(
     val autoMode: Boolean = true,   // the scene follows the game (the SCENE button still overrides)
     val classicPlaces: Map<String, Placement> = emptyMap(), // the classic layout's own moved controls (by ClassicCtl name)
     val macros: List<Macro> = emptyList(),
-    // Native touch in menus (tap items directly + drag to scroll smoothly, no D-pad clutter). Toggleable in Controls.
-    val menuTouch: Boolean = true,
+    // Optional native touch gestures in menus (off by default: virtual buttons stay the default).
+    val menuTouch: Boolean = false,
     val showNames: Boolean = false, // the action's name under each fight button (off: the icon and the console letter)
     val pro: ProTouch = ProTouch(),
 ) {
     fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("version", 4)
+        put("version", 5)
         put("mode", mode.name)
         put("skin", skin.name)
         put("style", style.name)
@@ -281,8 +281,8 @@ data class TouchConfig(
                 autoMode = o.optBoolean("autoMode", true),
                 classicPlaces = classic,
                 macros = macros,
-                // Migrate v1..v3 configs to native menu touch enabled by default (users can still toggle off in v4+)
-                menuTouch = if (o.optInt("version", 1) < 4) true else o.optBoolean("menuGestures", true),
+                // Virtual buttons are the default; menu gestures are optional (migrating v4 -> v5 resets to false unless toggled on in v5+)
+                menuTouch = if (o.optInt("version", 1) < 5) false else o.optBoolean("menuGestures", false),
                 showNames = o.optBoolean("showNames", false),
                 pro = o.optJSONObject("pro")?.let { ProTouch.fromJson(it) } ?: ProTouch(),
             )

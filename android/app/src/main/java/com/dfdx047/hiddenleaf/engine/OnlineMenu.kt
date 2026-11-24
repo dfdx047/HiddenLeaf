@@ -260,15 +260,16 @@ private fun RankedBoards(lobby: OnlineLobby) {
     ) {
         Text(stringResource(R.string.online_ranked_board_title), style = carved(18))
         profile?.let { p ->
-            Plank {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    com.dfdx047.hiddenleaf.ui.screens.RankEmblem(p.tier, size = 38)
-                    Column {
-                        Text("${p.name} · #${p.rank} (${p.tier})", style = carved(16))
-                        Text("${p.points} RP · ${p.wins}V / ${p.losses}D" + (if (p.streak >= 2) " · 🔥${p.streak}" else ""), style = bodyStyle.copy(fontSize = 12.sp))
-                    }
-                }
-            }
+            com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
+                profile = p,
+                onCycleChar = {
+                    val list = com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS
+                    val idx = list.indexOfFirst { it.id == p.favChar }.let { if (it < 0) 0 else (it + 1) % list.size }
+                    val nextId = list[idx].id
+                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveFavChar(ctx, nextId)
+                    profile = p.copy(favChar = nextId)
+                },
+            )
         }
         if (loading) {
             Pulse()
@@ -277,6 +278,7 @@ private fun RankedBoards(lobby: OnlineLobby) {
         } else {
             for (e in entries.take(12)) {
                 val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
+                val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(e.favChar)
                 Row(
                     Modifier.fillMaxWidth()
                         .border(1.5.dp, if (e.rank <= 3) ORANGE else WOOD_EDGE, CutCornerShape(8.dp))
@@ -285,11 +287,11 @@ private fun RankedBoards(lobby: OnlineLobby) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(medal, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp), modifier = Modifier.width(30.dp))
-                    com.dfdx047.hiddenleaf.ui.screens.RankEmblem(e.tier, size = 26)
+                    Text(medal, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp), modifier = Modifier.width(28.dp))
+                    com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 40)
                     Column(Modifier.weight(1f)) {
                         Text(e.name, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp))
-                        Text("${e.tier} · ${e.wins}V/${e.losses}D", style = bodyStyle.copy(fontSize = 11.sp, color = CREAM.copy(alpha = 0.8f)))
+                        Text("${e.tier} · ${ch.name} Lv.${e.favCharLvl} · ${e.wins}V/${e.losses}D", style = bodyStyle.copy(fontSize = 11.sp, color = CREAM.copy(alpha = 0.85f)))
                     }
                     Text("${e.points} RP", style = carved(15))
                 }

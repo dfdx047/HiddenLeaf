@@ -61,6 +61,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 07:05: Tela Online estilo UN5 (recortes de personagens + Nível de Maestria) e gestos de menu opcionais com guia animado
+
+- **Sistema de Personagem Favorito & Nível de Maestria (`worker.js`, `schema.sql`, `dev_server.mjs`, `OnlineAdvanced.kt`):**
+  - Adicionados `fav_char`, `fav_char_lvl` (Lv. 1 → Lv. 99) e `fav_char_xp` em `hl_players`, `/v1/profile`, `/v1/ranked/report` (+120 XP por vitória, +45 XP por derrota) e `/v1/leaderboard`.
+- **Visual oficial UN5 personalizado ([Un5NinjaUi.kt](file:///home/dfdx047/AndroidStudioProjects/HiddenLeaf/android/app/src/main/java/com/dfdx047/hiddenleaf/ui/components/Un5NinjaUi.kt), `OnlineScreen.kt`, `OnlineMenu.kt`):**
+  - Novo `CharacterCutout` (moldura chanfrada estilo UN5 com selo `Lv.XX` dourado, carregando PNG local de `<root>/portraits/<id>.png` quando presente ou recorte vetorial estilizado com bandana/clã/engrenagem).
+  - Novo `NinjaInfoCard` com retrato clicável para trocar o personagem favorito, barra de XP de Maestria, emblema de patente, RP e winrate.
+  - Layout responsivo focado em horizontal (2 colunas lado a lado: Rankeada/Top 100 com recortes + `Lv.XX` à esquerda e Sala Personalizada 2–8 à direita; empilhado na vertical) e tábuas de madeira chanfradas (`Un5WoodActionBoard`).
+- **Toque nos menus opcional + Guia Animado (`TouchConfig.kt`, `ControlsScreen.kt`):**
+  - Botões virtuais restaurados como padrão (`menuTouch = false`, migração v5); ao ativar *"Toque direto nos menus"*, exibe o `MenuGestureAnimatedGuide` com 4 demonstrações animadas no estilo da launcher.
+- **Verificado:** `node online/worker/test.mjs` verde, `./gradlew testDebugUnitTest` verde, instalado nos 3 aparelhos com servidor live em `127.0.0.1:8787` (`adb reverse`) e conferido visualmente no RP5.
+
 ### 2026-11-24 06:49: Correções de polimento pós-testes reais nos 3 aparelhos
 
 - **Toque nativo nos menus (migração v3 → v4):** corrigido `TouchConfig.fromJson()` que mantinha `menuGestures: false` em instalações antigas (como o Mi A3) e reduzido limiar de arraste de `26 dp` → `18 dp` em `NinjaPadView.kt`. Verificado ao vivo no Mi A3 deslizando `ENGLISH` → `FRANÇAIS` sem D-pad na tela.

@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS hl_players (
     losses INTEGER NOT NULL DEFAULT 0,
     streak INTEGER NOT NULL DEFAULT 0,
     input_mode TEXT NOT NULL DEFAULT 'any',
+    fav_char TEXT NOT NULL DEFAULT 'naruto',
+    fav_char_lvl INTEGER NOT NULL DEFAULT 1,
+    fav_char_xp INTEGER NOT NULL DEFAULT 0,
     updated INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS hl_players_rank ON hl_players (points DESC, wins DESC);

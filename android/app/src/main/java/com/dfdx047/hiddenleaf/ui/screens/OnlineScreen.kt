@@ -476,163 +476,179 @@ private fun RankedAndLobbySection(
         loadingRank = false
     }
 
-    // Ranked & Top 100 Global card with Ninja tier emblems, medals, avatar circles & RP progress bar
-    SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
-        profile?.let { p ->
-            val tierColor = rankTierColor(p.tier)
-            val total = (p.wins + p.losses).coerceAtLeast(1)
-            val wr = (p.wins * 100) / total
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = tierColor.copy(alpha = 0.14f).compositeOver(Konoha.NightHigh)),
-                border = BorderStroke(1.5.dp, tierColor.copy(alpha = 0.65f)),
-            ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RankEmblem(p.tier, size = 44)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(p.name, style = MaterialTheme.typography.titleMedium, color = Konoha.ScrollCream)
-                            Text("#${p.rank}", style = MaterialTheme.typography.labelLarge, color = tierColor)
+    // Ranked & Top 100 Global + Custom Lobby (2-8) in official UN5 wood/scroll look, responsive Landscape (2-col) / Portrait (1-col)
+    val rankedContent: @Composable () -> Unit = {
+        SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
+            profile?.let { p ->
+                com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
+                    profile = p,
+                    onCycleChar = {
+                        val list = com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS
+                        val idx = list.indexOfFirst { it.id == p.favChar }.let { if (it < 0) 0 else (it + 1) % list.size }
+                        val nextId = list[idx].id
+                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveFavChar(context, nextId)
+                        profile = p.copy(favChar = nextId)
+                        if (serverSet) {
+                            scope.launch {
+                                runCatching {
+                                    profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                        context, Online.cleanServer(prefs.server), prefs.name, Online.effectiveInputMode(prefs.inputMode), nextId,
+                                    )
+                                }
+                            }
                         }
-                        Text(
-                            "${p.tier} · ${p.points} RP · ${p.wins}V / ${p.losses}D ($wr%)" +
-                                (if (p.streak >= 2) " · 🔥${p.streak}" else ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Konoha.ScrollCream.copy(alpha = 0.85f),
-                        )
-                    }
-                }
+                    },
+                )
             }
-        }
-        FilledTonalButton(
-            onClick = {
-                if (!serverSet) return@FilledTonalButton
-                loadingRank = true
-                scope.launch {
-                    val srv = Online.cleanServer(prefs.server)
-                    runCatching {
-                        profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
-                            context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
-                        )
-                    }
-                    leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
-                    loadingRank = false
-                }
-            },
-            enabled = serverSet && !loadingRank,
-        ) {
-            Text(stringResource(R.string.online_ranked_refresh))
-        }
-        if (leaderboard.isEmpty()) {
-            Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (e in leaderboard.take(15)) {
-                    val tc = rankTierColor(e.tier)
-                    val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
-                    val wr = if (e.wins + e.losses > 0) (e.wins * 100) / (e.wins + e.losses) else 0
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .background(if (e.rank <= 3) tc.copy(alpha = 0.12f) else Konoha.NightHigh.copy(alpha = 0.55f))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(34.dp))
-                        RankEmblem(e.tier, size = 28)
-                        Column(Modifier.weight(1f)) {
-                            Text(e.name, style = MaterialTheme.typography.bodyMedium, color = Konoha.ScrollCream)
-                            Text(
-                                "${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else ""),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Konoha.ScrollCream.copy(alpha = 0.7f),
+            com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                title = stringResource(R.string.online_ranked_refresh),
+                subtitle = "Top 100 Global · Nível de Maestria por Personagem",
+                accent = Konoha.ChakraAmber,
+                enabled = serverSet && !loadingRank,
+                onClick = {
+                    if (!serverSet) return@Un5WoodActionBoard
+                    loadingRank = true
+                    scope.launch {
+                        val srv = Online.cleanServer(prefs.server)
+                        runCatching {
+                            profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
                             )
                         }
-                        Text("${e.points} RP", style = MaterialTheme.typography.titleSmall, color = tc)
+                        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+                        loadingRank = false
+                    }
+                },
+            )
+            if (leaderboard.isEmpty()) {
+                Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (e in leaderboard.take(15)) {
+                        val tc = rankTierColor(e.tier)
+                        val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(e.favChar)
+                        val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
+                        val wr = if (e.wins + e.losses > 0) (e.wins * 100) / (e.wins + e.losses) else 0
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .background(if (e.rank <= 3) tc.copy(alpha = 0.16f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
+                                .border(1.dp, if (e.rank <= 3) tc.copy(alpha = 0.6f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(30.dp))
+                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 44)
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(e.name, style = MaterialTheme.typography.bodyMedium, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                                    RankEmblem(e.tier, size = 18)
+                                }
+                                Text(
+                                    "${ch.name} Lv.${e.favCharLvl} · ${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Konoha.ScrollCream.copy(alpha = 0.78f),
+                                )
+                            }
+                            Text("${e.points} RP", style = MaterialTheme.typography.titleSmall, color = tc)
+                        }
                     }
                 }
             }
         }
     }
 
-    // Custom Lobby (2-8 players, King of the Hill) & Spectator card
-    SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
-        Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val cur = customLobby
-        if (cur != null) {
-            Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
-            for (m in cur.members) {
-                Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
-            }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
-                    customLobby = null
+    val lobbyContent: @Composable () -> Unit = {
+        SectionCard(stringResource(R.string.online_custom_lobby_title), NinjaIcons.Shuriken, accent = Konoha.SasukeBlueLight) {
+            Text(stringResource(R.string.online_custom_lobby_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val cur = customLobby
+            if (cur != null) {
+                Text("Lobby #${cur.code} (${cur.members.size}/${cur.maxPlayers})", style = MaterialTheme.typography.titleMedium, color = Konoha.NarutoOrange)
+                for (m in cur.members) {
+                    Text("• ${m.name} [${m.role.uppercase()}]", style = MaterialTheme.typography.bodyMedium)
                 }
-            }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (n in listOf(2, 4, 6, 8)) {
-                    FilterChip(selected = lobbyMax == n, onClick = { lobbyMax = n }, label = { Text("${n}P") })
-                }
-            }
-            FilledTonalButton(
-                onClick = {
-                    lobbyErr = null
+                OutlinedButton(onClick = {
                     scope.launch {
-                        runCatching {
-                            customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
-                                context, Online.cleanServer(prefs.server), prefs.name, fp(), lobbyMax, true,
-                                Online.effectiveInputMode(prefs.inputMode),
-                            )
-                        }.onFailure { lobbyErr = it.message }
+                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(context, Online.cleanServer(prefs.server), cur.code)
+                        customLobby = null
                     }
-                },
-                enabled = ready && serverSet && prefs.name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(R.string.online_custom_lobby_create)) }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = lobbyCode,
-                    onValueChange = { lobbyCode = it.filter { c -> c.isDigit() }.take(6) },
-                    label = { Text(stringResource(R.string.online_code)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.weight(1f),
+                }) { Text(stringResource(R.string.online_custom_lobby_leave)) }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (n in listOf(2, 4, 6, 8)) {
+                        FilterChip(selected = lobbyMax == n, onClick = { lobbyMax = n }, label = { Text("${n}P") })
+                    }
+                }
+                com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                    title = stringResource(R.string.online_custom_lobby_create),
+                    subtitle = "Até ${lobbyMax} jogadores · Rei da Mesa · Espectador",
+                    accent = Konoha.SasukeBlueLight,
+                    enabled = ready && serverSet && prefs.name.isNotBlank(),
+                    onClick = {
+                        lobbyErr = null
+                        scope.launch {
+                            runCatching {
+                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
+                                    context, Online.cleanServer(prefs.server), prefs.name, fp(), lobbyMax, true,
+                                    Online.effectiveInputMode(prefs.inputMode),
+                                )
+                            }.onFailure { lobbyErr = it.message }
+                        }
+                    },
                 )
-                Button(
-                    onClick = {
-                        lobbyErr = null
-                        scope.launch {
-                            runCatching {
-                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
-                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
-                                    Online.effectiveInputMode(prefs.inputMode), spectator = false,
-                                )
-                            }.onFailure { lobbyErr = it.message }
-                        }
-                    },
-                    enabled = ready && serverSet && lobbyCode.length == 6,
-                ) { Text(stringResource(R.string.online_custom_lobby_join)) }
-                OutlinedButton(
-                    onClick = {
-                        lobbyErr = null
-                        scope.launch {
-                            runCatching {
-                                customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
-                                    context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
-                                    Online.effectiveInputMode(prefs.inputMode), spectator = true,
-                                )
-                            }.onFailure { lobbyErr = it.message }
-                        }
-                    },
-                    enabled = ready && serverSet && lobbyCode.length == 6,
-                ) { Text(stringResource(R.string.online_custom_lobby_spectate)) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = lobbyCode,
+                        onValueChange = { lobbyCode = it.filter { c -> c.isDigit() }.take(6) },
+                        label = { Text(stringResource(R.string.online_code)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = {
+                            lobbyErr = null
+                            scope.launch {
+                                runCatching {
+                                    customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                        context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                        Online.effectiveInputMode(prefs.inputMode), spectator = false,
+                                    )
+                                }.onFailure { lobbyErr = it.message }
+                            }
+                        },
+                        enabled = ready && serverSet && lobbyCode.length == 6,
+                    ) { Text(stringResource(R.string.online_custom_lobby_join)) }
+                    OutlinedButton(
+                        onClick = {
+                            lobbyErr = null
+                            scope.launch {
+                                runCatching {
+                                    customLobby = com.dfdx047.hiddenleaf.data.OnlineAdvanced.joinLobby(
+                                        context, Online.cleanServer(prefs.server), lobbyCode, prefs.name, fp(),
+                                        Online.effectiveInputMode(prefs.inputMode), spectator = true,
+                                    )
+                                }.onFailure { lobbyErr = it.message }
+                            }
+                        },
+                        enabled = ready && serverSet && lobbyCode.length == 6,
+                    ) { Text(stringResource(R.string.online_custom_lobby_spectate)) }
+                }
+                lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
-            lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
+    }
+
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    if (cfg.screenWidthDp >= 700) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1.15f)) { rankedContent() }
+            Column(Modifier.weight(0.85f)) { lobbyContent() }
+        }
+    } else {
+        rankedContent()
+        lobbyContent()
     }
 }
 

@@ -12,15 +12,15 @@ db.exec(fs.readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
 // Seed realistic Top 100 leaderboard entries so the Ranked UI can be tested live immediately
 const now = Math.floor(Date.now() / 1000);
 const seed = [
-    ["seed_01", "hash1", "Minato_BR", 2140, 48, 6, 9, "gamepad"],
-    ["seed_02", "hash2", "ItachiUchiha", 1920, 41, 11, 5, "touch"],
-    ["seed_03", "hash3", "PainAkatsuki", 1765, 35, 12, 4, "gamepad"],
-    ["seed_04", "hash4", "KakashiCopy", 1580, 29, 14, 3, "touch"],
-    ["seed_05", "hash5", "RockLee8G", 1390, 22, 13, 2, "touch"],
-    ["seed_06", "hash6", "GaaraSuna", 1185, 15, 11, 1, "gamepad"],
-    ["seed_07", "hash7", "NarutoUzumaki", 1045, 8, 6, 0, "touch"],
+    ["seed_01", "hash1", "Minato_BR", 2140, 48, 6, 9, "gamepad", "minato", 42, 8250],
+    ["seed_02", "hash2", "ItachiUchiha", 1920, 41, 11, 5, "touch", "itachi", 37, 7280],
+    ["seed_03", "hash3", "PainAkatsuki", 1765, 35, 12, 4, "gamepad", "sasuke", 31, 6090],
+    ["seed_04", "hash4", "KakashiCopy", 1580, 29, 14, 3, "touch", "kakashi", 26, 5120],
+    ["seed_05", "hash5", "RockLee8G", 1390, 22, 13, 2, "touch", "lee", 21, 4050],
+    ["seed_06", "hash6", "GaaraSuna", 1185, 15, 11, 1, "gamepad", "gaara", 14, 2680],
+    ["seed_07", "hash7", "NarutoUzumaki", 1045, 8, 6, 0, "touch", "naruto", 9, 1650],
 ];
-const ins = db.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+const ins = db.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 for (const r of seed) ins.run(...r, now);
 
 const D1 = {

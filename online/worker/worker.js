@@ -86,6 +86,14 @@ async function sha256Hex(text) {
     return [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
+function cleanCharId(s) {
+    return typeof s === "string" ? s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24) || "naruto" : "naruto";
+}
+
+function charLevelFromXp(xp) {
+    return Math.max(1, Math.min(99, 1 + Math.floor(Math.max(0, Number(xp) || 0) / 200)));
+}
+
 export function ninjaTier(points) {
     if (points >= 2000) return "Kage";
     if (points >= 1700) return "Sannin";
@@ -247,10 +255,10 @@ export async function handle(request, env, now) {
         const mode = url.searchParams.get("mode") || "all";
         let rows;
         if (mode === "touch" || mode === "gamepad") {
-            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode FROM hl_players WHERE input_mode = ? ORDER BY points DESC, wins DESC LIMIT ?")
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl FROM hl_players WHERE input_mode = ? ORDER BY points DESC, wins DESC LIMIT ?")
                 .bind(mode, limit).all()).results;
         } else {
-            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode FROM hl_players ORDER BY points DESC, wins DESC LIMIT ?")
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl FROM hl_players ORDER BY points DESC, wins DESC LIMIT ?")
                 .bind(limit).all()).results;
         }
         const entries = rows.map((r, i) => ({
@@ -262,6 +270,8 @@ export async function handle(request, env, now) {
             losses: r.losses,
             streak: r.streak,
             input_mode: r.input_mode,
+            fav_char: r.fav_char || "naruto",
+            fav_char_lvl: r.fav_char_lvl || 1,
             tier: ninjaTier(r.points),
         }));
         return new Response(JSON.stringify({ entries, updated: now }), {
@@ -408,24 +418,32 @@ export async function handle(request, env, now) {
         if (pid.length < 8 || secret.length < 16) return reply({ error: "bad request" }, 400);
         const name = cleanName(body.name) || "Ninja";
         const mode = cleanInputMode(body.input_mode);
+        const favChar = body.fav_char ? cleanCharId(body.fav_char) : null;
         const hash = await sha256Hex(secret);
         const existing = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
         if (existing) {
             if (existing.auth_hash !== hash) return reply({ error: "unauthorized" }, 403);
-            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, updated = ? WHERE player_id = ?")
-                .bind(name, mode, now, pid).run();
+            const nextChar = favChar || existing.fav_char || "naruto";
+            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, fav_char = ?, updated = ? WHERE player_id = ?")
+                .bind(name, mode, nextChar, now, pid).run();
             const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > ? OR (points = ? AND wins > ?)")
                 .bind(existing.points, existing.points, existing.wins).first();
             return reply({
                 player_id: pid, name, points: existing.points, wins: existing.wins, losses: existing.losses,
-                streak: existing.streak, input_mode: mode, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(existing.points),
+                streak: existing.streak, input_mode: mode, fav_char: nextChar,
+                fav_char_lvl: existing.fav_char_lvl || 1, fav_char_xp: existing.fav_char_xp || 0,
+                rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(existing.points),
             });
         }
         if (!checkRate(ip, now, "profile", 10)) return reply({ error: "busy" }, 429);
-        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?)")
-            .bind(pid, hash, name, mode, now).run();
+        const initChar = favChar || "naruto";
+        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?, 1, 0, ?)")
+            .bind(pid, hash, name, mode, initChar, now).run();
         const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > 1000 OR (points = 1000 AND wins > 0)").first();
-        return reply({ player_id: pid, name, points: 1000, wins: 0, losses: 0, streak: 0, input_mode: mode, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000) });
+        return reply({
+            player_id: pid, name, points: 1000, wins: 0, losses: 0, streak: 0, input_mode: mode,
+            fav_char: initChar, fav_char_lvl: 1, fav_char_xp: 0, rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000),
+        });
     }
 
     if (what === "ranked/report") {
@@ -483,10 +501,12 @@ export async function handle(request, env, now) {
         const lPts = Math.max(0, loser.points - loss);
         const p1Delta = p1Won ? gain : -loss;
         const p2Delta = p1Won ? -loss : gain;
-        await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, updated = ? WHERE player_id = ?")
-            .bind(wPts, now, winner.player_id).run();
-        await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, updated = ? WHERE player_id = ?")
-            .bind(lPts, now, loser.player_id).run();
+        const wXp = (winner.fav_char_xp || 0) + 120;
+        const lXp = (loser.fav_char_xp || 0) + 45;
+        await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, fav_char_xp = ?, fav_char_lvl = ?, updated = ? WHERE player_id = ?")
+            .bind(wPts, wXp, charLevelFromXp(wXp), now, winner.player_id).run();
+        await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, fav_char_xp = ?, fav_char_lvl = ?, updated = ? WHERE player_id = ?")
+            .bind(lPts, lXp, charLevelFromXp(lXp), now, loser.player_id).run();
         await env.DB.prepare("UPDATE hl_matches SET winner_id = ?, p1_delta = ?, p2_delta = ?, resolved = 1 WHERE match_id = ?")
             .bind(winner.player_id, p1Delta, p2Delta, matchId).run();
         return reply({

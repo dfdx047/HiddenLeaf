@@ -24,6 +24,9 @@ object OnlineAdvanced {
         val streak: Int,
         val rank: Int,
         val tier: String,
+        val favChar: String = "naruto",
+        val favCharLvl: Int = 1,
+        val favCharXp: Int = 0,
     )
 
     data class LeaderboardEntry(
@@ -36,6 +39,8 @@ object OnlineAdvanced {
         val streak: Int,
         val inputMode: String,
         val tier: String,
+        val favChar: String = "naruto",
+        val favCharLvl: Int = 1,
     )
 
     data class LobbyMember(val id: String, val name: String, val role: String)
@@ -67,13 +72,21 @@ object OnlineAdvanced {
         return id to secret
     }
 
-    suspend fun syncProfile(context: Context, server: String, name: String, inputMode: String): RankedProfile = withContext(Dispatchers.IO) {
+    fun savedFavChar(context: Context): String =
+        context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).getString("fav_char", "naruto") ?: "naruto"
+
+    fun saveFavChar(context: Context, charId: String) {
+        context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).edit().putString("fav_char", charId).apply()
+    }
+
+    suspend fun syncProfile(context: Context, server: String, name: String, inputMode: String, favChar: String = savedFavChar(context)): RankedProfile = withContext(Dispatchers.IO) {
         val (pid, secret) = identity(context)
         val r = postJson(server, "/v1/profile", JSONObject()
             .put("player_id", pid)
             .put("secret", secret)
             .put("name", Online.cleanName(name).ifEmpty { "Ninja" })
-            .put("input_mode", inputMode))
+            .put("input_mode", inputMode)
+            .put("fav_char", favChar))
         RankedProfile(
             playerId = r.optString("player_id", pid),
             name = r.optString("name", name),
@@ -83,6 +96,9 @@ object OnlineAdvanced {
             streak = r.optInt("streak", 0),
             rank = r.optInt("rank", 1),
             tier = r.optString("tier", "Genin"),
+            favChar = r.optString("fav_char", favChar),
+            favCharLvl = r.optInt("fav_char_lvl", 1),
+            favCharXp = r.optInt("fav_char_xp", 0),
         )
     }
 
@@ -110,6 +126,8 @@ object OnlineAdvanced {
                     streak = o.optInt("streak", 0),
                     inputMode = o.optString("input_mode", "any"),
                     tier = o.optString("tier", "Genin"),
+                    favChar = o.optString("fav_char", "naruto"),
+                    favCharLvl = o.optInt("fav_char_lvl", 1),
                 )
             }
         } catch (_: Exception) {
