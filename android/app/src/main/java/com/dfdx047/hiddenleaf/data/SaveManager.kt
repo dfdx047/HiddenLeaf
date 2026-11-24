@@ -60,11 +60,24 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
         } else {
             makeCleanSlot()
         }
-        // Apply 100% unlocks matching hl_game.cpp unlockEverything()
+        // Apply full 100% unlocks matching UN5's sub_001E9* save tables (characters, awakenings/transformations, stages, jutsus, collection, max Ryo)
+        // 0x34..0x37: Max Ryo (99,999,999 = 0x05F5E0FF)
+        data[0x34] = 0xFF.toByte(); data[0x35] = 0xE0.toByte(); data[0x36] = 0xF5.toByte(); data[0x37] = 0x05.toByte()
+        // 0x38..0x907: character & linked-partner unlock matrix
         for (i in 0x38 until 0x38 + 0x8D0) data[i] = 0xFF.toByte()
-        for (i in 0x909 until 0x971) data[i] = 3
+        // 0x909..0x967: all characters unlocked + seen (3)
+        for (i in 0x909 until 0x968) data[i] = 3
+        // 0x968..0x96F (save+8+0x960): 64-bit starting transformations / awakenings bitset (0xFF = all unlocked!)
+        for (i in 0x968 until 0x970) data[i] = 0xFF.toByte()
+        // 0x970..0x98F (save+8+0x968): all stages & extras
+        for (i in 0x970 until 0x990) data[i] = 3
+        // 0x990..0xB6C: Figures, Music, Voices, Ultimate Jutsus, Movies, Diorama
         for (i in 0x990 until 0xB6D) if ((data[i].toInt() and 0xFF) < 3) data[i] = 3
-        // Progress counter (0x6E = 110)
+        // 0xDF4..0xDF7 (save+8+0xDEC): 32-bit extra unlocks bitset
+        for (i in 0xDF4 until 0xDF8) data[i] = 0xFF.toByte()
+        // 0x130C..0x138B (save+8+0x1304): jutsus, abilities & shop items
+        for (i in 0x130C until 0x138C) if ((data[i].toInt() and 0xFF) < 3) data[i] = 3
+        // 0xE68..0xE6B: story progress counter (0x6E = 110, 100% clear)
         data[0xE68] = 0x6E; data[0xE69] = 0; data[0xE6A] = 0; data[0xE6B] = 0
         // Recompute UN5 16-bit checksum: sum of bytes [0..1] + [4..9215], stored little-endian at [2..3]
         var sum = (data[0].toInt() and 0xFF) + (data[1].toInt() and 0xFF)

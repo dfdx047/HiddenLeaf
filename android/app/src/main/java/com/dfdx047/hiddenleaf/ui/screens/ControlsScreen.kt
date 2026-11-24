@@ -202,27 +202,14 @@ internal fun ControlsContent(
 
         if (mobile) TouchProSection(c, onChange = onTouch, onEditLayout = { editing = true })
 
-        SectionCard(stringResource(R.string.special_one), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
-            val specialOn = (engine[EngineSettings.SPECIAL_ONE] ?: 0) != 0
-            ToggleRow(stringResource(R.string.special_one), stringResource(R.string.special_one_text), specialOn) {
-                onSetting(EngineSettings.SPECIAL_ONE, if (it) 1 else 0)
-            }
-            if (specialOn) {
-                Text(stringResource(R.string.special_button), style = MaterialTheme.typography.titleSmall)
-                ChipRow(
-                    options = listOf("○" to 0x20, "□" to 0x80, "△" to 0x10, "✕" to 0x40, "L1" to 0x04, "R1" to 0x08, "L2" to 0x01, "R2" to 0x02),
-                    selected = engine[EngineSettings.SPECIAL_BUTTON] ?: 0x20,
-                    onSelect = { onSetting(EngineSettings.SPECIAL_BUTTON, it) },
-                )
-                Text(stringResource(R.string.special_button_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(stringResource(R.string.mash_multiplier), style = MaterialTheme.typography.titleSmall)
-                ChipRow(
-                    options = listOf("1x" to 100, "1,25x" to 125, "1,5x" to 150, "1,65x" to 165, "2x" to 200),
-                    selected = engine[EngineSettings.MASH_PERCENT] ?: 100,
-                    onSelect = { onSetting(EngineSettings.MASH_PERCENT, it) },
-                )
-                Text(stringResource(R.string.mash_multiplier_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        SectionCard(stringResource(R.string.gp_assists), NinjaIcons.Kunai, accent = Konoha.ChakraAmber) {
+            Text(stringResource(R.string.mash_multiplier), style = MaterialTheme.typography.titleSmall)
+            ChipRow(
+                options = listOf("1x" to 100, "1,25x" to 125, "1,5x" to 150, "1,65x" to 165, "2x" to 200),
+                selected = engine[EngineSettings.MASH_PERCENT] ?: 100,
+                onSelect = { onSetting(EngineSettings.MASH_PERCENT, it) },
+            )
+            Text(stringResource(R.string.mash_multiplier_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         MacroSection(c, onTouch, onEdit = { editMacro = it })

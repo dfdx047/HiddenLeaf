@@ -57,6 +57,9 @@ namespace
     constexpr long long kSessionMaxAge = 180;
 
     bool g_active = false;
+    bool g_trainingFast = false;
+    std::atomic<uint32_t> g_trainingTick{0};
+    constexpr uint32_t kTrainingEnd = 4660u; // right on Free Battle 1P vs CPU Character Select (before P2 START at 4700)
     std::string g_root;
     SessionFile g_file;
     MatchSession g_match;
@@ -265,6 +268,28 @@ namespace
         std::memcpy(p2, two, 6);
     }
 
+    void onTrainingVsync(PS2Runtime *runtime, uint64_t tick)
+    {
+        if (g_prevVsync)
+            g_prevVsync(runtime, tick);
+        const uint32_t f = static_cast<uint32_t>(tick);
+        g_trainingTick.store(f, std::memory_order_relaxed);
+        if (f < kTrainingEnd)
+        {
+            const uint16_t a = entryButtons(f, true);
+            const uint8_t one[6] = {static_cast<uint8_t>(a), static_cast<uint8_t>(a >> 8), 0x80u, 0x80u, 0x80u, 0x80u};
+            const uint8_t rest[6] = {0u, 0u, 0x80u, 0x80u, 0x80u, 0x80u};
+            g_pads[0].store(pack(one), std::memory_order_release);
+            g_pads[1].store(pack(rest), std::memory_order_release);
+            g_padsOn.store(true, std::memory_order_release);
+        }
+        else if (g_padsOn.load(std::memory_order_relaxed))
+        {
+            g_padsOn.store(false, std::memory_order_release);
+            hl_spu2_mute(false);
+        }
+    }
+
     void onVsync(PS2Runtime *runtime, uint64_t tick)
     {
         if (g_prevVsync)
@@ -326,9 +351,30 @@ bool hl_online::active() { return g_active; }
 bool hl_online::setup(const std::string &root)
 {
     const std::string dir = root + "/online", path = dir + "/session.txt";
+    const std::string trainPath = dir + "/training.txt";
     std::error_code error;
     if (!std::filesystem::exists(path, error))
+    {
+        // Training Mode while queuing: fast-forward boot & menus directly to Free Battle Character Select!
+        if (std::filesystem::exists(trainPath, error))
+        {
+            std::filesystem::remove(trainPath, error);
+            g_trainingFast = true;
+            g_trainingTick.store(0u, std::memory_order_relaxed);
+            if (!std::getenv("HL_FAST_UNTIL"))
+                setenv("HL_FAST_UNTIL", std::to_string(kTrainingEnd).c_str(), 1);
+            hl_spu2_mute(true);
+            const uint8_t rest[6] = {0, 0, 0x80, 0x80, 0x80, 0x80};
+            g_pads[0].store(pack(rest));
+            g_pads[1].store(pack(rest));
+            g_padsOn.store(true);
+            g_prevVsync = g_hlVsyncHook;
+            g_hlVsyncHook = &onTrainingVsync;
+            g_hlPadPortHook = &padPortHook;
+            log("online: training fast-entry enabled (skipping straight to Character Select)");
+        }
         return false;
+    }
     const std::string text = readFile(path);
     std::filesystem::rename(path, dir + "/session.used.txt", error); // (once: the next start is an ordinary one)
     SessionFile file;
@@ -398,7 +444,14 @@ bool hl_online::setup(const std::string &root)
 extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_OnlineBridge_nativeStatus(JNIEnv *env, jclass)
 {
     if (!g_active)
+    {
+        if (g_trainingFast)
+        {
+            const std::string s = "phase=training;field=" + std::to_string(g_trainingTick.load(std::memory_order_relaxed));
+            return env->NewStringUTF(s.c_str());
+        }
         return env->NewStringUTF("");
+    }
     std::lock_guard<std::mutex> lock(g_statusMutex);
     return env->NewStringUTF(g_status.c_str());
 }

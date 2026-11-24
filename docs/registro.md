@@ -61,6 +61,17 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 06:49: Correções de polimento pós-testes reais nos 3 aparelhos
+
+- **Toque nativo nos menus (migração v3 → v4):** corrigido `TouchConfig.fromJson()` que mantinha `menuGestures: false` em instalações antigas (como o Mi A3) e reduzido limiar de arraste de `26 dp` → `18 dp` em `NinjaPadView.kt`. Verificado ao vivo no Mi A3 deslizando `ENGLISH` → `FRANÇAIS` sem D-pad na tela.
+- **Seleção de personagem cortada após sair de luta:** removido `s_tagFullWidth` e reduzido `s_targets` de 32 → 8 em `hl_native.cpp`, adicionando `hl_native::resetWideTargets()` na transição `wideCamera true → false` em `hl_gsx.cpp` (evita FBPs antigos da luta vazarem para retratos dos personagens).
+- **Save 100% com Transformações (Awakenings) desbloqueadas:** extraídos os offsets reais das funções `sub_001E9*` do binário recompilado e aplicados em `SaveManager.kt` e `hl_game.cpp`: bitset 64-bit de transformações iniciais (`0x968..0x96F = 0xFF`), stages (`0x970..0x98F = 3`), unlocks extras (`0xDF4..0xDF7 = 0xFF`), jutsus/itens (`0x130C..0x138B = 3`) e Max Ryo (`0x34 = 99.999.999`).
+- **Mod UN6 A35 recompilado:** `libun5_un6_a35.so` e `libun5_un6_a35_v80.so` (Mi A3) recompilados junto com `libbt4gsx.so`, `libun5.so` e `libun5_v80.so`.
+- **Removido "Especial com um botão"** de `GameMenu.kt` e `ControlsScreen.kt`.
+- **Menu Online in-game (`OnlineMenu.kt`) + Rankeada estilizada (`OnlineScreen.kt`):** ambos agora trazem **Rankeada & Top 100 Global** com emblemas desenhados por patente (*Genin* 🍃 → *Chunin* ⚔ → *Jonin* ✦ → *ANBU* ◈ → *Sannin* ★ → *Kage* ♛), medalhas 🥇🥈🥉, RP, V/D, winrate e streak; **Sala Personalizada (2–8, Rei da Mesa) / Espectador**; **Separação Toque vs Controle** e **Treinar enquanto procura**.
+- **Treinar enquanto procura pulando direto para Seleção de Personagem:** adicionado `training.txt` fast-entry em `hl_online.cpp` + `training_ui.json` cross-process em `TrainingQueue.kt` com tela de loading **"Modo Treino"** (barra de progresso). Verificado no RG Cube caindo direto na Seleção de Personagem (`1P vs COM`) com o selo *"Procurando oponente durante o treino…"*.
+- **Servidor local de teste ao vivo (`online/worker/dev_server.mjs`):** servidor real do `worker.js` na porta 8787 populado com jogadores ranqueados para validação em tempo real nos aparelhos.
+
 ### 2026-11-24 02:12: Fase 8 — Modo Online avançado: Rankeada + Top 100 Global, Salas Personalizadas (2–8), Espectador e Treino na Fila
 
 - **Worker Cloudflare (`online/worker/worker.js`, `schema.sql`, `test.mjs`):**

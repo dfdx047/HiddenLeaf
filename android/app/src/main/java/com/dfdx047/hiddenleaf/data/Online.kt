@@ -162,8 +162,12 @@ object Online {
 
     private fun opts(o: JSONObject?) = Opts(o?.optInt("delay", 0)?.coerceIn(0, 4) ?: 0, o?.optBoolean("relay", true) ?: true)
 
+    fun isAllowedServer(server: String): Boolean =
+        !isPlaceholder(server) && (server.startsWith("https://") ||
+            server.startsWith("http://192.168.") || server.startsWith("http://10.") || server.startsWith("http://127.0.0.1"))
+
     private fun post(server: String, path: String, body: JSONObject): JSONObject {
-        if (!server.startsWith("https://") || isPlaceholder(server)) throw Failure("server")
+        if (!isAllowedServer(server)) throw Failure("server")
         val c = URL(server + path).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"

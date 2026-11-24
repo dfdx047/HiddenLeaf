@@ -87,7 +87,7 @@ object OnlineAdvanced {
     }
 
     suspend fun fetchLeaderboard(server: String, mode: String = "all", limit: Int = 100): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
-        if (!server.startsWith("https://") || Online.isPlaceholder(server)) return@withContext emptyList()
+        if (!Online.isAllowedServer(server)) return@withContext emptyList()
         val url = "$server/v1/leaderboard?limit=$limit&mode=${URLEncoder.encode(mode, "UTF-8")}"
         val c = URL(url).openConnection() as HttpURLConnection
         try {
@@ -201,7 +201,7 @@ object OnlineAdvanced {
     }
 
     private fun postJson(server: String, path: String, body: JSONObject): JSONObject {
-        if (!server.startsWith("https://") || Online.isPlaceholder(server)) throw Online.Failure("server")
+        if (!Online.isAllowedServer(server)) throw Online.Failure("server")
         val c = URL(server + path).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"

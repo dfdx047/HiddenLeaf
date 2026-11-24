@@ -510,6 +510,7 @@ namespace
 						dumpVsync(s_packet[0]);
 					hl_native::vsync();
 					{
+						const bool prevWide = g_wideCurrent;
 						const uint32_t r = g_wideRead.load(std::memory_order_relaxed);
 						const uint32_t w = g_wideWrite.load(std::memory_order_acquire);
 						if (r != w)
@@ -521,6 +522,9 @@ namespace
 						{
 							g_wideCurrent = g_bt4WideCamera.load(std::memory_order_relaxed);
 						}
+						// Fight -> Menu/Character Select transition: clear stale fight render target FBPs so character portraits are never falsely flagged as framebuffer copies
+						if (prevWide && !g_wideCurrent)
+							hl_native::resetWideTargets();
 					}
 					hashStats();
 					dumpTakeAsked();

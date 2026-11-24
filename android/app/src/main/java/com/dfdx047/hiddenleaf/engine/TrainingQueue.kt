@@ -16,14 +16,15 @@ import androidx.core.content.res.ResourcesCompat
 import com.dfdx047.hiddenleaf.R
 import com.dfdx047.hiddenleaf.data.GamePaths
 import com.dfdx047.hiddenleaf.data.Online
+import java.io.File
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.security.SecureRandom
 
 /**
- * Training Mode while queuing: lets the player practice offline inside GameActivity while a background thread
- * polls /v1/quick. When an opponent is found, a Konoha-styled banner slides in at the top so the player can
- * accept and jump straight into the online match (or decline and keep practicing).
+ * Training Mode while queuing: writes <root>/online/training.txt so the engine fast-forwards boot/logos/menus
+ * straight to Free Battle Character Select under a smooth loading screen, while a background thread polls /v1/quick.
+ * When an opponent is found, a Konoha banner slides in at the top to accept and jump straight into the online match.
  */
 object TrainingQueue {
     data class Request(
@@ -38,7 +39,46 @@ object TrainingQueue {
     @Volatile var pending: Request? = null
         private set
 
-    fun arm(req: Request) { pending = req }
+    fun arm(paths: GamePaths, req: Request) {
+        pending = req
+        runCatching {
+            val dir = File(paths.root, "online").apply { mkdirs() }
+            File(dir, "training.txt").writeText("1\n")
+            val json = org.json.JSONObject()
+                .put("server", req.server)
+                .put("name", req.name)
+                .put("fp", req.fp)
+                .put("inputMode", req.inputMode)
+                .put("delay", req.delay)
+                .put("relay", req.relay)
+                .put("at", System.currentTimeMillis() / 1000)
+            File(dir, "training_ui.json").writeText(json.toString())
+        }
+    }
+
+    /** Called in GameActivity's :game process to pick up the armed training queue request across processes. */
+    fun consume(paths: GamePaths): Request? {
+        pending?.let { pending = null; return it }
+        val f = File(paths.root, "online/training_ui.json")
+        if (!f.exists()) return null
+        val text = runCatching { f.readText() }.getOrNull()
+        runCatching { f.delete() }
+        if (text.isNullOrBlank()) return null
+        return runCatching {
+            val o = org.json.JSONObject(text)
+            val age = System.currentTimeMillis() / 1000 - o.optLong("at", 0L)
+            if (age !in -60..180) return null
+            Request(
+                server = o.getString("server"),
+                name = o.getString("name"),
+                fp = o.getString("fp"),
+                inputMode = o.optString("inputMode", "any"),
+                delay = o.optInt("delay", 0),
+                relay = o.optBoolean("relay", true),
+            )
+        }.getOrNull()
+    }
+
     fun clear() { pending = null }
 }
 
@@ -47,6 +87,9 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
     private var root: ViewGroup? = null
     private var badge: TextView? = null
     private var banner: View? = null
+    private var cover: View? = null
+    private var coverBar: View? = null
+    private var coverTrack: FrameLayout? = null
     private var socket: DatagramSocket? = null
     private var room: Online.Room? = null
     private val who = ByteArray(12).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
@@ -72,7 +115,76 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
             leftMargin = dp(8f).toInt(); topMargin = dp(6f).toInt()
         })
         badge = b
+        addLoadingCover(layout)
+        b.post(object : Runnable {
+            override fun run() {
+                if (!running) return
+                val st = OnlineBridge.parse(OnlineBridge.status())
+                if (st["phase"] == "training") {
+                    updateCover(st["field"]?.toIntOrNull() ?: 0)
+                    if (cover != null) b.postDelayed(this, 200)
+                } else {
+                    dismissCover()
+                }
+            }
+        })
         startWorker()
+    }
+
+    private fun addLoadingCover(layout: ViewGroup) {
+        val c = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF2A160A.toInt(), 0xFF120A05.toInt(), 0xFF2A160A.toInt()))
+            isClickable = true
+        }
+        c.addView(TextView(activity).apply {
+            gravity = Gravity.CENTER
+            text = "Modo Treino"
+            typeface = font(R.font.shojumaru_regular, Typeface.DEFAULT_BOLD)
+            textSize = 32f
+            setTextColor(0xFFFFE6A0.toInt())
+            setShadowLayer(4f, 3f, 3f, 0xFF000000.toInt())
+        })
+        c.addView(TextView(activity).apply {
+            gravity = Gravity.CENTER
+            text = activity.getString(R.string.online_training_searching)
+            typeface = font(R.font.kanit_semibold, Typeface.DEFAULT_BOLD)
+            textSize = 15f
+            setTextColor(0xFFEDE6DE.toInt())
+            setPadding(0, dp(4f).toInt(), 0, dp(14f).toInt())
+        })
+        val track = FrameLayout(activity).apply {
+            background = GradientDrawable().apply { setColor(0xFF4A2A12.toInt()); cornerRadius = dp(6f); setStroke(dp(2f).toInt(), 0xFF000000.toInt()) }
+        }
+        val bar = View(activity).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFFE2560B.toInt(), 0xFFFF7A1A.toInt())).apply { cornerRadius = dp(6f) }
+        }
+        track.addView(bar, FrameLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT))
+        c.addView(track, LinearLayout.LayoutParams(dp(300f).toInt(), dp(14f).toInt()))
+        layout.addView(c, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        cover = c
+        coverBar = bar
+        coverTrack = track
+    }
+
+    private fun updateCover(field: Int) {
+        if (field >= TRAINING_END) {
+            dismissCover()
+            return
+        }
+        val w = coverTrack?.width ?: 0
+        coverBar?.let { b ->
+            val lp = b.layoutParams
+            lp.width = (w * (field.coerceIn(0, TRAINING_END).toFloat() / TRAINING_END)).toInt()
+            b.layoutParams = lp
+        }
+    }
+
+    private fun dismissCover() {
+        val c = cover ?: return
+        cover = null
+        c.animate().alpha(0f).setDuration(350).withEndAction { (c.parent as? ViewGroup)?.removeView(c) }.start()
     }
 
     private fun startWorker() {
@@ -125,6 +237,7 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
     private fun showFound(session: Online.Session) {
         activity.runOnUiThread {
             val layout = root ?: return@runOnUiThread
+            dismissCover()
             badge?.visibility = View.GONE
             val card = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -182,5 +295,9 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
         val r = room
         room = null
         if (r != null) Thread { Online.leave(req.server, r) }.start()
+    }
+
+    companion object {
+        private const val TRAINING_END = 4660
     }
 }

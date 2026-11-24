@@ -68,6 +68,7 @@ import com.dfdx047.hiddenleaf.data.Lan
 import com.dfdx047.hiddenleaf.data.LobbyState
 import com.dfdx047.hiddenleaf.data.OnlineLobby
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * "Naruto Online" in the game's own Mode Select (the developer, 2026-11-14): the online menu inside the game, over the game's
@@ -124,7 +125,7 @@ class OnlineMenuHost(context: Context, private val lobby: OnlineLobby, private v
     }
 }
 
-enum class OnlinePage { MAIN, CODE, LAN }
+enum class OnlinePage { MAIN, CODE, LAN, RANKED, LOBBY }
 
 // The Mode Select's look: dark wood boards with a carved border, cream-gold lettering outlined in brown, the orange of the
 // game's highlight, a blue-grey help bar at the bottom.
@@ -174,6 +175,8 @@ private fun OnlineMenu(lobby: OnlineLobby, fp: String, page: OnlinePage, go: (On
                                 OnlinePage.MAIN -> MainBoards(lobby, fp, go, start)
                                 OnlinePage.CODE -> CodePad(onJoin = { code -> lobby.join(code, fp, start) })
                                 OnlinePage.LAN -> LanBoards(lobby, fp, start)
+                                OnlinePage.RANKED -> RankedBoards(lobby)
+                                OnlinePage.LOBBY -> CustomLobbyBoards(lobby, fp)
                             }
                             LobbyState.LanSearching -> LanFound(lobby, fp, start, back)
                             else -> Status(s, back)
@@ -191,16 +194,154 @@ private fun OnlineMenu(lobby: OnlineLobby, fp: String, page: OnlinePage, go: (On
 @Composable
 private fun MainBoards(lobby: OnlineLobby, fp: String, go: (OnlinePage) -> Unit, start: () -> Unit) {
     val first = remember { FocusRequester() }
+    val prefs by lobby.prefs.state.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val modeLabel = when (prefs.inputMode) {
+        "touch" -> stringResource(R.string.online_input_touch)
+        "gamepad" -> stringResource(R.string.online_input_gamepad)
+        else -> stringResource(R.string.online_input_any)
+    }
     Column(
         Modifier.widthIn(max = 520.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Board(stringResource(R.string.online_quick), stringResource(R.string.online_quick_hint), Modifier.focusRequester(first)) { lobby.quick(fp, start) }
-        Board(stringResource(R.string.online_create), stringResource(R.string.ingame_online_create_hint)) { lobby.create(fp, start) }
-        Board(stringResource(R.string.ingame_online_join), stringResource(R.string.ingame_online_join_hint)) { go(OnlinePage.CODE) }
-        Board(stringResource(R.string.online_mode_lan), stringResource(R.string.ingame_online_lan_hint)) { go(OnlinePage.LAN) }
+        Board(stringResource(R.string.online_quick), stringResource(R.string.online_quick_hint), Modifier.focusRequester(first), small = true) { lobby.quick(fp, start) }
+        Board(stringResource(R.string.online_train_while_queue), stringResource(R.string.online_training_searching), small = true) {
+            val paths = com.dfdx047.hiddenleaf.data.GamePaths(ctx)
+            TrainingQueue.arm(
+                paths,
+                TrainingQueue.Request(
+                    server = com.dfdx047.hiddenleaf.data.Online.cleanServer(prefs.server),
+                    name = prefs.name,
+                    fp = fp,
+                    inputMode = com.dfdx047.hiddenleaf.data.Online.effectiveInputMode(prefs.inputMode),
+                    delay = prefs.delay,
+                    relay = prefs.relay,
+                )
+            )
+            start()
+        }
+        Board(stringResource(R.string.online_ranked_board_title), "Genin → Kage · Top 100", small = true) { go(OnlinePage.RANKED) }
+        Board(stringResource(R.string.online_custom_lobby_title), "2–8P · Rei da Mesa · Espectador", small = true) { go(OnlinePage.LOBBY) }
+        Board(stringResource(R.string.online_create), stringResource(R.string.ingame_online_create_hint), small = true) { lobby.create(fp, start) }
+        Board(stringResource(R.string.ingame_online_join), stringResource(R.string.ingame_online_join_hint), small = true) { go(OnlinePage.CODE) }
+        Board(stringResource(R.string.online_mode_lan), stringResource(R.string.ingame_online_lan_hint), small = true) { go(OnlinePage.LAN) }
+        Board("${stringResource(R.string.online_input_mode)}: $modeLabel", null, small = true) {
+            val next = when (prefs.inputMode) { "any" -> "touch"; "touch" -> "gamepad"; else -> "any" }
+            lobby.update(prefs.copy(inputMode = next))
+        }
     }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+}
+
+@Composable
+private fun RankedBoards(lobby: OnlineLobby) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val prefs by lobby.prefs.state.collectAsState()
+    var profile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.RankedProfile?>(null) }
+    var entries by remember { mutableStateOf<List<com.dfdx047.hiddenleaf.data.OnlineAdvanced.LeaderboardEntry>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(prefs.server) {
+        loading = true
+        val srv = com.dfdx047.hiddenleaf.data.Online.cleanServer(prefs.server)
+        runCatching {
+            profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                ctx, srv, prefs.name, com.dfdx047.hiddenleaf.data.Online.effectiveInputMode(prefs.inputMode),
+            )
+        }
+        entries = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+        loading = false
+    }
+
+    Column(
+        Modifier.widthIn(max = 520.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(7.dp), horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.online_ranked_board_title), style = carved(18))
+        profile?.let { p ->
+            Plank {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    com.dfdx047.hiddenleaf.ui.screens.RankEmblem(p.tier, size = 38)
+                    Column {
+                        Text("${p.name} · #${p.rank} (${p.tier})", style = carved(16))
+                        Text("${p.points} RP · ${p.wins}V / ${p.losses}D" + (if (p.streak >= 2) " · 🔥${p.streak}" else ""), style = bodyStyle.copy(fontSize = 12.sp))
+                    }
+                }
+            }
+        }
+        if (loading) {
+            Pulse()
+        } else if (entries.isEmpty()) {
+            Text(stringResource(R.string.online_ranked_empty), style = bodyStyle, textAlign = TextAlign.Center)
+        } else {
+            for (e in entries.take(12)) {
+                val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
+                Row(
+                    Modifier.fillMaxWidth()
+                        .border(1.5.dp, if (e.rank <= 3) ORANGE else WOOD_EDGE, CutCornerShape(8.dp))
+                        .background(Brush.verticalGradient(listOf(WOOD_TOP, WOOD_BOTTOM)), CutCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(medal, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp), modifier = Modifier.width(30.dp))
+                    com.dfdx047.hiddenleaf.ui.screens.RankEmblem(e.tier, size = 26)
+                    Column(Modifier.weight(1f)) {
+                        Text(e.name, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp))
+                        Text("${e.tier} · ${e.wins}V/${e.losses}D", style = bodyStyle.copy(fontSize = 11.sp, color = CREAM.copy(alpha = 0.8f)))
+                    }
+                    Text("${e.points} RP", style = carved(15))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomLobbyBoards(lobby: OnlineLobby, fp: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val prefs by lobby.prefs.state.collectAsState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var cur by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.CustomLobby?>(null) }
+    var maxP by remember { mutableStateOf(4) }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        Modifier.widthIn(max = 520.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(7.dp), horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.online_custom_lobby_title), style = carved(17))
+        val active = cur
+        if (active != null) {
+            Plank { Text("Lobby #${active.code} (${active.members.size}/${active.maxPlayers})", style = carved(22)) }
+            for (m in active.members) {
+                Board("${m.name}  [${m.role.uppercase()}]", null, small = true, onClick = {})
+            }
+            Board(stringResource(R.string.online_custom_lobby_leave), null, small = true) {
+                scope.launch {
+                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.leaveLobby(ctx, com.dfdx047.hiddenleaf.data.Online.cleanServer(prefs.server), active.code)
+                    cur = null
+                }
+            }
+        } else {
+            Board("Máximo de jogadores: ${maxP}P", "Toque para alternar 2P / 4P / 6P / 8P", small = true) {
+                maxP = when (maxP) { 2 -> 4; 4 -> 6; 6 -> 8; else -> 2 }
+            }
+            Board(stringResource(R.string.online_custom_lobby_create), stringResource(R.string.online_custom_lobby_hint), small = true) {
+                err = null
+                scope.launch {
+                    runCatching {
+                        cur = com.dfdx047.hiddenleaf.data.OnlineAdvanced.createLobby(
+                            ctx, com.dfdx047.hiddenleaf.data.Online.cleanServer(prefs.server), prefs.name, fp, maxP, true,
+                            com.dfdx047.hiddenleaf.data.Online.effectiveInputMode(prefs.inputMode),
+                        )
+                    }.onFailure { err = it.message }
+                }
+            }
+            err?.let { Text(it, style = bodyStyle.copy(color = ORANGE)) }
+        }
+    }
 }
 
 @Composable

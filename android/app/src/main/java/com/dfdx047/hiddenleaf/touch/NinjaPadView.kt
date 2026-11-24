@@ -397,7 +397,7 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     private fun menuGesture(ev: MotionEvent): Boolean {
-        val slide = 26 * dp
+        val slide = 18 * dp
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 // the menu button and START stay buttons

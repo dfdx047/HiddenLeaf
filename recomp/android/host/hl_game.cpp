@@ -471,10 +471,22 @@ namespace
         if ((state[kSaveMatrix] & 3u) != 3u)
             return;
         std::memset(state + kSaveMatrix, 0xFF, kSaveMatrixBytes);
-        std::memset(state + kSaveRoster, 3, kSaveRosterEnd - kSaveRoster);
+        // 0x909..0x967: characters (3 = unlocked + seen); 0x968..0x96F (save+8+0x960): 64-bit starting transformations / awakenings bitset!
+        std::memset(state + kSaveRoster, 3, 0x968u - kSaveRoster);
+        std::memset(state + 0x968u, 0xFF, 8u);
+        // 0x970..0x98F (save+8+0x968): stages & extras
+        std::memset(state + 0x970u, 3, 0x20u);
         for (uint32_t i = kSaveTables; i < kSaveTablesEnd; ++i)
             if (state[i] < 3u)
                 state[i] = 3u;
+        // 0xDF4..0xDF7 (save+8+0xDEC): 32-bit extra unlocks bitset; 0x130C..0x138B (save+8+0x1304): jutsus/items
+        std::memset(state + 0xDF4u, 0xFF, 4u);
+        for (uint32_t i = 0x130Cu; i < 0x138Cu; ++i)
+            if (state[i] < 3u)
+                state[i] = 3u;
+        // 0x34: max Ryo (99,999,999 = 0x05F5E0FF)
+        const uint32_t maxRyo = 99999999u;
+        std::memcpy(state + 0x34u, &maxRyo, 4);
         uint32_t progress;
         std::memcpy(&progress, state + kSaveProgress, 4);
         if (progress < kSaveProgressMax)

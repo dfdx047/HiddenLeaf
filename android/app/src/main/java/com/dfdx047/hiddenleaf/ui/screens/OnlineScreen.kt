@@ -2,6 +2,8 @@ package com.dfdx047.hiddenleaf.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,7 +94,7 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
     val fileMods by vm.fileMods.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val ready = install is InstallState.Installed && vm.engineAvailable
-    val serverSet = prefs.server.startsWith("https://") && !Online.isPlaceholder(prefs.server)
+    val serverSet = Online.isAllowedServer(prefs.server)
     val idle = state is LobbyState.Idle || state is LobbyState.Failed
     // (online and local matches are base game only for now: the launcher's list, and the engine's own as a check)
     val modsOn = remember(fileMods) { fileMods.any { it.enabled } || Online.modsOn(vm.paths) }
@@ -150,6 +152,7 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
                     OutlinedButton(
                         onClick = {
                             com.dfdx047.hiddenleaf.engine.TrainingQueue.arm(
+                                vm.paths,
                                 com.dfdx047.hiddenleaf.engine.TrainingQueue.Request(
                                     server = Online.cleanServer(prefs.server),
                                     name = prefs.name,
@@ -459,12 +462,47 @@ private fun RankedAndLobbySection(
     var lobbyMax by remember { mutableStateOf(4) }
     var lobbyErr by remember { mutableStateOf<String?>(null) }
 
-    // Ranked & Top 100 Global card
+    // Auto-load ranked profile & Top 100 leaderboard when server is ready
+    LaunchedEffect(prefs.server, serverSet) {
+        if (!serverSet) return@LaunchedEffect
+        loadingRank = true
+        val srv = Online.cleanServer(prefs.server)
+        runCatching {
+            profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
+            )
+        }
+        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+        loadingRank = false
+    }
+
+    // Ranked & Top 100 Global card with Ninja tier emblems, medals, avatar circles & RP progress bar
     SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
         profile?.let { p ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("${p.tier} · #${p.rank}", style = MaterialTheme.typography.titleMedium, color = Konoha.ChakraAmber)
-                Text("${p.points} RP (${p.wins}V / ${p.losses}D)", style = MaterialTheme.typography.bodyMedium)
+            val tierColor = rankTierColor(p.tier)
+            val total = (p.wins + p.losses).coerceAtLeast(1)
+            val wr = (p.wins * 100) / total
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.cardColors(containerColor = tierColor.copy(alpha = 0.14f).compositeOver(Konoha.NightHigh)),
+                border = BorderStroke(1.5.dp, tierColor.copy(alpha = 0.65f)),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    RankEmblem(p.tier, size = 44)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(p.name, style = MaterialTheme.typography.titleMedium, color = Konoha.ScrollCream)
+                            Text("#${p.rank}", style = MaterialTheme.typography.labelLarge, color = tierColor)
+                        }
+                        Text(
+                            "${p.tier} · ${p.points} RP · ${p.wins}V / ${p.losses}D ($wr%)" +
+                                (if (p.streak >= 2) " · 🔥${p.streak}" else ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Konoha.ScrollCream.copy(alpha = 0.85f),
+                        )
+                    }
+                }
             }
         }
         FilledTonalButton(
@@ -478,7 +516,7 @@ private fun RankedAndLobbySection(
                             context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
                         )
                     }
-                    leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 20)
+                    leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
                     loadingRank = false
                 }
             },
@@ -489,11 +527,31 @@ private fun RankedAndLobbySection(
         if (leaderboard.isEmpty()) {
             Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            for (e in leaderboard.take(10)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("#${e.rank}", style = MaterialTheme.typography.labelLarge, color = Konoha.ChakraAmber, modifier = Modifier.width(34.dp))
-                    Text(e.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    Text("${e.tier} · ${e.points} RP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (e in leaderboard.take(15)) {
+                    val tc = rankTierColor(e.tier)
+                    val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
+                    val wr = if (e.wins + e.losses > 0) (e.wins * 100) / (e.wins + e.losses) else 0
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .background(if (e.rank <= 3) tc.copy(alpha = 0.12f) else Konoha.NightHigh.copy(alpha = 0.55f))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(34.dp))
+                        RankEmblem(e.tier, size = 28)
+                        Column(Modifier.weight(1f)) {
+                            Text(e.name, style = MaterialTheme.typography.bodyMedium, color = Konoha.ScrollCream)
+                            Text(
+                                "${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Konoha.ScrollCream.copy(alpha = 0.7f),
+                            )
+                        }
+                        Text("${e.points} RP", style = MaterialTheme.typography.titleSmall, color = tc)
+                    }
                 }
             }
         }
@@ -575,5 +633,36 @@ private fun RankedAndLobbySection(
             }
             lobbyErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
+    }
+}
+
+internal fun rankTierColor(tier: String): Color = when (tier) {
+    "Kage" -> Color(0xFFFF6D00)
+    "Sannin" -> Color(0xFFFFD54F)
+    "ANBU" -> Color(0xFFEF5350)
+    "Jonin" -> Color(0xFFAB47BC)
+    "Chunin" -> Color(0xFF42A5F5)
+    else -> Color(0xFF66BB6A)
+}
+
+@Composable
+internal fun RankEmblem(tier: String, size: Int = 34) {
+    val c = rankTierColor(tier)
+    val sym = when (tier) {
+        "Kage" -> "♛"
+        "Sannin" -> "★"
+        "ANBU" -> "◈"
+        "Jonin" -> "✦"
+        "Chunin" -> "⚔"
+        else -> "🍃"
+    }
+    Box(
+        Modifier.size(size.dp)
+            .clip(CircleShape)
+            .background(c.copy(alpha = 0.22f))
+            .border(1.5.dp, c, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(sym, color = c, fontSize = (size * 0.46f).sp)
     }
 }

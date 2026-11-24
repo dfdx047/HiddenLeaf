@@ -210,7 +210,7 @@ data class TouchConfig(
     fun placeOf(scene: PadScene, c: Ctl): Placement? = places["${scene.name}.${c.name}"] ?: PadDefaults.of(scene)[c]
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("version", 3)
+        put("version", 4)
         put("mode", mode.name)
         put("skin", skin.name)
         put("style", style.name)
@@ -281,7 +281,8 @@ data class TouchConfig(
                 autoMode = o.optBoolean("autoMode", true),
                 classicPlaces = classic,
                 macros = macros,
-                menuTouch = o.optBoolean("menuGestures", false),
+                // Migrate v1..v3 configs to native menu touch enabled by default (users can still toggle off in v4+)
+                menuTouch = if (o.optInt("version", 1) < 4) true else o.optBoolean("menuGestures", true),
                 showNames = o.optBoolean("showNames", false),
                 pro = o.optJSONObject("pro")?.let { ProTouch.fromJson(it) } ?: ProTouch(),
             )

@@ -110,7 +110,7 @@ class GameActivity : SDLActivity() {
         (SDLActivity.getContentView() as? ViewGroup)?.let { layout ->
             online?.attach(layout)
             if (online == null) {
-                TrainingQueue.pending?.let { req ->
+                TrainingQueue.consume(paths)?.let { req ->
                     trainingQueue = TrainingQueueOverlay(this, paths, req).also { it.attach(layout) }
                 }
             }
