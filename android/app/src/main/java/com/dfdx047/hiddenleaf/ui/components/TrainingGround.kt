@@ -1,12 +1,13 @@
 package com.dfdx047.hiddenleaf.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -17,6 +18,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import com.dfdx047.hiddenleaf.ui.theme.Konoha
 import kotlin.math.PI
@@ -46,16 +48,92 @@ fun TrainingGround(active: Boolean, modifier: Modifier = Modifier) {
             }
         }
     }
-    Canvas(modifier) {
-        val t = time.floatValue * if (active) 1f else 0.55f
-        val dim = if (active) 1f else 0.55f
-        sky(dim)
-        val posts = posts()
-        posts.forEach { drawPost(it, dim) }
-        ground(dim)
-        if (active) posts.indices.forEach { lane -> shurikenLane(t, lane, posts) }
-        leaves(t, dim)
-    }
+    Box(
+        modifier.graphicsLayer().drawWithCache {
+            val dim = if (active) 1f else 0.55f
+            val w = size.width
+            val h = size.height
+            val skyBrush = Brush.verticalGradient(
+                0f to Konoha.SasukeBlue.copy(alpha = 0.55f * dim),
+                0.55f to Konoha.SasukePurple.copy(alpha = 0.28f * dim),
+                1f to Konoha.NarutoOrangeDeep.copy(alpha = 0.42f * dim),
+            )
+            val sunCenter = Offset(w * 0.5f, h * 0.86f)
+            val sunRadius = (w * 0.45f).coerceAtLeast(1f)
+            val sunBrush = Brush.radialGradient(
+                0f to Konoha.ChakraAmber.copy(alpha = 0.55f * dim),
+                1f to Color.Transparent,
+                center = sunCenter,
+                radius = sunRadius,
+            )
+            val groundY = h * 0.80f
+            val groundBrush = Brush.verticalGradient(
+                0f to Konoha.LeeGreenDeep.copy(alpha = 0.85f * dim),
+                1f to Konoha.Night.copy(alpha = 0.9f),
+                startY = groundY, endY = h,
+            )
+            val pw = (w * 0.075f).coerceIn(h * 0.14f, h * 0.26f)
+            val posts = listOf(
+                Post(w * 0.12f, h * 0.18f, groundY, pw),
+                Post(w * 0.37f, h * 0.06f, groundY, pw * 1.08f),
+                Post(w * 0.63f, h * 0.12f, groundY, pw),
+                Post(w * 0.88f, h * 0.24f, groundY, pw * 0.94f),
+            )
+            val postBrushes = posts.map { p ->
+                val left = p.x - p.w / 2
+                Brush.horizontalGradient(
+                    0f to Konoha.WoodDark, 0.35f to Konoha.WoodLight, 0.7f to Konoha.Wood, 1f to Konoha.WoodDark,
+                    startX = left, endX = left + p.w,
+                )
+            }
+            val grainPaths = posts.map { p ->
+                val left = p.x - p.w / 2
+                val ph = p.bottom - p.top
+                val capH = p.w * 0.32f
+                Path().apply {
+                    for (k in 1..3) {
+                        val gx = left + p.w * (0.2f + 0.25f * k)
+                        moveTo(gx, p.top + capH)
+                        cubicTo(gx - p.w * 0.06f, p.top + ph * 0.35f, gx + p.w * 0.06f, p.top + ph * 0.65f, gx - p.w * 0.02f, p.bottom)
+                    }
+                }
+            }
+            val grassDark = Path().apply {
+                val n = 26
+                for (i in 0..n) {
+                    val x = w * i / n
+                    val tall = h * (0.025f + 0.02f * ((i * 7) % 5) / 4f)
+                    moveTo(x, groundY + 1f); lineTo(x + tall * 0.3f, groundY - tall)
+                }
+            }
+            val grassLight = Path().apply {
+                val n = 26
+                for (i in 0..n) {
+                    val x = w * i / n
+                    val tall = h * (0.025f + 0.02f * ((i * 7) % 5) / 4f)
+                    moveTo(x + 4f * density, groundY + 1f); lineTo(x + 2f * density - tall * 0.25f, groundY - tall * 0.8f)
+                }
+            }
+            val cornerRadius = CornerRadius(26f * density)
+            val grainColor = Konoha.WoodDark.copy(alpha = 0.45f * dim)
+            val grainStroke = Stroke(width = 1.2f * density)
+            val grassDarkStroke = Stroke(width = 2f * density, cap = StrokeCap.Round)
+            val grassLightStroke = Stroke(width = 1.5f * density, cap = StrokeCap.Round)
+            val scratchPath = Path()
+
+            onDrawBehind {
+                val t = time.floatValue * if (active) 1f else 0.55f
+                drawRoundRect(skyBrush, cornerRadius = cornerRadius)
+                drawCircle(sunBrush, radius = sunRadius, center = sunCenter)
+                posts.forEachIndexed { idx, p -> drawPostCached(p, postBrushes[idx], grainPaths[idx], grainColor, grainStroke, dim) }
+                drawRect(groundBrush, topLeft = Offset(0f, groundY), size = Size(w, h - groundY))
+                drawPath(grassDark, Konoha.LeeGreen.copy(alpha = 0.7f * dim), style = grassDarkStroke)
+                drawPath(grassLight, Konoha.LeeGreenLight.copy(alpha = 0.45f * dim), style = grassLightStroke)
+                if (active) posts.indices.forEach { lane -> shurikenLane(t, lane, posts) }
+                leaves(t, dim, scratchPath)
+            }
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -123,47 +201,23 @@ private fun DrawScope.ground(dim: Float) {
     }
 }
 
-/** A cut log standing upright: bark gradient, grain, two rope bands, and the cut end on top. */
-private fun DrawScope.drawPost(p: Post, dim: Float) {
+/** A cut log standing upright: pre-cached bark gradient & grain path, two rope bands, and the cut end on top. */
+private fun DrawScope.drawPostCached(p: Post, bark: Brush, grainPath: Path, grainColor: Color, grainStroke: Stroke, dim: Float) {
     val left = p.x - p.w / 2
     val height = p.bottom - p.top
     val capH = p.w * 0.32f
-    // shadow on the ground
     drawOval(Color.Black.copy(alpha = 0.28f * dim), topLeft = Offset(left - p.w * 0.25f, p.bottom - capH * 0.4f), size = Size(p.w * 1.5f, capH * 0.8f))
-    // body
-    drawRect(
-        Brush.horizontalGradient(
-            0f to Konoha.WoodDark,
-            0.35f to Konoha.WoodLight,
-            0.7f to Konoha.Wood,
-            1f to Konoha.WoodDark,
-            startX = left, endX = left + p.w,
-        ),
-        topLeft = Offset(left, p.top + capH / 2),
-        size = Size(p.w, height - capH / 2),
-        alpha = dim,
-    )
-    // grain
-    val grain = Konoha.WoodDark.copy(alpha = 0.45f * dim)
-    for (k in 1..3) {
-        val gx = left + p.w * (0.2f + 0.25f * k)
-        val path = Path().apply {
-            moveTo(gx, p.top + capH)
-            cubicTo(gx - p.w * 0.06f, p.top + height * 0.35f, gx + p.w * 0.06f, p.top + height * 0.65f, gx - p.w * 0.02f, p.bottom)
-        }
-        drawPath(path, grain, style = Stroke(width = 1.2f * density))
-    }
-    // rope bands
+    drawRect(bark, topLeft = Offset(left, p.top + capH / 2), size = Size(p.w, height - capH / 2), alpha = dim)
+    drawPath(grainPath, grainColor, style = grainStroke)
     for (fy in listOf(0.34f, 0.46f)) {
         val by = p.top + height * fy
         drawRect(Konoha.ScrollCream.copy(alpha = 0.75f * dim), topLeft = Offset(left - 1f, by), size = Size(p.w + 2f, p.w * 0.11f))
         drawRect(Konoha.WoodDark.copy(alpha = 0.35f * dim), topLeft = Offset(left - 1f, by + p.w * 0.08f), size = Size(p.w + 2f, p.w * 0.03f))
     }
-    // the cut end, with its rings
     val capTop = Offset(left, p.top)
     drawOval(Konoha.WoodLight.copy(alpha = dim), topLeft = capTop, size = Size(p.w, capH))
-    drawOval(Konoha.ChakraAmber.copy(alpha = 0.35f * dim), topLeft = capTop + Offset(p.w * 0.18f, capH * 0.18f), size = Size(p.w * 0.64f, capH * 0.64f), style = Stroke(1.2f * density))
-    drawOval(Konoha.Wood.copy(alpha = 0.8f * dim), topLeft = capTop + Offset(p.w * 0.36f, capH * 0.36f), size = Size(p.w * 0.28f, capH * 0.28f), style = Stroke(1.2f * density))
+    drawOval(Konoha.ChakraAmber.copy(alpha = 0.35f * dim), topLeft = capTop + Offset(p.w * 0.18f, capH * 0.18f), size = Size(p.w * 0.64f, capH * 0.64f), style = grainStroke)
+    drawOval(Konoha.Wood.copy(alpha = 0.8f * dim), topLeft = capTop + Offset(p.w * 0.36f, capH * 0.36f), size = Size(p.w * 0.28f, capH * 0.28f), style = grainStroke)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -262,34 +316,30 @@ private fun DrawScope.splinters(at: Offset, r: Float, f: Float, lane: Int, k: In
 }
 
 /** A four-bladed throwing star with a ring in the middle. */
+private val shurikenBladePath = Path()
+private val shurikenSteel = Color(0xFFC5CCD8)
+private val shurikenRim = Color(0xFF2B3040)
+
 fun DrawScope.drawShuriken(center: Offset, radius: Float, degrees: Float, alpha: Float = 1f) {
     rotate(degrees, center) {
-        val blades = Path()
+        val blades = shurikenBladePath
+        blades.reset()
         for (i in 0 until 4) {
             val a = i * PI.toFloat() / 2f
-            val tip = Offset(center.x + cos(a) * radius, center.y + sin(a) * radius)
+            val tipX = center.x + cos(a) * radius
+            val tipY = center.y + sin(a) * radius
             val l = a + PI.toFloat() / 4f
             val rr = radius * 0.30f
-            val side = Offset(center.x + cos(l) * rr, center.y + sin(l) * rr)
             val back = a - PI.toFloat() / 4f
-            val side2 = Offset(center.x + cos(back) * rr, center.y + sin(back) * rr)
-            blades.moveTo(side2.x, side2.y)
-            // a curved cutting edge on one side, straight on the other: it reads as spinning
-            blades.quadraticTo(center.x + cos(a - 0.35f) * radius * 0.75f, center.y + sin(a - 0.35f) * radius * 0.75f, tip.x, tip.y)
-            blades.lineTo(side.x, side.y)
+            blades.moveTo(center.x + cos(back) * rr, center.y + sin(back) * rr)
+            blades.quadraticTo(center.x + cos(a - 0.35f) * radius * 0.75f, center.y + sin(a - 0.35f) * radius * 0.75f, tipX, tipY)
+            blades.lineTo(center.x + cos(l) * rr, center.y + sin(l) * rr)
             blades.lineTo(center.x, center.y)
             blades.close()
         }
-        drawPath(
-            blades,
-            Brush.linearGradient(
-                listOf(Color(0xFFE9EEF5), Konoha.HeadbandSteel, Color(0xFF5B6475)),
-                start = Offset(center.x - radius, center.y - radius), end = Offset(center.x + radius, center.y + radius),
-            ),
-            alpha = alpha,
-        )
-        drawPath(blades, Color(0xFF2B3040).copy(alpha = 0.8f * alpha), style = Stroke(width = (radius * 0.06f).coerceAtLeast(1f)))
-        drawCircle(Color(0xFF2B3040).copy(alpha = alpha), radius = radius * 0.2f, center = center)
+        drawPath(blades, shurikenSteel.copy(alpha = alpha))
+        drawPath(blades, shurikenRim.copy(alpha = 0.8f * alpha), style = Stroke(width = (radius * 0.06f).coerceAtLeast(1f)))
+        drawCircle(shurikenRim.copy(alpha = alpha), radius = radius * 0.2f, center = center)
         drawCircle(Konoha.HeadbandSteel.copy(alpha = alpha), radius = radius * 0.2f, center = center, style = Stroke(width = radius * 0.07f))
     }
 }
@@ -298,11 +348,12 @@ fun DrawScope.drawShuriken(center: Offset, radius: Float, degrees: Float, alpha:
 // leaves
 
 /** An almond-shaped leaf with its vein, pointing along [degrees]. */
-fun DrawScope.drawLeaf(center: Offset, length: Float, degrees: Float, color: Color) {
+fun DrawScope.drawLeaf(center: Offset, length: Float, degrees: Float, color: Color, reuse: Path? = null) {
     rotate(degrees, center) {
         val half = length / 2
         val w = length * 0.42f
-        val p = Path().apply {
+        val p = (reuse ?: Path()).apply {
+            reset()
             moveTo(center.x - half, center.y)
             quadraticTo(center.x - half * 0.1f, center.y - w, center.x + half, center.y)
             quadraticTo(center.x - half * 0.1f, center.y + w * 0.9f, center.x - half, center.y)
@@ -323,7 +374,7 @@ private const val LEAVES = 18
  * Leaves falling all the time: a third in each corner band, the rest over the middle, each with its own speed, sway
  * and turn. A few are the orange of autumn (and Naruto), most are green (and Lee).
  */
-private fun DrawScope.leaves(t: Float, dim: Float) {
+private fun DrawScope.leaves(t: Float, dim: Float, reuse: Path) {
     val len = (size.minDimension * 0.085f).coerceAtLeast(9f * density)
     for (i in 0 until LEAVES) {
         val band = i % 3
@@ -349,6 +400,6 @@ private fun DrawScope.leaves(t: Float, dim: Float) {
         // flutter: the leaf narrows as it turns edge-on
         val flutter = 0.55f + 0.45f * abs(cos(t * (2.2f + rnd(i, 9)) + i))
         val center = Offset(size.width * x0 + sway, size.height * y)
-        drawLeaf(center, len * k * flutter.coerceAtLeast(0.6f), turn, c.copy(alpha = 0.85f * dim * edge))
+        drawLeaf(center, len * k * flutter.coerceAtLeast(0.6f), turn, c.copy(alpha = 0.85f * dim * edge), reuse)
     }
 }

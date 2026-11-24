@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -44,38 +45,39 @@ import com.dfdx047.hiddenleaf.Busy
 
 /** The background of every screen: night over the village, Naruto's orange glow from the top, Sasuke's indigo from
  *  the lower left, a touch of Lee's green, and a few still leaves. */
-fun Modifier.leafBackground(primary: Color, secondary: Color): Modifier = drawBehind {
-    drawRect(
-        Brush.radialGradient(
-            0f to primary.copy(alpha = 0.20f),
-            1f to Color.Transparent,
-            center = Offset(size.width * 0.85f, -size.height * 0.05f),
-            radius = size.maxDimension * 0.75f,
-        ),
+fun Modifier.leafBackground(primary: Color, secondary: Color): Modifier = drawWithCache {
+    val g1 = Brush.radialGradient(
+        0f to primary.copy(alpha = 0.20f),
+        1f to Color.Transparent,
+        center = Offset(size.width * 0.85f, -size.height * 0.05f),
+        radius = (size.maxDimension * 0.75f).coerceAtLeast(1f),
     )
-    drawRect(
-        Brush.radialGradient(
-            0f to secondary.copy(alpha = 0.16f),
-            1f to Color.Transparent,
-            center = Offset(0f, size.height * 0.9f),
-            radius = size.maxDimension * 0.7f,
-        ),
+    val g2 = Brush.radialGradient(
+        0f to secondary.copy(alpha = 0.16f),
+        1f to Color.Transparent,
+        center = Offset(0f, size.height * 0.9f),
+        radius = (size.maxDimension * 0.7f).coerceAtLeast(1f),
     )
-    drawRect(
-        Brush.radialGradient(
-            0f to com.dfdx047.hiddenleaf.ui.theme.Konoha.LeeGreen.copy(alpha = 0.10f),
-            1f to Color.Transparent,
-            center = Offset(size.width, size.height),
-            radius = size.maxDimension * 0.5f,
-        ),
+    val g3 = Brush.radialGradient(
+        0f to com.dfdx047.hiddenleaf.ui.theme.Konoha.LeeGreen.copy(alpha = 0.10f),
+        1f to Color.Transparent,
+        center = Offset(size.width, size.height),
+        radius = (size.maxDimension * 0.5f).coerceAtLeast(1f),
     )
-    // still leaves, very faint: where they fall in the Play animation, at rest
     val u = size.minDimension / 14f
-    for ((fx, fy, rot, k) in listOf(
+    val leafColor = primary.copy(alpha = 0.06f)
+    val leaves = listOf(
         Quad(0.08f, 0.18f, -30f, 1.0f), Quad(0.92f, 0.42f, 40f, 0.8f), Quad(0.18f, 0.72f, 120f, 0.9f),
         Quad(0.78f, 0.86f, -70f, 1.1f), Quad(0.55f, 0.08f, 15f, 0.7f),
-    )) {
-        drawLeaf(Offset(size.width * fx, size.height * fy), u * k, rot, primary.copy(alpha = 0.06f))
+    )
+    val scratch = Path()
+    onDrawBehind {
+        drawRect(g1)
+        drawRect(g2)
+        drawRect(g3)
+        for ((fx, fy, rot, k) in leaves) {
+            drawLeaf(Offset(size.width * fx, size.height * fy), u * k, rot, leafColor, scratch)
+        }
     }
 }
 
@@ -138,15 +140,21 @@ fun SectionCard(
                 }
                 Text(title.uppercase(), style = MaterialTheme.typography.titleSmall.copy(letterSpacing = 1.2.sp), color = accent)
             }
-            Canvas(Modifier.fillMaxWidth().height(3.dp)) {
-                // a twisted rope: short slanted strokes
-                val step = 7.dp.toPx()
-                var x = 0f
-                while (x < size.width) {
-                    drawLine(rope, Offset(x, size.height), Offset(x + step * 0.6f, 0f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
-                    x += step
-                }
-            }
+            Spacer(
+                Modifier.fillMaxWidth().height(3.dp).drawWithCache {
+                    val step = 7.dp.toPx()
+                    val ropePath = Path().apply {
+                        var x = 0f
+                        while (x < size.width) {
+                            moveTo(x, size.height)
+                            lineTo(x + step * 0.6f, 0f)
+                            x += step
+                        }
+                    }
+                    val ropeStroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round)
+                    onDrawBehind { drawPath(ropePath, rope, style = ropeStroke) }
+                },
+            )
             content()
         }
     }

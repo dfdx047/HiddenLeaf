@@ -61,6 +61,18 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:29: Fase 4 — otimização das animações da launcher + verificação de resoluções/filtros/60 fps
+
+- **Otimização da Launcher (`TrainingGround.kt`, `HomeScreen.kt`, `Common.kt`):**
+  - `TrainingGround`: cenário estático (céu, sol, postes, veios da madeira, chão e grama) cacheado via `drawWithCache`; `Path` reutilizável em `drawLeaf` e `drawShuriken` (sem `Brush.linearGradient` nem `Path()` por shuriken/frame) + isolamento em `graphicsLayer()`.
+  - `PlayButton`: leitura de `breath`/`gleam` diferida para `drawBehind` (0 recomposições/s, antes 60 recomposições/s) + `remember(enabled)` no gradiente + `graphicsLayer()`.
+  - `leafBackground` e corda do `SectionCard`: convertidos para `drawWithCache` (um único `Path` cacheado para a corda).
+- **Verificado nos 3 aparelhos (`dumpsys gfxinfo` na tela inicial animando):**
+  - **RG Cube (Mali-G57):** Janky frames **98,99% → 7,91%**, p50 **32 ms → 17 ms**, p90 **34 ms → 19 ms**.
+  - **Mi A3 (SD665):** Janky frames **3,70%**.
+  - **RP5 capado (`sd480p`):** Janky frames **1,64% → 1,35%**, p50 **19 ms**.
+- **Verificado filtros/upscale/interpolação:** RP5 capado em **2x (`scale4=8`) + CAS (`filter=3`) + 60 fps interpolado (`fps_mode=60`)** rodando a **50,0 fps** cravados (10 ms idle), 0 crashes, print conferido.
+
 ### 2026-11-24 01:22: Fase 3 — Ultrawide sincronizado no stream + `wide2d` multi-tira + Save 100% embutido
 
 - **Ultrawide (`hl_gsx.cpp`, `hl_native.cpp`):**

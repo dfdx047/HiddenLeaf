@@ -238,18 +238,24 @@ private fun PlayStage(enabled: Boolean, onClick: () -> Unit) {
 /** Orange like Naruto's jumpsuit, a green ring like Lee's around the play mark, Sasuke's indigo in the aura. */
 @Composable
 private fun PlayButton(enabled: Boolean, onClick: () -> Unit) {
+    // Keep animation State objects (do NOT delegate with `by`) so only drawBehind invalidates, 0 recompositions/sec!
     val t = rememberInfiniteTransition(label = "play")
-    val breath by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1600), RepeatMode.Reverse), label = "aura")
-    val gleam by t.animateFloat(-0.4f, 1.4f, infiniteRepeatable(tween(2600, easing = LinearEasing)), label = "gleam")
-    val shape = RoundedCornerShape(22.dp)
+    val breath = t.animateFloat(0f, 1f, infiniteRepeatable(tween(1600), RepeatMode.Reverse), label = "aura")
+    val gleam = t.animateFloat(-0.4f, 1.4f, infiniteRepeatable(tween(2600, easing = LinearEasing)), label = "gleam")
+    val shape = remember { RoundedCornerShape(22.dp) }
+    val bgBrush = remember(enabled) {
+        if (enabled) Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep, Konoha.NarutoOrange, Konoha.ChakraAmber))
+        else Brush.horizontalGradient(listOf(Color(0xFF3A3C48), Color(0xFF2D2F3A)))
+    }
     Box(
-        Modifier.fillMaxWidth().height(76.dp).drawBehind {
+        Modifier.fillMaxWidth().height(76.dp).graphicsLayer().drawBehind {
             if (!enabled) return@drawBehind
+            val b = breath.value
             for (i in 3 downTo 1) {
-                val grow = (5f + 6f * i * (0.6f + 0.4f * breath)).dp.toPx()
+                val grow = (5f + 6f * i * (0.6f + 0.4f * b)).dp.toPx()
                 drawRoundRect(
                     color = (if (i == 3) Konoha.SasukePurple else if (i == 2) Konoha.NarutoOrange else Konoha.ChakraAmber)
-                        .copy(alpha = 0.10f + 0.06f * breath / i),
+                        .copy(alpha = 0.10f + 0.06f * b / i),
                     topLeft = Offset(-grow, -grow * 0.6f),
                     size = Size(size.width + grow * 2, size.height + grow * 1.2f),
                     cornerRadius = CornerRadius(28.dp.toPx() + grow),
@@ -260,14 +266,11 @@ private fun PlayButton(enabled: Boolean, onClick: () -> Unit) {
     ) {
         Box(
             Modifier.fillMaxSize().clip(shape)
-                .background(
-                    if (enabled) Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep, Konoha.NarutoOrange, Konoha.ChakraAmber))
-                    else Brush.horizontalGradient(listOf(Color(0xFF3A3C48), Color(0xFF2D2F3A))),
-                )
+                .background(bgBrush)
                 .border(2.dp, if (enabled) Konoha.ScrollCream.copy(alpha = 0.6f) else Color(0x33FFFFFF), shape)
                 .drawBehind {
                     if (!enabled) return@drawBehind
-                    val x = size.width * gleam
+                    val x = size.width * gleam.value
                     drawRect(
                         Brush.linearGradient(
                             0f to Color.Transparent, 0.5f to Color.White.copy(alpha = 0.26f), 1f to Color.Transparent,
