@@ -2,6 +2,48 @@
 
 [English](CHANGELOG.md) · **Português** · [Español](CHANGELOG.es.md)
 
+## v0.2.0-beta (24/11/2026)
+
+Grande atualização de desempenho, gráficos e Modo Online: **Frame Generation real (ZeroFG 1.2)** para o modo offline, **Modo Online reorganizado** com telas dedicadas para **Modo Casual** (incl. Sala Personalizada & Espectador 2–8P) e **Modo Ranqueado** (Genin → Kage, Maestria por Personagem e Top 100 Global), **aba de Drivers** com detecção automática de GPU (Turnip, PanVK, MaliSX2 e RADV), **Save 100% com transformações R1**, **Pular Logos + Abertura** e correção definitiva das texturas de menu pós-luta.
+
+**Download:** `HiddenLeaf-v0.2.0-beta.apk` (Android 10+, ARM de 64 bits).
+
+### Gráficos & Frame Generation real (ZeroFG 1.2)
+
+- **Frame Generation real (ZeroFG 1.2 · Somente Offline):** removida a antiga opção de FPS interpolado (60/90/120) e substituída pelo motor **ZeroFG 1.2** (Vulkan 1.3 dedicado em Device B, modo ZeroGS com separação de HUD e detecção de corte de cena, **sem precisar de DLL externa**).
+  - Multiplicadores disponíveis: **Desligado**, **2x**, **3x** e **4x** (em Ajustes e no menu dentro do jogo), além do limite nativo (`30` ou `50 original`).
+  - **Exclusivo do modo Offline:** desativado automaticamente em partidas Online (`hl_online::active()`) para manter justiça competitiva a 50 Hz nativos.
+  - Seleção automática da maior taxa de atualização da tela (`preferRefresh`) quando o ZeroFG está ligado.
+- **Números medidos em hardware real:**
+  - **Retroid Pocket 5 (Snapdragon 865 / Adreno 650):** ZeroFG 1.2 ativo no Device B em `1920×1080` (`status=0`), 2x/CAS liso a 50 Hz base.
+  - **Anbernic RG Cube (Unisoc T820 / Mali-G57):** ZeroFG 1.2 ativo (`704×528`, `status=0`), dobrando o jogo de 25 FPS para **50–59 FPS reais na tela** (~13% de GPU no GS com framebuffer fetch).
+  - **Xiaomi Mi A3 (Snapdragon 665 / Adreno 610, Vulkan 1.1.128 stock):** fallback gracioso sem travamento (ativa automaticamente se usar driver Turnip Vulkan 1.3); Modo Leve mantém lutas e menus estáveis.
+- **Correção das texturas de menu pós-luta:** corrigida a corrupção/inversão de texturas ao voltar de uma luta para a Seleção de Personagem ou Mode Select (`hl_gsx.cpp`, `hl_native.cpp`), verificada antes e depois de lutas no RP5, RG Cube e Mi A3.
+- **Modo Leve refinado:** ativado automaticamente apenas em GPUs fracas (Tier 0–1: Adreno 3xx–620, Mali-G31/G51/G52/G57/G68/G71/G72, PowerVR, Xclipse 5xx) e mantido desligado por padrão em GPUs intermediárias/fortes (Tier 2–4) para preservar 100% dos efeitos e filtros do PS2. Lista de SoCs com GS em 2 threads expandida (`trinket`, `bengal`, `khaje`, `ums*`, `mt676*`, `mt678*`, `mt683*`, `exynos*`, `sc9863*`).
+
+### Drivers Vulkan por GPU (Turnip, PanVK, MaliSX2 & RADV)
+
+- **Detecção automática da família de GPU** na aba **Drivers** com filtro e fontes recomendadas:
+  - **Adreno (Qualcomm):** Turnip (ARMSX2, Mr. Purple, StevenMXZ, K11MCH1, crueter 8 Elite, Banner's Turnip).
+  - **Mali (ARM):** **PanVK** (`JimVulkan/mali-panvk`, `panvk-kbase-android`, `FristOneRR-Panvk-Driver`) e **MaliSX2** (`bmdhacks/malisx2`).
+  - **Xclipse (Samsung / AMD RDNA):** **RADV** (`JimVulkan/radv-xclipse` e `paulowesll/mesa` do Paulo Wesley).
+- **Correção definitiva da aba parada (HTTP 403):** adicionado fallback automático via GitHub Atom (`releases.atom` + `expanded_assets`) quando a API REST anônima atinge o limite de requisições.
+
+### Novo Modo Online (Reorganizado, Ranqueada, Maestria & Espectador)
+
+- **Hub Online reorganizado:** tela principal limpa com seletor `Online (internet)` / `Rede local (Wi-Fi)`, nome do jogador, botão **`Modo Casual`**, botão **`Modo Ranqueado`** e apenas as opções de servidor/conexão fora deles.
+- **Filtro de Controle separado por modo:** removido o filtro global da tela principal e adicionado filtro independente (`Só Tela` / `Só Controle` / `Todos`) dentro do **Modo Casual** e dentro do **Modo Ranqueado**, com botão automático **"Demorando? Aceitar qualquer controle"** após 15s de busca.
+- **Tela dedicada — Modo Casual (`CasualDedicatedScreen`):** reúne em 2 colunas (paisagem) Filtro de Controle, Partida Rápida, Treinar na Fila, Criar/Entrar Sala 1v1 e **Sala Personalizada & Espectador (2–8 jogadores)** com troca de papéis ao vivo (`P1` / `P2` / `Espectador`) e código de sala em largura total sem corte.
+- **Tela dedicada — Modo Ranqueado (`RankedDedicatedScreen`):** fila competitiva separada (`#ranked`), **Cartão Ninja** com retratos reais dos personagens do jogo, patente (`Genin` → `Kage`), RP, V/D, sequência de vitórias, **detecção automática do personagem escolhido**, exportação automática do retrato do HUD (`PixelCopy`), **Maestria individual por personagem** e **Top 100 Global** com filtro por controle.
+- **Otimização do servidor Cloudflare Free-Tier:** redução drástica de escritas D1 (`TOUCH_EVERY=12s`, remoção de `sweep()` no poll/ws), Lazy WebSocket Connect (0 requisições DO em P2P direto), rate limit por IP e proteção anti-spoof UDP.
+
+### Qualidade de vida, Save 100%, Mods & Controles
+
+- **Pular Logos + Abertura (`0111-skip-logos-and-safe-stop.patch`):** aguarda a escolha de idioma e pula automaticamente Bandai, CyberConnect2, CRIWARE e abertura direto para **New Game / Load Game** em ~1–2 segundos.
+- **Correção do loop de salvar sozinho no UN6 A35 e mods:** limite rígido permanente no skip de abertura nas 4 bibliotecas nativas (`libun5.so`, `libun5_v80.so`, `libun5_un6_a35.so`, `libun5_un6_a35_v80.so`), eliminando botões fantasmas nos menus.
+- **Save 100% & Trapaça "Desbloquear tudo" com Transformações R1:** corrigido o flag de progresso (`save + 0x1C5C = 0x6E`) tanto no save 100% embutido quanto no modo Online/Trapaça, liberando todas as transformações iniciais apertando **R1** na seleção de personagem.
+- **Controles Touch:** botões de especial `↑↑○` e `↓↓○` agora permitem **segurar para carregar** (`holdLast = true`); removido o acionamento acidental de **R2 (Kawarimi)** por deslize e zona morta dos gatilhos ajustada para 50%; opção antiga de "Especial com um botão" removida; toque nos menus mantido como opcional com guia animado.
+
 ## v0.1.0-beta (14/11/2026)
 
 A primeira versão pública. *Naruto Shippuden: Ultimate Ninja 5* (PS2, Europa, SLES-55605) recompilado para código ARM64

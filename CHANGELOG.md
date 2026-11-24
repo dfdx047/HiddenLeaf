@@ -2,6 +2,48 @@
 
 **English** · [Português](CHANGELOG.pt-BR.md) · [Español](CHANGELOG.es.md)
 
+## v0.2.0-beta (2026-11-24)
+
+Major performance, graphics and Online update: **real Frame Generation (ZeroFG 1.2)** for offline play, **reorganized Online hub** with dedicated **Casual Mode** (including 2–8P Custom Lobby & Spectator) and **Ranked Mode** (Genin → Kage, Per-Character Mastery & Global Top 100), **GPU-aware Vulkan Drivers tab** (Turnip, PanVK, MaliSX2 & RADV), **100% Save with R1 transformations unlocked**, **Skip Company Logos + Intro**, and permanent fix for post-fight menu textures.
+
+**Download:** `HiddenLeaf-v0.2.0-beta.apk` (Android 10+, 64-bit ARM).
+
+### Graphics & Real Frame Generation (ZeroFG 1.2)
+
+- **Real Frame Generation (ZeroFG 1.2 · Offline Only):** removed the non-functional interpolated FPS (60/90/120) option and integrated **ZeroFG 1.2** (dedicated Vulkan 1.3 Device B, ZeroGS mode with HUD-layer separation & content-break detection, **no external DLL required**).
+  - Multipliers: **Off**, **2x**, **3x**, **4x** (in Settings and in-game menus), alongside native FPS cap (`30` or `50 original`).
+  - **Strictly Offline Only:** `un5_main.cpp` automatically forces `ZeroFGEnabled = false` during Online matches (`hl_online::active()`) so online play stays fair at native 50 Hz.
+  - Automatically requests the display's highest refresh rate (`preferRefresh`) when ZeroFG is enabled.
+- **Real Hardware Benchmarks:**
+  - **Retroid Pocket 5 (Snapdragon 865 / Adreno 650):** ZeroFG 1.2 active on Device B at `1920×1080` (`status=0`), smooth 2x + CAS.
+  - **Anbernic RG Cube (Unisoc T820 / Mali-G57):** ZeroFG 1.2 active (`704×528`, `status=0`), doubling 25 FPS native to **50–59 FPS on display** (~13% GPU on GS with framebuffer fetch).
+  - **Xiaomi Mi A3 (Snapdragon 665 / Adreno 610, stock Vulkan 1.1.128):** graceful fallback with zero crash (auto-activates when using a Vulkan 1.3 Turnip driver); Light Mode keeps fights and menus steady.
+- **Post-fight menu textures fixed:** resolved inverted/corrupted menu textures when returning from a fight to Character Select or Mode Select (`hl_gsx.cpp`, `hl_native.cpp`), visually verified pre-fight vs post-fight on RP5, RG Cube and Mi A3.
+- **Refined Light Mode:** auto-enabled only on weak GPUs (Tier 0–1: Adreno 3xx–620, Mali-G31/G51/G52/G57/G68/G71/G72, PowerVR, Xclipse 5xx) and kept off by default on mid/high GPUs (Tier 2–4) to preserve 100% of PS2 visual effects and filters. Expanded 2-thread GS SoC list (`trinket`, `bengal`, `khaje`, `ums*`, `mt676*`, `mt678*`, `mt683*`, `exynos*`, `sc9863*`).
+
+### GPU-Aware Vulkan Drivers (Turnip, PanVK, MaliSX2 & RADV)
+
+- **Automatic GPU family detection** in the **Drivers** tab with tailored sources:
+  - **Adreno (Qualcomm):** Turnip (ARMSX2, Mr. Purple, StevenMXZ, K11MCH1, crueter 8 Elite, Banner's Turnip).
+  - **Mali (ARM):** **PanVK** (`JimVulkan/mali-panvk`, `panvk-kbase-android`, `FristOneRR-Panvk-Driver`) and **MaliSX2** (`bmdhacks/malisx2`).
+  - **Xclipse (Samsung / AMD RDNA):** **RADV** (`JimVulkan/radv-xclipse` and Paulo Wesley's `paulowesll/mesa`).
+- **Fixed broken Drivers tab (GitHub HTTP 403):** added automatic fallback via GitHub Atom (`releases.atom` + `expanded_assets`) when anonymous REST API rate limits are hit.
+
+### Reorganized Online Mode (Casual, Ranked, Mastery & Spectator)
+
+- **Clean Online Hub:** Internet / Local Wi-Fi toggle, player name, **`Casual Mode`** button, **`Ranked Mode`** button, with only Server & Connection settings outside.
+- **Per-mode Control Filter:** removed the global control filter from the main page and placed dedicated filters (`Touch Only` / `Controller Only` / `All`) inside **Casual** and **Ranked** separately, with a 15s **"Taking too long? Accept any controller"** fallback button.
+- **Dedicated Casual Screen (`CasualDedicatedScreen`):** 2-column landscape layout grouping Control Filter, Quick Match, Train While Queuing, 1v1 Friend Rooms and **Custom Lobby & Live Spectator (2–8 players)** with real-time role switching (`P1` / `P2` / `Spectator`) and full-width room code input.
+- **Dedicated Ranked Screen (`RankedDedicatedScreen`):** separate competitive queue (`#ranked`), **Ninja Info Card** with real extracted in-game character portraits, ranks (`Genin` → `Kage`), RP, W/L, win streak, **auto P1 character detection**, automatic HUD portrait export (`PixelCopy`), **per-character Mastery**, and **Global Top 100 Leaderboard**.
+- **Cloudflare Free-Tier Backend Optimizations:** massive D1 write reduction (`TOUCH_EVERY=12s`, removed `sweep()` from poll/ws), Lazy WebSocket Connect (0 DO requests on direct P2P), IP rate limiting and UDP anti-spoof protection.
+
+### Quality of Life, 100% Save, Mods & Controls
+
+- **Skip Company Logos + Intro (`0111-skip-logos-and-safe-stop.patch`):** waits for Language Select, then fast-forwards past Bandai, CyberConnect2, CRIWARE and opening movies straight to **New Game / Load Game** in ~1–2 seconds.
+- **Fixed phantom Save-button loop in UN6 A35 & mods:** hard stop added across all 4 native libraries (`libun5.so`, `libun5_v80.so`, `libun5_un6_a35.so`, `libun5_un6_a35_v80.so`).
+- **100% Save & Unlock-All Cheat with R1 Transformations:** fixed progress flag (`save + 0x1C5C = 0x6E`) in both the built-in 100% save and Online/Cheat unlock so all R1 starting transformations are unlocked.
+- **Touch Controls:** `↑↑○` and `↓↓○` special buttons now support **hold-to-charge** (`holdLast = true`); excluded `R2` (Guard/Kawarimi) from accidental slide activation and raised analog trigger deadzone to 50%; removed unused one-button special option; menu touch gestures remain optional with an animated guide.
+
 ## v0.1.0-beta (2026-11-14)
 
 The first public release. *Naruto Shippuden: Ultimate Ninja 5* (PS2, Europe, SLES-55605) recompiled to native ARM64
