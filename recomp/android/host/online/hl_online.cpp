@@ -104,7 +104,8 @@ namespace
         s << "phase=" << phase << ";me=" << g_file.myName << ";peer=" << g_file.peerName << ";host=" << (g_file.host ? 1 : 0)
           << ";p1=" << (g_match.iAmPlayer1() ? 1 : 0) << ";rtt=" << g_match.roundTripMs() << ";delay=" << g_match.delay()
           << ";field=" << g_match.field() << ";waits=" << g_match.waits() << ";desyncs=" << g_match.desyncs()
-          << ";relay=" << (g_match.viaRelay() ? 1 : 0) << ";linked=" << (g_match.linked() ? 1 : 0)
+          << ";relay=" << (g_match.viaRelay() ? 1 : 0) << ";want_relay=" << (g_match.wantsRelay() ? 1 : 0)
+          << ";linked=" << (g_match.linked() ? 1 : 0) << ";input_mode=" << g_file.inputMode
           << ";reason=" << (g_match.ended() ? g_match.endReason() : std::string());
         std::lock_guard<std::mutex> lock(g_statusMutex);
         g_status = s.str();

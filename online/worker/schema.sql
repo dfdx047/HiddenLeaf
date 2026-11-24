@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS hl_rooms (
     v INTEGER NOT NULL,
     game TEXT NOT NULL,
     fp TEXT NOT NULL DEFAULT '',
+    input_mode TEXT NOT NULL DEFAULT 'any',
+    session_secret TEXT NOT NULL DEFAULT '',
     host_key TEXT NOT NULL,
     host_name TEXT NOT NULL DEFAULT '',
     host_addrs TEXT NOT NULL DEFAULT '[]',
@@ -30,6 +32,8 @@ CREATE TABLE IF NOT EXISTS hl_queue (
     v INTEGER NOT NULL,
     game TEXT NOT NULL,
     fp TEXT NOT NULL DEFAULT '',
+    input_mode TEXT NOT NULL DEFAULT 'any',
     who TEXT NOT NULL,
     made INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS hl_queue_match ON hl_queue (v, game, fp, input_mode);

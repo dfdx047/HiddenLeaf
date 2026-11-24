@@ -497,4 +497,10 @@
     <string name="un5_gfx_engine">Motor e Desempenho</string>
     <string name="un5_gfx_help">Toque ou direcional: navegar  ·  ✕: OK  ·  △ / Voltar: sair</string>
     <string name="un5_gfx_open">Abrir menu gráfico (estilo UN5)</string>
+    <string name="online_err_input_mode">Esta sala é restrita a outro tipo de controle (Toque vs Controle).</string>
+    <string name="online_input_mode">Separação por controle</string>
+    <string name="online_input_any">Qualquer</string>
+    <string name="online_input_touch">Só Toque</string>
+    <string name="online_input_gamepad">Só Controle</string>
+    <string name="online_input_mode_hint">Separa quem joga na tela de quem usa controle físico. Em Só Toque, controles externos ficam bloqueados na partida.</string>
 </resources>

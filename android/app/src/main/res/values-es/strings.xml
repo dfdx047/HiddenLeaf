@@ -497,4 +497,10 @@
     <string name="un5_gfx_engine">Motor y Rendimiento</string>
     <string name="un5_gfx_help">Toca o cruceta: mover  ·  ✕: OK  ·  △ / Atrás: volver</string>
     <string name="un5_gfx_open">Abrir menú gráfico (estilo UN5)</string>
+    <string name="online_err_input_mode">Esta sala está restringida a otro tipo de control (Táctil vs Mando).</string>
+    <string name="online_input_mode">Separación por control</string>
+    <string name="online_input_any">Cualquiera</string>
+    <string name="online_input_touch">Solo Táctil</string>
+    <string name="online_input_gamepad">Solo Mando</string>
+    <string name="online_input_mode_hint">Separa a jugadores táctiles de quienes usan mando físico. En Solo Táctil se bloquean los mandos externos en la partida.</string>
 </resources>

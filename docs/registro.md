@@ -61,6 +61,27 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 02:03: Fase 7 — Modo Online: otimização Cloudflare free-tier + segurança + separação Toque vs Controle
+
+- **Worker Cloudflare (`online/worker/worker.js`, `schema.sql`, `test.mjs`):**
+  - Removido `sweep()` de `/v1/poll`, `/v1/ws`, `/v1/addrs`, `/v1/relay` e `/v1/leave`; limpeza global agora roda apenas em `/v1/host` e `/v1/quick` com throttle de 30 s, e salas expiradas são rejeitadas preguiçosamente (0 escritas no D1).
+  - `TOUCH_EVERY` subiu de 5 s → 12 s e `QUICK_IDLE` de 15 s → 25 s (~2,4× menos escritas de polling no D1); adicionado índice `hl_queue_match (v, game, fp, input_mode)` e limpeza de `hl_queue` em `/v1/leave`.
+  - Rate limit por IP em memória de isolate em `/v1/host`, `/v1/join` e `/v1/quick` (protege cota D1 contra spam).
+  - Segurança: geração de `session_secret` (`token` de 128 bits por sala) entregue apenas a host e guest.
+  - Separação **Toque vs Controle** (`input_mode`: `"touch" | "gamepad" | "any"`): `/v1/quick` e `/v1/hello` filtram por `input_mode` e `/v1/join` retorna `409 input_mode` em caso de incompatibilidade.
+- **Netcode C++ (`link.h`, `link.cpp`, `match_session.h`, `match_session.cpp`, `hl_online.cpp`):**
+  - Anti-spoof UDP: `session_` derivado de `code:token` quando presente + validação estrita `source == remote_` após `Link::Up`.
+  - Economia massiva de Durable Object no relay: reenvio em espera reduzido de 8 ms (125 msgs/s) → 250 ms no relay TCP, batching de inputs a 25 Hz (a cada 2 campos) quando em relay sem espera, e `ping_every` de 500 ms → 2000 ms no relay (~65–75% menos mensagens de DO).
+  - Publicação de `want_relay=1` e `input_mode=` em `OnlineBridge.status()`.
+- **App Android (`Online.kt`, `OnlineGame.kt`, `GameActivity.kt`, `OnlineScreen.kt`, `strings.xml` en/pt/es):**
+  - **Lazy WebSocket Connect** em `OnlineGame.kt`: só abre `/v1/ws` quando o motor sinaliza `want_relay=1` (após 3 s sem UDP direto) → 0 requisições de Durable Object em partidas P2P diretas.
+  - Detecção de controle físico (`Online.hasExternalGamepad()`) + seletor **Separação por controle** (*Qualquer* / *Só Toque* / *Só Controle*) em `OnlineScreen.kt` + bloqueio estrito de gamepad externo em `GameActivity.dispatchKeyEvent()` durante partidas `touchOnly`.
+- **Verificado:**
+  - `node online/worker/test.mjs` (100% verde, incluindo testes de `input_mode`, `token` e escritas D1).
+  - `recomp/android/host/online/tests/run.sh`: `lockstep_tests` (892/0), `session_tests` (2042/0), `match_tests` (76/0).
+  - `./gradlew testDebugUnitTest` verde + `libun5.so` e `libun5_v80.so` atualizados.
+  - **Partida real 2 aparelhos (RP5 capado `sd480p` Host × RG Cube Guest)** com `token=` + `input_mode=touch` + `relay=1`: parearam direto via UDP em 9–246 ms (RTT 6–23 ms), **0 conexões WebSocket (Lazy Relay confirmado)**, sincronizados pixel-a-pixel na Seleção de Personagens (`Online P1 contra CubeGuest` / `Online P2 contra RP5Host`), e UI de separação por controle conferida no Mi A3.
+
 ### 2026-11-24 01:52: Fase 6 — toque nativo nos menus do jogo + Menu Gráfico estilo UN5 in-game
 
 - **Toque nativo nos menus (`hl_game.cpp`, `un5_main.cpp`, `TouchBridge.kt`, `TouchConfig.kt`, `NinjaPadView.kt`, `ControlsScreen.kt`):**

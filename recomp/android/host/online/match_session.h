@@ -31,6 +31,8 @@ struct SessionFile {
     unsigned delayFrames = 0;                   // the host's choice: 0 automatic, else 1 to 4 of the game's frames (two fields each)
     bool relay = false;                         // the app keeps the room's relay open for this match (engine/OnlineGame.kt)
     unsigned version = 0;                       // the app's network version: must be HL_NET_VERSION
+    std::string token;                          // optional room session secret for UDP anti-spoof
+    std::string inputMode;                      // optional input mode ("touch", "gamepad", "any")
 };
 bool parseSessionFile(const std::string& text, SessionFile& out);
 std::string formatSessionFile(const SessionFile& file);
@@ -76,6 +78,7 @@ public:
     std::uint32_t lockField() const {return field_ >= env_.localUntil ? field_ - env_.localUntil : 0u;}
     int roundTripMs() const {return link_.roundTripMs();}
     bool viaRelay() const {return link_.state() == Link::Up && link_.viaRelay();}
+    bool wantsRelay() const {return link_.wantsRelay();}
     bool linked() const {return link_.state() == Link::Up;}
     unsigned waits() const {return waits_;}              // fields the game had to wait for the other's pad
     unsigned desyncs() const {return desyncs_;}

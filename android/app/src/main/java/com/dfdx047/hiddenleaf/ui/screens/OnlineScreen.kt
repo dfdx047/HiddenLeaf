@@ -197,6 +197,20 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
             }
             Text(stringResource(R.string.online_delay_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             // (no relay on the local network: there is no room on the service to go through)
+            if (!prefs.lan) {
+                Text(stringResource(R.string.online_input_mode), style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((key, labelId) in listOf("any" to R.string.online_input_any, "touch" to R.string.online_input_touch, "gamepad" to R.string.online_input_gamepad)) {
+                        FilterChip(
+                            selected = prefs.inputMode == key,
+                            onClick = { lobby.update(prefs.copy(inputMode = key)) },
+                            enabled = idle,
+                            label = { Text(stringResource(labelId)) },
+                        )
+                    }
+                }
+                Text(stringResource(R.string.online_input_mode_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (!prefs.lan) Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.online_relay), style = MaterialTheme.typography.titleSmall)

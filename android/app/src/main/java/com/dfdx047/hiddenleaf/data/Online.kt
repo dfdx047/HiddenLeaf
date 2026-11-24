@@ -55,11 +55,28 @@ object Online {
     class Failure(val why: String) : Exception(why)
     data class Peer(val name: String, val addrs: List<String>, val seen: String)
     data class Opts(val delay: Int, val relay: Boolean)
-    data class Room(val code: String, val key: String)
-    data class Joined(val key: String, val host: Peer, val opts: Opts)
+    data class Room(val code: String, val key: String, val token: String = "", val inputMode: String = "any")
+    data class Joined(val key: String, val host: Peer, val opts: Opts, val token: String = "", val inputMode: String = "any")
     data class Hello(val ok: Boolean, val ms: Long, val colo: String, val country: String)
     /** A quick match's answer: [host] set = put in that player's room as its guest; null = a room of one's own, waiting in the queue. */
-    data class Quick(val code: String, val key: String, val host: Peer?, val opts: Opts)
+    data class Quick(val code: String, val key: String, val host: Peer?, val opts: Opts, val token: String = "", val inputMode: String = "any")
+
+    /** Detects whether an external physical gamepad is currently connected. */
+    fun hasExternalGamepad(): Boolean = runCatching {
+        android.view.InputDevice.getDeviceIds().any { id ->
+            val d = android.view.InputDevice.getDevice(id) ?: return@any false
+            if (d.isVirtual) return@any false
+            val s = d.sources
+            (s and android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD ||
+                (s and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK
+        }
+    }.getOrDefault(false)
+
+    fun effectiveInputMode(pref: String): String = when (pref) {
+        "touch" -> if (hasExternalGamepad()) "gamepad" else "touch"
+        "gamepad" -> "gamepad"
+        else -> "any"
+    }
 
     fun isPlaceholder(server: String) = server.contains("SEU-SUBDOMINIO")
 
@@ -96,26 +113,32 @@ object Online {
     }
 
     /** One /v1/hello with this phone's [fp] (no timing): keeps the free-plan notice current; how many search a quick match it would meet. */
-    fun status(server: String, fp: String): Int =
-        post(server, "/v1/hello", JSONObject().put("v", NET_VERSION).put("game", GAME).put("fp", fp)).optInt("waiting", 0)
+    fun status(server: String, fp: String, inputMode: String = "any"): Int =
+        post(server, "/v1/hello", JSONObject().put("v", NET_VERSION).put("game", GAME).put("fp", fp).put("input_mode", inputMode)).optInt("waiting", 0)
 
-    fun host(server: String, name: String, fp: String, addrs: List<String>, opts: Opts): Room {
-        val r = post(server, "/v1/host", base(name, fp, addrs).put("opts", optsJson(opts)))
-        return Room(r.getString("code"), r.getString("key"))
+    fun host(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, inputMode: String = "any"): Room {
+        val r = post(server, "/v1/host", base(name, fp, addrs).put("opts", optsJson(opts)).put("input_mode", inputMode))
+        return Room(r.getString("code"), r.getString("key"), r.optString("token", ""), r.optString("input_mode", inputMode))
     }
 
     /** Quick match: the room of whoever waits longest with the same [fp], or one of this phone's own that waits in the queue. */
-    fun quick(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, who: String): Quick {
-        val r = post(server, "/v1/quick", base(name, fp, addrs).put("opts", optsJson(opts)).put("who", who))
+    fun quick(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, who: String, inputMode: String = "any"): Quick {
+        val r = post(server, "/v1/quick", base(name, fp, addrs).put("opts", optsJson(opts)).put("who", who).put("input_mode", inputMode))
         val joined = r.optString("role") == "join"
-        return Quick(r.getString("code"), r.getString("key"), if (joined) peer(r.getJSONObject("host")) else null, if (joined) opts(r.optJSONObject("opts")) else opts)
+        return Quick(
+            r.getString("code"), r.getString("key"),
+            if (joined) peer(r.getJSONObject("host")) else null,
+            if (joined) opts(r.optJSONObject("opts")) else opts,
+            r.optString("token", ""),
+            r.optString("input_mode", inputMode),
+        )
     }
 
     private fun optsJson(o: Opts) = JSONObject().put("delay", o.delay).put("relay", o.relay)
 
-    fun join(server: String, code: String, name: String, fp: String, addrs: List<String>): Joined {
-        val r = post(server, "/v1/join", base(name, fp, addrs).put("code", code))
-        return Joined(r.getString("key"), peer(r.getJSONObject("host")), opts(r.optJSONObject("opts")))
+    fun join(server: String, code: String, name: String, fp: String, addrs: List<String>, inputMode: String = "any"): Joined {
+        val r = post(server, "/v1/join", base(name, fp, addrs).put("code", code).put("input_mode", inputMode))
+        return Joined(r.getString("key"), peer(r.getJSONObject("host")), opts(r.optJSONObject("opts")), r.optString("token", ""), r.optString("input_mode", "any"))
     }
 
     /** The host's poll: the one who joined, once there. */
@@ -176,6 +199,7 @@ object Online {
         "game" -> R.string.online_err_version
         "different" -> R.string.online_err_different
         "no room" -> R.string.online_err_no_room
+        "input_mode" -> R.string.online_err_input_mode
         "full" -> R.string.online_err_full
         "busy" -> R.string.online_err_busy
         "quota" -> R.string.online_err_quota
@@ -284,6 +308,7 @@ object Online {
     data class Session(
         val host: Boolean, val port: Int, val code: String, val me: String, val peer: String,
         val addrs: List<String>, val delay: Int, val relay: Boolean, val relayUrl: String,
+        val token: String = "", val inputMode: String = "any",
     )
 
     fun writeSession(paths: GamePaths, s: Session) {
@@ -300,6 +325,8 @@ object Online {
             append("delay=${s.delay.coerceIn(0, 4)}\n")
             append("relay=${if (s.relay) 1 else 0}\n")
             if (s.relay) append("relay_url=${s.relayUrl}\n")
+            if (s.token.isNotEmpty()) append("token=${s.token}\n")
+            if (s.inputMode.isNotEmpty()) append("input_mode=${s.inputMode}\n")
             s.addrs.forEach { append("addr=$it\n") }
         }
         // (written aside and renamed: the engine must never read half of it)
@@ -328,7 +355,7 @@ class OnlinePrefs(context: Context) {
     private val p = context.getSharedPreferences("online", Context.MODE_PRIVATE)
 
     /** [lan]: the page's choice between the internet (rooms service) and the local network (data/Lan.kt). */
-    data class State(val server: String, val name: String, val delay: Int, val relay: Boolean, val lan: Boolean = false)
+    data class State(val server: String, val name: String, val delay: Int, val relay: Boolean, val lan: Boolean = false, val inputMode: String = "any")
 
     private val _state = MutableStateFlow(read())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -339,11 +366,12 @@ class OnlinePrefs(context: Context) {
         p.getInt("delay", 0).coerceIn(0, 4),
         p.getBoolean("relay", true),
         p.getBoolean("lan", false),
+        p.getString("input_mode", null) ?: "any",
     )
 
     fun set(s: State) {
         _state.value = s
-        p.edit().putString("server", s.server).putString("name", s.name).putInt("delay", s.delay).putBoolean("relay", s.relay).putBoolean("lan", s.lan).apply()
+        p.edit().putString("server", s.server).putString("name", s.name).putInt("delay", s.delay).putBoolean("relay", s.relay).putBoolean("lan", s.lan).putString("input_mode", s.inputMode).apply()
     }
 }
 
@@ -404,10 +432,12 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
     /** The page opened: one cheap request, so that the free-plan notice and the number searching are current. */
     fun checkService(fp: String) {
         if (!autoCheck) return
-        val server = Online.cleanServer(prefs.state.value.server)
+        val p = prefs.state.value
+        val server = Online.cleanServer(p.server)
+        val mode = Online.effectiveInputMode(p.inputMode)
         viewModelScope.launch(Dispatchers.IO) {
             _waiting.value = try {
-                Online.status(server, fp)
+                Online.status(server, fp, mode)
             } catch (e: Online.Failure) {
                 0
             }
@@ -451,11 +481,12 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
                 ActivityLog.info("online", "room: own addresses ${addrs.joinToString()}")
                 _state.value = LobbyState.Working(R.string.online_step_room)
-                val r = Online.host(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay))
+                val mode = Online.effectiveInputMode(p.inputMode)
+                val r = Online.host(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), mode)
                 room = r
                 roomServer = server
                 _state.value = LobbyState.Waiting(r.code)
-                ActivityLog.info("online", "room ${r.code} open")
+                ActivityLog.info("online", "room ${r.code} open (input=$mode)")
                 waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "room failed: ${e.why}")
@@ -484,7 +515,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
             }
             if (guest != null) {
                 ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
-                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key)), start)
+                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay, Online.relayUrl(server, r.code, r.key), r.token, r.inputMode), start)
                 room = null // (the room stays on the service for the relay's connection; it goes by itself)
                 return true
             }
@@ -520,13 +551,14 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                         closeRoom()
                         return@launch
                     }
-                    val q = Online.quick(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), who)
+                    val mode = Online.effectiveInputMode(p.inputMode)
+                    val q = Online.quick(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), who, mode)
                     if (q.host != null) {
                         ActivityLog.info("online", "quick match: in room ${q.code} of ${q.host.name} (${q.host.seen}), addresses ${q.host.addrs.joinToString()}")
-                        launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key)), start)
+                        launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key), q.token, q.inputMode), start)
                         return@launch
                     }
-                    val r = Online.Room(q.code, q.key)
+                    val r = Online.Room(q.code, q.key, q.token, q.inputMode)
                     room = r
                     roomServer = server
                     ActivityLog.info("online", "quick match: waiting in room ${r.code}")
@@ -565,9 +597,10 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 val s = openSocket()
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
                 _state.value = LobbyState.Working(R.string.online_step_join)
-                val j = Online.join(server, digits, p.name, fp, addrs)
+                val mode = Online.effectiveInputMode(p.inputMode)
+                val j = Online.join(server, digits, p.name, fp, addrs, mode)
                 ActivityLog.info("online", "joined room $digits of ${j.host.name} (${j.host.seen}), addresses ${j.host.addrs.joinToString()}")
-                launchMatch(Online.Session(false, s.localPort, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key)), start)
+                launchMatch(Online.Session(false, s.localPort, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key), j.token, j.inputMode), start)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "join failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))

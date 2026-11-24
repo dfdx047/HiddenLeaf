@@ -498,4 +498,10 @@
     <string name="un5_gfx_engine">Engine &amp; Performance</string>
     <string name="un5_gfx_help">Tap or D-pad: choose  ·  ✕: OK  ·  △ / Back: return</string>
     <string name="un5_gfx_open">Open in-game UN5 Graphics Menu</string>
+    <string name="online_err_input_mode">This room is restricted to another control type (Touch vs Controller).</string>
+    <string name="online_input_mode">Control matchmaking</string>
+    <string name="online_input_any">Any</string>
+    <string name="online_input_touch">Touch only</string>
+    <string name="online_input_gamepad">Controller only</string>
+    <string name="online_input_mode_hint">Separate Touch and Controller players for fair matches. Touch-only locks out external gamepads during the match.</string>
 </resources>

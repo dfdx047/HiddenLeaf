@@ -123,9 +123,9 @@ std::vector<std::string> Link::localAddresses() const {
     return out;
 }
 
-void Link::start(const std::string& code, const std::vector<std::string>& addresses) {
+void Link::start(const std::string& code, const std::vector<std::string>& addresses, const std::string& token) {
     if (state_ != Open) return;
-    session_ = fnv(code);
+    session_ = token.empty() ? fnv(code) : fnv(code + ":" + token);
     candidates_.clear();
     for (const auto& a : addresses) {
         const auto at = a.rfind(':');
@@ -216,6 +216,12 @@ void Link::take(const std::uint8_t* p, std::size_t got, const Candidate& source,
             note("online: the other game speaks network version " + std::to_string(p[4]) + ", this one " + std::to_string(version));
         return;
     }
+    // Once UP, bind strictly to the authenticated peer endpoint (blocks off-path UDP injection/spoofing).
+    if (state_ == Up && (source.relayed != remote_.relayed || source.ip != remote_.ip || source.port != remote_.port)) {
+        ++foreign_;
+        lastForeign_ = source;
+        return;
+    }
     ++got_;
     heard_ = t;
     const State before = state_;
@@ -278,7 +284,7 @@ void Link::poll() {
             for (const auto& c : candidates_) send(hello, ++number_, t, c); // (to every address: the one that works answers)
             if (relayDue) send(hello, ++number_, t, Candidate{0, 0, true});
         }
-    } else if (state_ == Up && t - lastPing_ >= ping_every) {
+    } else if (state_ == Up && t - lastPing_ >= (remote_.relayed ? 2000u : ping_every)) {
         lastPing_ = t;
         send(ping, ++number_, t, remote_);
     }

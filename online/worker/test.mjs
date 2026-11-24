@@ -141,12 +141,12 @@ assert.equal((await call("quick", { v, game: GAME, fp, name: "Q", addrs: [] })).
 assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 0);
 assert.equal((await call("hello", { v, game: GAME })).waiting, undefined);
 
-// nobody waits: a room of one's own, in the queue (two rows written: the room and its place in the queue)
+// nobody waits: a room of one's own, in the queue (the first quick after 1000s also sweeps the 4 old spam rooms; subsequent ones write only 2 rows)
 written = 0;
 let qa = await quick("Naruto", "whoAAAAAAAA", "203.0.113.20");
 assert.equal(qa.role, "host");
 assert.match(qa.code, /^\d{6}$/);
-assert.equal(written, 2);
+assert.equal(written, 6);
 assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 1);
 assert.equal((await call("hello", { v, game: GAME, fp: fpMod })).waiting, 0);
 // its polls in the same seconds write nothing
@@ -154,10 +154,12 @@ written = 0;
 assert.equal((await call("poll", { code: qa.code, key: qa.key }, "203.0.113.20")).guest, null);
 assert.equal(written, 0);
 
-// another build (other mods) never meets it: a room of its own
+// another build (other mods) never meets it: a room of its own (writes only 2 rows: room + queue)
+written = 0;
 const qm = await quick("Modded", "whoMMMMMMMM", "203.0.113.21", fpMod);
 assert.equal(qm.role, "host");
 assert.notEqual(qm.code, qa.code);
+assert.equal(written, 2);
 
 // the same phone searching again: its old room is gone, a new one waits (it is never given its own)
 const qa2 = await quick("Naruto", "whoAAAAAAAA", "203.0.113.20");
@@ -189,8 +191,8 @@ const qc = await quick("Sakura", "whoCCCCCCCC", "198.51.100.31");
 assert.equal(qc.role, "host");
 
 // a waiting room is kept by its host's polls; one not polled for QUICK_IDLE seconds is given to nobody and goes
-for (let i = 0; i < 5; i++) {
-    now += 4;
+for (let i = 0; i < 6; i++) {
+    now += 5;
     assert.equal((await call("poll", { code: qc.code, key: qc.key }, "198.51.100.31")).guest, null);
 }
 assert.equal((await call("hello", { v, game: GAME, fp })).waiting, 1);
@@ -203,6 +205,31 @@ assert.equal(qm2.role, "host"); // (not the stale one)
 assert.equal((await call("poll", { code: qm.code, key: qm.key }, "203.0.113.21")).error, "no room");
 await call("leave", { code: qm2.code, key: qm2.key }, "198.51.100.33");
 assert.equal((await call("hello", { v, game: GAME, fp: fpMod })).waiting, 0);
+
+// ---- input_mode separation (touch vs gamepad) + session token
+now += 100;
+const touchRoom = await call("host", { v, game: GAME, fp, name: "TouchH", addrs: [], input_mode: "touch" }, "198.51.100.60");
+assert.equal(touchRoom.status, 200);
+assert.equal(touchRoom.input_mode, "touch");
+assert.match(touchRoom.token, /^[0-9a-f]{32}$/);
+assert.equal((await call("join", { v, game: GAME, fp, code: touchRoom.code, name: "PadG", addrs: [], input_mode: "gamepad" }, "198.51.100.61")).error, "input_mode");
+const touchJoin = await call("join", { v, game: GAME, fp, code: touchRoom.code, name: "TouchG", addrs: [], input_mode: "touch" }, "198.51.100.62");
+assert.equal(touchJoin.status, 200);
+assert.equal(touchJoin.token, touchRoom.token);
+assert.equal(touchJoin.input_mode, "touch");
+
+// quick match: touch never meets gamepad, touch meets touch
+const qt = await call("quick", { v, game: GAME, fp, name: "TouchQ1", addrs: [], input_mode: "touch", who: "whoTOUCH1111" }, "198.51.100.70");
+const qp = await call("quick", { v, game: GAME, fp, name: "PadQ1", addrs: [], input_mode: "gamepad", who: "whoPAD111111" }, "198.51.100.71");
+assert.equal(qt.role, "host");
+assert.equal(qp.role, "host");
+assert.notEqual(qt.code, qp.code);
+assert.equal((await call("hello", { v, game: GAME, fp, input_mode: "touch" })).waiting, 1);
+assert.equal((await call("hello", { v, game: GAME, fp, input_mode: "gamepad" })).waiting, 1);
+const qt2 = await call("quick", { v, game: GAME, fp, name: "TouchQ2", addrs: [], input_mode: "touch", who: "whoTOUCH2222" }, "198.51.100.72");
+assert.equal(qt2.role, "join");
+assert.equal(qt2.code, qt.code);
+assert.equal(qt2.token, qt.token);
 
 // two searching in the same moment both find nobody: the second gives its room up and joins the first
 const race = "app43+mods:none";

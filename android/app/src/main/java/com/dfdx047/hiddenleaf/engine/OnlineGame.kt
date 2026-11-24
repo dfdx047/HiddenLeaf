@@ -23,9 +23,15 @@ import com.dfdx047.hiddenleaf.data.Online
  * recomp/android/host/online/hl_online.cpp): a line on screen saying how the match goes, and the room's relay, a WebSocket the
  * engine's packets go through when the two phones cannot reach each other directly.
  */
-class OnlineGame private constructor(private val activity: Activity, private val peer: String, private val relayUrl: String?) {
+class OnlineGame private constructor(
+    private val activity: Activity,
+    private val peer: String,
+    private val relayUrl: String?,
+    val touchOnly: Boolean = false,
+) {
     @Volatile private var running = true
     @Volatile private var relay: RelaySocket? = null
+    @Volatile private var relayStarted = false
     private var text: TextView? = null
     private var root: ViewGroup? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -128,7 +134,8 @@ class OnlineGame private constructor(private val activity: Activity, private val
                 t.postDelayed(this, 500)
             }
         })
-        if (relayUrl != null) startRelay(relayUrl)
+        // Lazy relay connect: do NOT open WebSocket eagerly here! Direct P2P matches use 0 Durable Object requests.
+        // We open the relay only when the engine reports want_relay=1 (after relayAfter_ 3 s without direct UDP).
     }
 
     // ---- the loading cover (the developer, 2026-11-14: from the game's online menu the match must open on the character select).
@@ -215,6 +222,10 @@ class OnlineGame private constructor(private val activity: Activity, private val
     private var endShown = false
 
     private fun show(t: TextView, s: Map<String, String>) {
+        if (relayUrl != null && !relayStarted && s["want_relay"] == "1") {
+            relayStarted = true
+            startRelay(relayUrl)
+        }
         val phase = s["phase"] ?: "starting"
         updateCover(phase, s["field"]?.toIntOrNull() ?: 0)
         if (phase != lastPhase) {
@@ -308,8 +319,9 @@ class OnlineGame private constructor(private val activity: Activity, private val
             if (s.isEmpty() || s["v"]?.firstOrNull()?.toIntOrNull() != Online.NET_VERSION) return null
             val relay = s["relay_url"]?.firstOrNull()?.takeIf { s["relay"]?.firstOrNull() == "1" && it.startsWith("https://") }
             val peer = s["peer"]?.firstOrNull().orEmpty().ifEmpty { "?" }
-            Log.i("un5", "online: match against $peer, relay ${if (relay != null) "on" else "off"}")
-            return OnlineGame(activity, peer, relay)
+            val touchOnly = s["input_mode"]?.firstOrNull() == "touch"
+            Log.i("un5", "online: match against $peer, relay ${if (relay != null) "lazy" else "off"}, touchOnly=$touchOnly")
+            return OnlineGame(activity, peer, relay, touchOnly)
         }
     }
 }

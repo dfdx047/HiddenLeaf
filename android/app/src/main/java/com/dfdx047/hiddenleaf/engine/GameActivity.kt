@@ -875,6 +875,8 @@ class GameActivity : SDLActivity() {
             return true
         }
         if (fromPad) {
+            // Strict Touch-Only online fairness: ignore external controller input during a touch-only match.
+            if (online?.touchOnly == true) return true
             padUsed()
             val combo = padMap.menuCombo.keys
             if (down && event.repeatCount == 0 && code in combo && held.containsAll(combo)) {

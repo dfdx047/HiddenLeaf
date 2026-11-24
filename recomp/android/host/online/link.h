@@ -48,7 +48,8 @@ public:
     void setChannel(Channel channel) {channel_ = std::move(channel);}
     void setRelayAfterMs(std::uint32_t ms) {relayAfter_ = ms;}
     // Starts the exchange with the other game: `code` names the session, `addresses` are the other side's "ip:port" strings.
-    void start(const std::string& code, const std::vector<std::string>& addresses);
+    // Optional `token` binds the session ID to a secret shared via the rooms service (anti-spoof).
+    void start(const std::string& code, const std::vector<std::string>& addresses, const std::string& token = "");
     void poll();                                         // as often as possible: sends what is due, reads what came
     State state() const {return state_;}
     int roundTripMs() const {return rtt_;}               // smoothed, milliseconds; -1 before the first PONG
@@ -57,6 +58,7 @@ public:
     int silentMs() const;                                // milliseconds since anything came from the other game (while UP)
     void sayBye();                                       // tells the other game this one is leaving
     bool viaRelay() const {return remote_.relayed;}      // the line goes through the room's relay
+    bool wantsRelay() const {return relayNoted_ || (state_ == Up && remote_.relayed);} // true once direct UDP timed out or relay is active
     // Messages of the game's own conversation (session.h, lockstep.h) travel on the same line, once it is UP: a type from 6 up and a payload.
     // Like everything here they may be lost, repeated or late: whoever sends them repeats them as long as it needs.
     struct Message {std::uint8_t type = 0; std::vector<std::uint8_t> payload;};

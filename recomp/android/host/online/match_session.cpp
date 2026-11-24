@@ -26,6 +26,8 @@ bool parseSessionFile(const std::string& text, SessionFile& out) {
         else if (key == "delay") {const unsigned long d = std::strtoul(value.c_str(), nullptr, 10); out.delayFrames = d <= 4 ? unsigned(d) : 0;}
         else if (key == "relay") out.relay = value == "1";
         else if (key == "v") out.version = unsigned(std::strtoul(value.c_str(), nullptr, 10));
+        else if (key == "token") out.token = value;
+        else if (key == "input_mode") out.inputMode = value;
     }
     return role && !out.code.empty() && (!out.addresses.empty() || out.relay);
 }
@@ -33,6 +35,8 @@ bool parseSessionFile(const std::string& text, SessionFile& out) {
 std::string formatSessionFile(const SessionFile& f) {
     std::string t = "v=" + std::to_string(f.version) + "\nrole=" + (f.host ? "host" : "guest") + "\nat=" + std::to_string(f.at) + "\nport=" + std::to_string(f.port) +
                     "\ncode=" + f.code + "\nme=" + f.myName + "\npeer=" + f.peerName + "\ndelay=" + std::to_string(f.delayFrames) + "\nrelay=" + (f.relay ? "1" : "0") + "\n";
+    if (!f.token.empty()) t += "token=" + f.token + "\n";
+    if (!f.inputMode.empty()) t += "input_mode=" + f.inputMode + "\n";
     for (const auto& a : f.addresses) t += "addr=" + a + "\n";
     return t;
 }
@@ -52,7 +56,7 @@ bool MatchSession::begin(const SessionFile& file, Env env) {
     if (!link_.open(file.port)) {log("online: the match could not open its socket"); return false;}
     link_.setGiveUpMs(env_.meetTimeoutMs);          // (the other side's engine starts a few seconds either way)
     if (file.relay && env_.channel.send) link_.setChannel(env_.channel);
-    link_.start(file.code, file.addresses);
+    link_.start(file.code, file.addresses, file.token);
     if (!file.host) {ctl_.begin(false, SessionControl::Config{}); ctlBegun_ = true;}
     active_ = true;
     phase_ = Phase::Meeting;
@@ -190,11 +194,15 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
     Lockstep::Sample mine;
     std::memcpy(mine.data(), local, 6);
     lock_.pushLocal(lf, mine);
-    sendInputs();
-    if (!lock_.ready(lf)) {
+    // Over reliable WebSocket relay, batch 2 fields per packet (25 Hz, matching UN5's 25 Hz logic) unless we are about to wait,
+    // cutting Cloudflare Durable Object message volume in half without adding latency.
+    const bool needNow = !lock_.ready(lf);
+    if (!link_.viaRelay() || needNow || (lf & 1u) == 0u) sendInputs();
+    if (needNow) {
         ++waits_;
         const std::uint32_t waitFrom = now();
         std::uint32_t nextNote = waitFrom + 2000;
+        const std::uint32_t resendEvery = link_.viaRelay() ? 250u : 8u;
         while (!lock_.ready(lf)) {
             if (now() >= nextNote) {
                 nextNote += 2000;
@@ -206,7 +214,7 @@ int MatchSession::padField(const std::uint8_t local[6], std::uint8_t p1[6], std:
             pump();
             if (const char* bad = lineBad()) {end(bad, link_.peerLeft()); return 0;}
             if (leaveRequested_.load(std::memory_order_acquire)) {end("the player left", false); return 0;}
-            if (now() - lastSend_ >= 8) sendInputs();          // (a waiting game says its latest again every few milliseconds)
+            if (now() - lastSend_ >= resendEvery) sendInputs(); // TCP relay: 250 ms keepalive; UDP: 8 ms resend
             waited();
             sleep(1);
         }

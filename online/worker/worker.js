@@ -43,11 +43,39 @@
 
 export const GAME = "un5";
 const ROOM_IDLE = 180;       // seconds a room lives with nobody asking about it
-const QUICK_IDLE = 15;       // seconds a quick-match room waits in the queue without its host's poll (the app polls every 2 s)
-const TOUCH_EVERY = 5;       // a poll writes the room's time only this often (D1's free plan counts rows written)
+const QUICK_IDLE = 25;       // seconds a quick-match room waits in the queue without its host's poll
+const TOUCH_EVERY = 12;      // a poll writes the room's time only this often (D1's free plan counts rows written)
+const SWEEP_EVERY = 30;      // global sweep runs at most this often per isolate, and only on room creation
 const RELAY_PER_DAY = 300;
 const MAX_BODY = 4096;
 const MAX_RELAY_MESSAGE = 1600;
+
+let lastSweepAt = 0;
+const rateBuckets = new Map(); // "bucket:ip" -> { win, n }
+
+export function resetWorkerState() {
+    lastSweepAt = 0;
+    rateBuckets.clear();
+}
+
+function checkRate(ip, now, bucket, limitPerMin) {
+    if (!ip || limitPerMin <= 0) return true;
+    const win = Math.floor(now / 60);
+    const key = bucket + ":" + ip;
+    const cur = rateBuckets.get(key);
+    if (!cur || cur.win !== win) {
+        if (rateBuckets.size > 4096) rateBuckets.clear();
+        rateBuckets.set(key, { win, n: 1 });
+        return true;
+    }
+    if (cur.n >= limitPerMin) return false;
+    cur.n++;
+    return true;
+}
+
+function cleanInputMode(s) {
+    return s === "touch" || s === "gamepad" ? s : "any";
+}
 
 function reply(obj, status = 200) {
     return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -98,44 +126,49 @@ function randomCode() {
     return String(100000 + (b[0] % 900000)); // six digits, easy to read out over a call
 }
 
-// A room of [ip]'s with the body's player as its host: {code, key}, or null if no free code was found.
+// A room of [ip]'s with the body's player as its host: {code, key, token, input_mode}, or null if no free code was found.
 async function makeRoom(env, body, ip, now) {
     const key = randomKey();
+    const token = randomKey();
+    const inputMode = cleanInputMode(body.input_mode);
     for (let tries = 0; tries < 8; tries++) {
         const code = randomCode();
-        const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, host_key, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(code, body.v, GAME, cleanFp(body.fp), key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
-        if (r.meta.changes === 1) return { code, key };
+        const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, input_mode, session_secret, host_key, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(code, body.v, GAME, cleanFp(body.fp), inputMode, token, key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
+        if (r.meta.changes === 1) return { code, key, token, input_mode: inputMode };
     }
     return null;
 }
 
-async function tooManyRooms(env, ip) {
-    const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM hl_rooms WHERE host_seen = ?").bind(ip).first();
+async function tooManyRooms(env, ip, now) {
+    const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM hl_rooms WHERE host_seen = ? AND touched >= ?").bind(ip, now - ROOM_IDLE).first();
     return open && open.n >= (Number(env.ROOMS_PER_ADDRESS) || 4);
 }
 
-// The quick-match rooms that wait for a guest with one v, game and fp (bound in that order, then the oldest poll time
+// The quick-match rooms that wait for a guest with one v, game, fp and input_mode (bound in that order, then the oldest poll time
 // taken: now - QUICK_IDLE). The longest waiting comes first by the queue's rowid.
-const WAITING = "FROM hl_queue q JOIN hl_rooms r ON r.code = q.code WHERE q.v = ? AND q.game = ? AND q.fp = ? AND r.guest_key IS NULL AND r.touched >= ?";
+const WAITING = "FROM hl_queue q JOIN hl_rooms r ON r.code = q.code WHERE q.v = ? AND q.game = ? AND q.fp = ? AND q.input_mode = ? AND r.guest_key IS NULL AND r.touched >= ?";
 
 // Makes the caller [room]'s guest, as /v1/join does; null if someone else got there first.
 async function takeRoom(env, room, body, ip, now) {
     const key = randomKey();
     const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
         .bind(key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, room.code).run();
-    return r.meta.changes === 1 ? { key, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) } : null;
+    return r.meta.changes === 1 ? { key, token: room.session_secret || "", input_mode: room.input_mode || "any", you: ip, host: hostOf(room), opts: JSON.parse(room.opts) } : null;
 }
 
 async function sweep(env, now) {
+    if (now - lastSweepAt < SWEEP_EVERY && now >= lastSweepAt) return;
+    lastSweepAt = now;
     await env.DB.prepare("DELETE FROM hl_rooms WHERE touched < ?").bind(now - ROOM_IDLE).run();
 }
 
-// Who asks: the room's host or its guest, by the key each was given.
-async function whoIs(env, code, key) {
+// Who asks: the room's host or its guest, by the key each was given. Lazily rejects expired rooms without writing to D1.
+async function whoIs(env, code, key, now) {
     if (typeof code !== "string" || typeof key !== "string" || key.length < 16) return null;
     const room = await env.DB.prepare("SELECT * FROM hl_rooms WHERE code = ?").bind(code).first();
     if (!room) return null;
+    if (now - room.touched >= ROOM_IDLE) return null;
     if (room.host_key === key) return { room, host: true };
     if (room.guest_key && room.guest_key === key) return { room, host: false };
     return null;
@@ -183,10 +216,11 @@ export async function handle(request, env, now) {
     if (request.method === "GET" && url.pathname === "/v1/ws") {
         if (request.headers.get("upgrade") !== "websocket") return reply({ error: "bad request" }, 426);
         if (!env.RELAY) return reply({ error: "no relay" }, 503);
-        await sweep(env, now);
-        const who = await whoIs(env, url.searchParams.get("code"), url.searchParams.get("key"));
+        const who = await whoIs(env, url.searchParams.get("code"), url.searchParams.get("key"), now);
         if (!who) return reply({ error: "no room" }, 404);
-        await env.DB.prepare("UPDATE hl_rooms SET touched = ? WHERE code = ?").bind(now, who.room.code).run();
+        if (now - who.room.touched >= TOUCH_EVERY) {
+            await env.DB.prepare("UPDATE hl_rooms SET touched = ? WHERE code = ?").bind(now, who.room.code).run();
+        }
         const headers = new Headers(request.headers);
         headers.set("x-hl-who", who.host ? "h" : "g");
         // The relay is made near whoever connects first (left to Cloudflare it may sit on another continent: 100-150 ms more
@@ -214,17 +248,19 @@ export async function handle(request, env, now) {
         const ok = versionAllowed(env, body.v) && body.game === GAME;
         const out = { ok, v: body.v ?? null, game: GAME, colo: cf.colo ?? "", country: cf.country ?? "", time: now };
         if (ok && typeof body.fp === "string") { // (a read only: nothing written)
-            const n = await env.DB.prepare(`SELECT COUNT(*) AS n ${WAITING}`).bind(body.v, GAME, cleanFp(body.fp), now - QUICK_IDLE).first();
+            const inputMode = cleanInputMode(body.input_mode);
+            const n = await env.DB.prepare(`SELECT COUNT(*) AS n ${WAITING}`).bind(body.v, GAME, cleanFp(body.fp), inputMode, now - QUICK_IDLE).first();
             out.waiting = n ? n.n : 0;
         }
         return reply(out);
     }
-    await sweep(env, now);
 
     if (what === "host") {
         if (body.game !== GAME) return reply({ error: "game" }, 409);
         if (!versionAllowed(env, body.v)) return reply({ error: "version" }, 409);
-        if (await tooManyRooms(env, ip)) return reply({ error: "busy" }, 429);
+        if (!checkRate(ip, now, "host", Number(env.RATE_HOST_PER_MIN) || 12)) return reply({ error: "busy" }, 429);
+        await sweep(env, now);
+        if (await tooManyRooms(env, ip, now)) return reply({ error: "busy" }, 429);
         const made = await makeRoom(env, body, ip, now);
         return made ? reply({ ...made, you: ip }) : reply({ error: "busy" }, 503);
     }
@@ -234,7 +270,10 @@ export async function handle(request, env, now) {
         if (!versionAllowed(env, body.v)) return reply({ error: "version" }, 409);
         const who = typeof body.who === "string" ? body.who.replace(/[^0-9A-Za-z]/g, "").slice(0, 32) : "";
         if (who.length < 8) return reply({ error: "bad request" }, 400);
+        if (!checkRate(ip, now, "quick", Number(env.RATE_QUICK_PER_MIN) || 20)) return reply({ error: "busy" }, 429);
+        await sweep(env, now);
         const fp = cleanFp(body.fp);
+        const inputMode = cleanInputMode(body.input_mode);
         // Out of the queue: rooms whose host stopped polling and rooms this same phone left waiting (nobody in them yet);
         // then the queue's entries whose room is gone (left, swept, or just deleted here).
         await env.DB.prepare("DELETE FROM hl_rooms WHERE guest_key IS NULL AND code IN (SELECT code FROM hl_queue) AND (touched < ? OR code IN (SELECT code FROM hl_queue WHERE who = ?))")
@@ -242,7 +281,7 @@ export async function handle(request, env, now) {
         await env.DB.prepare("DELETE FROM hl_queue WHERE code NOT IN (SELECT code FROM hl_rooms)").run();
         for (let attempt = 0; attempt < 3; attempt++) {
             const waiting = await env.DB.prepare(`SELECT r.* ${WAITING} AND q.who <> ? ORDER BY q.rowid LIMIT 1`)
-                .bind(body.v, GAME, fp, now - QUICK_IDLE, who).first();
+                .bind(body.v, GAME, fp, inputMode, now - QUICK_IDLE, who).first();
             if (waiting) {
                 const joined = await takeRoom(env, waiting, body, ip, now);
                 if (joined) {
@@ -251,14 +290,15 @@ export async function handle(request, env, now) {
                 }
                 continue; // someone else took that one this moment: the next
             }
-            if (await tooManyRooms(env, ip)) return reply({ error: "busy" }, 429);
+            if (await tooManyRooms(env, ip, now)) return reply({ error: "busy" }, 429);
             const mine = await makeRoom(env, body, ip, now);
             if (!mine) return reply({ error: "busy" }, 503);
-            await env.DB.prepare("INSERT INTO hl_queue (code, v, game, fp, who, made) VALUES (?, ?, ?, ?, ?, ?)").bind(mine.code, body.v, GAME, fp, who, now).run();
+            await env.DB.prepare("INSERT INTO hl_queue (code, v, game, fp, input_mode, who, made) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .bind(mine.code, body.v, GAME, fp, inputMode, who, now).run();
             // Two who search in the same moment both find nobody and both make a room. The one whose room came second
             // sees the first one's here, gives its own up (unless someone is in it already) and takes the first.
             const earlier = await env.DB.prepare(`SELECT q.code ${WAITING} AND q.who <> ? AND q.rowid < (SELECT rowid FROM hl_queue WHERE code = ?) LIMIT 1`)
-                .bind(body.v, GAME, fp, now - QUICK_IDLE, who, mine.code).first();
+                .bind(body.v, GAME, fp, inputMode, now - QUICK_IDLE, who, mine.code).first();
             if (earlier) {
                 const gone = await env.DB.prepare("DELETE FROM hl_rooms WHERE code = ? AND guest_key IS NULL").bind(mine.code).run();
                 if (gone.meta.changes === 1) {
@@ -272,34 +312,37 @@ export async function handle(request, env, now) {
     }
 
     if (what === "join") {
+        if (!checkRate(ip, now, "join", Number(env.RATE_JOIN_PER_MIN) || 24)) return reply({ error: "busy" }, 429);
         const code = String(body.code ?? "").replace(/\D/g, "");
         const room = await env.DB.prepare("SELECT * FROM hl_rooms WHERE code = ?").bind(code).first();
-        if (!room) return reply({ error: "no room" }, 404);
+        if (!room || now - room.touched >= ROOM_IDLE) return reply({ error: "no room" }, 404);
         if (body.game !== room.game) return reply({ error: "game" }, 409);
         if (room.v !== body.v) return reply({ error: "version" }, 409);
         if (room.fp !== cleanFp(body.fp)) return reply({ error: "different" }, 409);
+        const reqMode = cleanInputMode(body.input_mode);
+        const roomMode = room.input_mode || "any";
+        if (roomMode !== "any" && reqMode !== "any" && roomMode !== reqMode) return reply({ error: "input_mode" }, 409);
         if (room.guest_key) return reply({ error: "full" }, 409);
         const key = randomKey();
         const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
             .bind(key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, code).run();
         if (r.meta.changes !== 1) return reply({ error: "full" }, 409);
-        return reply({ key, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) });
+        return reply({ key, token: room.session_secret || "", input_mode: roomMode, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) });
     }
 
-    const who = await whoIs(env, body.code, body.key);
+    const who = await whoIs(env, body.code, body.key, now);
     if (!who) return reply({ error: "no room" }, 404);
     const code = who.room.code;
 
     if (what === "poll") {
-        // (the room's time is written once in TOUCH_EVERY seconds, or when the player's address changed: a poll every 2 s
-        // would otherwise be a row written every 2 s)
+        // (the room's time is written once in TOUCH_EVERY seconds, or when the player's address changed)
         const stale = now - who.room.touched >= TOUCH_EVERY;
         if (who.host) {
             if (stale || who.room.host_seen !== ip) await env.DB.prepare("UPDATE hl_rooms SET touched = ?, host_seen = ? WHERE code = ?").bind(now, ip, code).run();
-            return reply({ guest: guestOf(who.room), opts: JSON.parse(who.room.opts) });
+            return reply({ guest: guestOf(who.room), opts: JSON.parse(who.room.opts), token: who.room.session_secret || "", input_mode: who.room.input_mode || "any" });
         }
         if (stale || who.room.guest_seen !== ip) await env.DB.prepare("UPDATE hl_rooms SET touched = ?, guest_seen = ? WHERE code = ?").bind(now, ip, code).run();
-        return reply({ host: hostOf(who.room), opts: JSON.parse(who.room.opts) });
+        return reply({ host: hostOf(who.room), opts: JSON.parse(who.room.opts), token: who.room.session_secret || "", input_mode: who.room.input_mode || "any" });
     }
 
     if (what === "addrs") {
@@ -316,8 +359,12 @@ export async function handle(request, env, now) {
     }
 
     if (what === "leave") {
-        if (who.host) await env.DB.prepare("DELETE FROM hl_rooms WHERE code = ?").bind(code).run();
-        else await env.DB.prepare("UPDATE hl_rooms SET guest_key = NULL, guest_name = NULL, guest_addrs = NULL, guest_seen = NULL, touched = ? WHERE code = ?").bind(now, code).run();
+        if (who.host) {
+            await env.DB.prepare("DELETE FROM hl_rooms WHERE code = ?").bind(code).run();
+            await env.DB.prepare("DELETE FROM hl_queue WHERE code = ?").bind(code).run();
+        } else {
+            await env.DB.prepare("UPDATE hl_rooms SET guest_key = NULL, guest_name = NULL, guest_addrs = NULL, guest_seen = NULL, touched = ? WHERE code = ?").bind(now, code).run();
+        }
         return reply({});
     }
     return reply({ error: "bad request" }, 404);
