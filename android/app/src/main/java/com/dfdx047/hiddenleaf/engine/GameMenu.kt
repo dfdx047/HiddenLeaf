@@ -489,13 +489,16 @@ private fun GraphicsTab(state: GameMenuState, actions: GameMenuActions) {
 
     Section(stringResource(R.string.panel_fps_limit))
     Chips(
-        listOf(
-            "30" to 30, stringResource(R.string.panel_fps_50) to 50, stringResource(R.string.panel_fps_60) to 60, "90" to 90,
-            stringResource(R.string.panel_fps_120) to 120,
-        ),
-        state.get(EngineSettings.FPS_MODE, 50),
+        listOf("30" to 30, stringResource(R.string.panel_fps_50) to 50),
+        if (state.get(EngineSettings.FPS_MODE, 50) == 30) 30 else 50,
     ) { actions.setting(EngineSettings.FPS_MODE, it) }
-    Hint(stringResource(R.string.gp_fps_hint, state.maxRefresh))
+
+    Section("Frame Generation (ZeroFG · Offline)")
+    Chips(
+        listOf("Desligado" to 0, "2x" to 2, "3x" to 3, "4x" to 4),
+        state.get(EngineSettings.ZERO_FG, 0).let { if (it in listOf(0, 2, 3, 4)) it else 0 },
+    ) { actions.setting(EngineSettings.ZERO_FG, it) }
+    Hint("Geração real de quadros via Vulkan 1.3 (tela até ${state.maxRefresh} Hz). Desligado automaticamente no Online.")
 
     Section(stringResource(R.string.gp_counter))
     Chips(

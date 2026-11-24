@@ -33,6 +33,7 @@ object TouchBridge {
 
     /** Resolution (quarters: 4 = 1x), screen filter, the picture's shape and the frame rate, in effect from the next frame. */
     @JvmStatic external fun nativeSetVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int)
+    @JvmStatic external fun nativeSetZeroFg(multiplier: Int)
 
     /** "Naruto Online" in the game's own Mode Select (under Free Battle; docs/menu-online.md), on or off. */
     @JvmStatic external fun nativeSetMenuOnline(on: Boolean)
@@ -73,6 +74,10 @@ object TouchBridge {
 
     fun setVideo(scale4: Int, filter: Int, aspectMilli: Int, fpsMode: Int) {
         runCatching { nativeSetVideo(scale4, filter, aspectMilli, fpsMode) }
+    }
+
+    fun setZeroFg(multiplier: Int) {
+        runCatching { nativeSetZeroFg(multiplier) }
     }
 
     private var nativeMissing = false

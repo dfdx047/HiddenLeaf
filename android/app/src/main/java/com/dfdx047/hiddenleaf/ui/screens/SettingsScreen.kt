@@ -137,16 +137,24 @@ fun SettingsScreen(vm: AppViewModel) {
 
         SectionCard(stringResource(R.string.performance), Icons.Rounded.Speed, accent = MaterialTheme.colorScheme.secondary) {
             Text(stringResource(R.string.panel_fps_limit), style = MaterialTheme.typography.titleSmall)
+            val fpsVal = if (get(EngineSettings.FPS_MODE, 50) == 30) 30 else 50
             ChipRow(
-                options = listOf(
-                    "30" to 30, stringResource(R.string.panel_fps_50) to 50,
-                    stringResource(R.string.panel_fps_60) to 60, "90" to 90, stringResource(R.string.panel_fps_120) to 120,
-                ), // (90 and 120 on every screen: above the panel's rate the extra pictures are drawn but not seen)
-                selected = get(EngineSettings.FPS_MODE, 50),
+                options = listOf("30" to 30, stringResource(R.string.panel_fps_50) to 50),
+                selected = fpsVal,
                 onSelect = { vm.setting(EngineSettings.FPS_MODE, it) },
             )
             Text(
-                stringResource(R.string.panel_fps_hint),
+                "Velocidade nativa do jogo (50 Hz original ou 30 Hz para economia de bateria).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("Frame Generation (ZeroFG · Somente Offline)", style = MaterialTheme.typography.titleSmall)
+            ChipRow(
+                options = listOf("Desligado" to 0, "2x" to 2, "3x" to 3, "4x" to 4),
+                selected = get(EngineSettings.ZERO_FG, 0).let { if (it in listOf(0, 2, 3, 4)) it else 0 },
+                onSelect = { vm.setting(EngineSettings.ZERO_FG, it) },
+            )
+            Text(
+                "Geração real de quadros via Vulkan 1.3 (ZeroFG 1.2, sem DLL externa). Multiplica a fluidez na tela sem alterar a física do jogo. Desativado automaticamente no modo Online.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             // the engine reads "gpu_api", which Renderer.apply writes from this choice (automatic is Vulkan)

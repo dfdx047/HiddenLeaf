@@ -159,17 +159,18 @@ class GameActivity : SDLActivity() {
         }
     }
 
-    /** 90 or 120 pictures a second: the screen's fastest mode at its current size (a 120 Hz panel left at 60 shows half). */
+    /** ZeroFG frame generation: request the screen's fastest refresh mode so generated frames are shown. */
     private fun preferRefresh() {
         runCatching {
-            val fps = EngineSettings(paths.settings).get(EngineSettings.FPS_MODE, 50)
+            val esNow = EngineSettings(paths.settings)
+            val fg = esNow.get(EngineSettings.ZERO_FG, 0)
             val display = windowManager.defaultDisplay
             val now = display.mode
             val best = display.supportedModes
                 .filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
-                .maxByOrNull { if (fps > 60) it.refreshRate else -kotlin.math.abs(it.refreshRate - 60f) } ?: return
+                .maxByOrNull { if (fg >= 2) it.refreshRate else -kotlin.math.abs(it.refreshRate - 60f) } ?: return
             window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
-            android.util.Log.i("un5", "display: fps mode $fps, mode ${best.modeId} at ${best.refreshRate} Hz")
+            android.util.Log.i("un5", "display: zero_fg $fg, mode ${best.modeId} at ${best.refreshRate} Hz")
         }
     }
 
@@ -445,6 +446,10 @@ class GameActivity : SDLActivity() {
             EngineSettings.FILTER, EngineSettings.ASPECT -> applyVideo()
             EngineSettings.FPS_MODE -> {
                 applyVideo()
+                preferRefresh()
+            }
+            EngineSettings.ZERO_FG -> {
+                TouchBridge.setZeroFg(value)
                 preferRefresh()
             }
             EngineSettings.METER -> meterLevel = value

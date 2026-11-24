@@ -34,7 +34,8 @@ sed "s#^set(CMAKE_PROJECT_INCLUDE .*#set(CMAKE_PROJECT_INCLUDE \"$out/after_proj
 if [ ! -e "$out/build.ninja" ]; then
     cmake -S "$src/platforms/android/app/src/main/cpp" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE="$out/android.cmake" -DANDROID=true -DANDROID_STL=c++_static -DARMSX2_ANDROID_HOST_PAGE_SIZE=0x1000 \
-        -DARMSX2_DISABLE_LIBRASHADER=ON -DARMSX2_EMUCORE_LIBRARY_NAME=emucore -DHAVE_WL_VERSION_SCRIPT=1 -DCMAKE_HAVE_LIBC_PTHREAD=1 \
+        -DARMSX2_DISABLE_LIBRASHADER=ON -DARMSX2_ENABLE_ZEROFG=ON -DZEROFG_SOURCE_DIR="$here/build/zerofg-src" \
+        -DARMSX2_EMUCORE_LIBRARY_NAME=emucore -DHAVE_WL_VERSION_SCRIPT=1 -DCMAKE_HAVE_LIBC_PTHREAD=1 \
         -DANDROID_NDK="$DR/port/bt4/gsx/ndk" -DARMSX2_EXTRA_CMAKE="$here/recomp/android/gsx/hlgsx.cmake" \
         -DBT4GSX_DIR="$here/recomp/android/gsx" -DBT4GSX_RING_DIR="$here/build/PS2Recomp/ps2xRuntime/src/lib/gs"
 fi

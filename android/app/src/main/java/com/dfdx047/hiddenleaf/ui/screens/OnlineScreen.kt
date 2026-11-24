@@ -100,9 +100,26 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
     val idle = state is LobbyState.Idle || state is LobbyState.Failed
     // (online and local matches are base game only for now: the launcher's list, and the engine's own as a check)
     val modsOn = remember(fileMods) { fileMods.any { it.enabled } || Online.modsOn(vm.paths) }
-    var code by rememberSaveable { mutableStateOf("") }
+    var showCasualScreen by rememberSaveable { mutableStateOf(false) }
     var showRankedScreen by rememberSaveable { mutableStateOf(false) }
     val fp = { Online.fingerprint(context, vm.paths) }
+
+    if (showCasualScreen && !prefs.lan) {
+        CasualDedicatedScreen(
+            vm = vm,
+            lobby = lobby,
+            prefs = prefs,
+            state = state,
+            waiting = waiting,
+            ready = ready,
+            serverSet = serverSet,
+            modsOn = modsOn,
+            onOpenMods = onOpenMods,
+            fp = fp,
+            onBack = { showCasualScreen = false },
+        )
+        return
+    }
 
     if (showRankedScreen && !prefs.lan) {
         RankedDedicatedScreen(
@@ -144,107 +161,40 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
         }
 
         if (prefs.lan) LanPlay(lobby, ready, modsOn, onOpenMods, fp) { vm.play() }
-        else SectionCard(stringResource(R.string.online_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
-            when {
-                !ready -> Text(stringResource(R.string.online_need_game), style = MaterialTheme.typography.bodyMedium)
-                !serverSet -> Text(stringResource(R.string.online_need_server), style = MaterialTheme.typography.bodyMedium)
-            }
-            OutlinedTextField(
-                value = prefs.name,
-                onValueChange = { lobby.update(prefs.copy(name = Online.cleanName(it))) },
-                label = { Text(stringResource(R.string.online_name)) },
-                singleLine = true,
-                enabled = idle,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            when (val s = state) {
-                is LobbyState.Waiting -> RoomCode(s.code) { lobby.cancel() }
-                is LobbyState.Searching -> QuickSearching(
-                    since = s.since,
-                    inputMode = Online.effectiveInputMode(prefs.inputMode),
-                    onAcceptAny = {
-                        lobby.cancel()
-                        lobby.update(prefs.copy(inputMode = "any"))
-                        lobby.quick(fp(), ranked = false, inputModeOverride = "any") { vm.play() }
-                    },
-                    onCancel = { lobby.cancel() },
+        else {
+            SectionCard(stringResource(R.string.online_play_title), NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
+                when {
+                    !ready -> Text(stringResource(R.string.online_need_game), style = MaterialTheme.typography.bodyMedium)
+                    !serverSet -> Text(stringResource(R.string.online_need_server), style = MaterialTheme.typography.bodyMedium)
+                }
+                OutlinedTextField(
+                    value = prefs.name,
+                    onValueChange = { lobby.update(prefs.copy(name = Online.cleanName(it))) },
+                    label = { Text(stringResource(R.string.online_name)) },
+                    singleLine = true,
+                    enabled = idle,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
-                is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
-                else -> if (modsOn) ModsOnly(onOpenMods) else {
-                    val can = ready && serverSet && prefs.name.isNotBlank()
-                    Button(onClick = { lobby.quick(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.online_quick))
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            com.dfdx047.hiddenleaf.engine.TrainingQueue.arm(
-                                vm.paths,
-                                com.dfdx047.hiddenleaf.engine.TrainingQueue.Request(
-                                    server = Online.cleanServer(prefs.server),
-                                    name = prefs.name,
-                                    fp = fp(),
-                                    inputMode = Online.effectiveInputMode(prefs.inputMode),
-                                    delay = prefs.delay,
-                                    relay = prefs.relay,
-                                )
-                            )
-                            vm.play()
-                        },
-                        enabled = can,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.online_train_while_queue))
-                    }
-                    Text(
-                        stringResource(R.string.online_quick_hint) +
-                            (if (waiting > 0) " " + pluralStringResource(R.plurals.online_quick_others, waiting, waiting) + "." else ""),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (modsOn) {
+                    ModsOnly(onOpenMods)
+                } else {
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Modo Casual",
+                        subtitle = "Partida Rápida · Treinar na Fila · Sala com Amigo · Sala Personalizada & Espectador" +
+                            (if (waiting > 0) " · $waiting na fila" else ""),
+                        accent = Konoha.NarutoOrange,
+                        enabled = serverSet,
+                        onClick = { showCasualScreen = true },
                     )
-                    Text(stringResource(R.string.online_or_friend), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FilledTonalButton(onClick = { lobby.create(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.online_create))
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it.filter { c -> c.isDigit() }.take(6) },
-                            label = { Text(stringResource(R.string.online_code)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            modifier = Modifier.weight(1f),
-                        )
-                        Button(
-                            onClick = { lobby.join(code, fp()) { vm.play() } },
-                            enabled = can && code.length == 6,
-                        ) { Text(stringResource(R.string.online_join)) }
-                    }
-                    if (s is LobbyState.Failed) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(s.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { lobby.dismiss() }) { Text(stringResource(R.string.online_dismiss)) }
-                        }
-                    }
+                    com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                        title = "Modo Ranqueado",
+                        subtitle = "Jogar Ranqueada · Top 100 Global · Genin até Kage · Maestria de Personagem",
+                        accent = Konoha.ChakraAmber,
+                        enabled = serverSet,
+                        onClick = { showRankedScreen = true },
+                    )
                 }
             }
-        }
-
-        if (!prefs.lan) {
-            SectionCard(stringResource(R.string.online_ranked_board_title), NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
-                Text(
-                    "Modo Ranqueado separado da Partida Casual: ganhe RP, suba de Genin até Kage, evolua a Maestria do seu personagem e entre no Top 100 Global.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
-                    title = "Abrir Modo Ranqueado",
-                    subtitle = "Jogar Ranqueada · Top 100 Global · Maestria de Personagem",
-                    accent = Konoha.ChakraAmber,
-                    enabled = serverSet,
-                    onClick = { showRankedScreen = true },
-                )
-            }
-            CustomLobbyCard(lobby, prefs, ready, serverSet, fp) { vm.play() }
         }
 
         SectionCard(stringResource(R.string.online_guide_title), NinjaIcons.Scroll, accent = Konoha.LeeGreen) {
@@ -265,20 +215,6 @@ fun OnlineScreen(vm: AppViewModel, onOpenMods: () -> Unit = {}) {
             }
             Text(stringResource(R.string.online_delay_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             // (no relay on the local network: there is no room on the service to go through)
-            if (!prefs.lan) {
-                Text(stringResource(R.string.online_input_mode), style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((key, labelId) in listOf("any" to R.string.online_input_any, "touch" to R.string.online_input_touch, "gamepad" to R.string.online_input_gamepad)) {
-                        FilterChip(
-                            selected = prefs.inputMode == key,
-                            onClick = { lobby.update(prefs.copy(inputMode = key)) },
-                            enabled = idle,
-                            label = { Text(stringResource(labelId)) },
-                        )
-                    }
-                }
-                Text(stringResource(R.string.online_input_mode_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
             if (!prefs.lan) Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.online_relay), style = MaterialTheme.typography.titleSmall)
@@ -497,6 +433,146 @@ private fun Busy(text: String, onCancel: (() -> Unit)?) {
         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         if (onCancel != null) TextButton(onClick = onCancel) { Text(stringResource(R.string.online_cancel)) }
+    }
+}
+
+@Composable
+private fun CasualDedicatedScreen(
+    vm: AppViewModel,
+    lobby: OnlineLobby,
+    prefs: com.dfdx047.hiddenleaf.data.OnlinePrefs.State,
+    state: LobbyState,
+    waiting: Int,
+    ready: Boolean,
+    serverSet: Boolean,
+    modsOn: Boolean,
+    onOpenMods: () -> Unit,
+    fp: () -> String,
+    onBack: () -> Unit,
+) {
+    var code by rememberSaveable { mutableStateOf("") }
+    val idle = state is LobbyState.Idle || state is LobbyState.Failed
+    val can = ready && serverSet && !modsOn && prefs.name.isNotBlank()
+    val effectiveMode = Online.effectiveInputMode(prefs.inputMode)
+
+    val leftCol: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionCard("Filtro de Controle (Casual)", NinjaIcons.Tools, accent = Konoha.SasukeBlueLight) {
+                Text(
+                    "Escolha se prefere enfrentar apenas quem joga na Tela, no Controle ou Todos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((key, label) in listOf("touch" to "Só Tela", "gamepad" to "Só Controle", "any" to "Todos")) {
+                        FilterChip(
+                            selected = prefs.inputMode == key || (prefs.inputMode == "auto" && effectiveMode == key),
+                            onClick = { lobby.update(prefs.copy(inputMode = key)) },
+                            enabled = idle,
+                            label = { Text(label, maxLines = 1) },
+                        )
+                    }
+                }
+            }
+
+            SectionCard("Partida Rápida & Amigos (1v1)", NinjaIcons.Shuriken, accent = Konoha.NarutoOrange) {
+                when (val s = state) {
+                    is LobbyState.Waiting -> RoomCode(s.code) { lobby.cancel() }
+                    is LobbyState.Searching -> QuickSearching(
+                        since = s.since,
+                        inputMode = effectiveMode,
+                        onAcceptAny = {
+                            lobby.cancel()
+                            lobby.update(prefs.copy(inputMode = "any"))
+                            lobby.quick(fp(), ranked = false, inputModeOverride = "any") { vm.play() }
+                        },
+                        onCancel = { lobby.cancel() },
+                    )
+                    is LobbyState.Working -> Busy(stringResource(s.step)) { lobby.cancel() }
+                    is LobbyState.Starting -> Busy(stringResource(R.string.online_starting, s.peer), null)
+                    else -> if (modsOn) ModsOnly(onOpenMods) else {
+                        com.dfdx047.hiddenleaf.ui.components.Un5WoodActionBoard(
+                            title = stringResource(R.string.online_quick),
+                            subtitle = "Fila casual · Controle: ${when (effectiveMode) { "touch" -> "Só Tela"; "gamepad" -> "Só Controle"; else -> "Todos" }}" +
+                                (if (waiting > 0) " · $waiting na fila" else ""),
+                            accent = Konoha.NarutoOrange,
+                            enabled = can,
+                            onClick = { lobby.quick(fp(), ranked = false) { vm.play() } },
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                com.dfdx047.hiddenleaf.engine.TrainingQueue.arm(
+                                    vm.paths,
+                                    com.dfdx047.hiddenleaf.engine.TrainingQueue.Request(
+                                        server = Online.cleanServer(prefs.server),
+                                        name = prefs.name,
+                                        fp = fp(),
+                                        inputMode = effectiveMode,
+                                        delay = prefs.delay,
+                                        relay = prefs.relay,
+                                    )
+                                )
+                                vm.play()
+                            },
+                            enabled = can,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.online_train_while_queue))
+                        }
+                        Text(stringResource(R.string.online_or_friend), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FilledTonalButton(onClick = { lobby.create(fp()) { vm.play() } }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.online_create))
+                        }
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { code = it.filter { c -> c.isDigit() }.take(6) },
+                            label = { Text(stringResource(R.string.online_code)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = { lobby.join(code, fp()) { vm.play() } },
+                            enabled = can && code.length == 6,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.online_join)) }
+                        if (s is LobbyState.Failed) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(s.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { lobby.dismiss() }) { Text(stringResource(R.string.online_dismiss)) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val rightCol: @Composable () -> Unit = {
+        CustomLobbyCard(lobby, prefs, ready, serverSet, fp) { vm.play() }
+    }
+
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onBack) { Text("← Voltar") }
+            Column(Modifier.weight(1f)) {
+                Text("Modo Casual", style = MaterialTheme.typography.headlineSmall, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                Text("Partida Rápida · Amigos 1v1 · Sala Personalizada & Espectador", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (cfg.screenWidthDp >= 680) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.weight(0.95f)) { leftCol() }
+                Column(Modifier.weight(1.05f)) { rightCol() }
+            }
+        } else {
+            leftCol()
+            rightCol()
+        }
     }
 }
 

@@ -179,9 +179,21 @@ namespace
 	Video s_videoNext{};
 	bool s_videoPending = false, s_videoFirst = true;
 	int s_fpsMode = 50;
+	std::atomic<int> s_zeroFgPending{-1}; // -1 none, 0 off, 2/3/4 multiplier
 
 	void applyVideoIfAsked()
 	{
+		const int zfg = s_zeroFgPending.exchange(-1, std::memory_order_acq_rel);
+		if (zfg >= 0)
+		{
+			MTGS::RunOnGSThread([zfg]() {
+				Pcsx2Config::GSOptions c(GSConfig);
+				c.ZeroFGEnabled = zfg >= 2;
+				c.ZeroFGMode = 7; // ZeroGS (RZ+ with content-break detection and HUD layer separation)
+				c.ZeroFGMultiplier = static_cast<u8>(zfg >= 2 && zfg <= 4 ? zfg : 2);
+				GSUpdateConfig(c);
+			});
+		}
 		Video v;
 		{
 			std::lock_guard<std::mutex> lock(s_videoLock);
@@ -601,6 +613,11 @@ __attribute__((visibility("default"))) void Bt4Gsx_SetVideo(const void* video)
 	std::lock_guard<std::mutex> lock(s_videoLock);
 	s_videoNext = *static_cast<const Video*>(video);
 	s_videoPending = true;
+}
+
+__attribute__((visibility("default"))) void Bt4Gsx_SetZeroFg(int multiplier)
+{
+	s_zeroFgPending.store(multiplier >= 2 && multiplier <= 4 ? multiplier : 0, std::memory_order_release);
 }
 
 __attribute__((visibility("default"))) void Bt4Gsx_SurfaceChanged(void* window, int width, int height)

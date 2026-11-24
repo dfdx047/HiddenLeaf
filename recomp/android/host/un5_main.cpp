@@ -175,7 +175,8 @@ namespace
         int scale4 = 4;      // internal resolution in quarters: 4 = 1x
         int filter = 0;      // on the way to the screen: 0 bilinear, 1 sharp bilinear, 2 FXAA, 3 CAS
         int aspectMilli = 0; // the shape of the picture: 0 the screen's, 1333 the game's, or width/height*10000
-        int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
+        int fpsMode = 50;    // 30 or 50 (the game's original rate)
+        int zeroFg = 0;      // ZeroFG 1.2 Vulkan frame generation (OFFLINE ONLY): 0 off, 2 = 2x, 3 = 3x, 4 = 4x
     };
     Settings g_settings;
     // The launcher's "Modo leve" (light_mode=1): Nominum's VIF1 and VU1 and, on weak 4-big-core SoCs, the GS in two threads.
@@ -204,7 +205,9 @@ namespace
             else if (!std::strcmp(line, "aspect_milli"))
                 g_settings.aspectMilli = v;
             else if (!std::strcmp(line, "fps_mode"))
-                g_settings.fpsMode = v;
+                g_settings.fpsMode = (v == 30) ? 30 : 50; // legacy 60/90/120 interpolated removed
+            else if (!std::strcmp(line, "zero_fg"))
+                g_settings.zeroFg = (v == 2 || v == 3 || v == 4) ? v : 0;
             else if (!std::strcmp(line, "dr_unlock_all"))
                 hl_game::g_unlockAll = v != 0;
             else if (!std::strcmp(line, "special_one"))
@@ -245,6 +248,7 @@ namespace
         int fpsMode;
     };
     void (*g_gsxSetVideo)(const GsxVideo *) = nullptr;
+    void (*g_gsxSetZeroFg)(int) = nullptr;
     int (*g_gsxPresentRate)() = nullptr;
     int g_windowW = 0, g_windowH = 0;
 
@@ -293,9 +297,15 @@ namespace
                      // barriers 1878 -> 0, passes 519 -> 22, GPU 75% -> 13%, right image; ARMSX2's list denies it on this part).
                      // Adreno ignores it.
                      "ForceMaliFramebufferFetch = true\n"
-                     "DumpReplaceableTextures = false\n",
+                     "DumpReplaceableTextures = false\n"
+                     // ZeroFG 1.2 real Vulkan 1.3 frame generation: STRICTLY OFFLINE ONLY (disabled automatically when online)
+                     "ZeroFGEnabled = %s\n"
+                     "ZeroFGMode = 7\n"
+                     "ZeroFGMultiplier = %d\n",
                      static_cast<double>(upscale), g_settings.filter == 2 ? "true" : "false", g_settings.filter == 3 ? 1 : 0, g_settings.filter == 1 ? 2 : 1,
-                     std::getenv("HL_PERF") ? "true" : "false");
+                     std::getenv("HL_PERF") ? "true" : "false",
+                     (!hl_online::active() && g_settings.zeroFg >= 2) ? "true" : "false",
+                     (g_settings.zeroFg >= 2 && g_settings.zeroFg <= 4) ? g_settings.zeroFg : 2);
         // PCSX2's GS in two threads (GSBackThreadMode: one parses the GIF, "GS Back" draws) where the GS is the limit of a
         // device with four fast cores: on the Mi A3 (Snapdragon 665, "trinket") the GS thread of a heavy fight went from 22-27
         // to 12-16 ms (docs/registro.md, 2026-11-13). Only with the GS on Vulkan and the native renderer off (hl_native's
@@ -485,8 +495,18 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 // The panel: resolution, filter, shape and frame rate, in effect from the next frame
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetVideo(JNIEnv *, jclass, jint scale4, jint filter, jint aspectMilli, jint fpsMode)
 {
-    g_settings = {scale4, filter, aspectMilli, fpsMode};
+    g_settings.scale4 = scale4;
+    g_settings.filter = filter;
+    g_settings.aspectMilli = aspectMilli;
+    g_settings.fpsMode = (fpsMode == 30) ? 30 : 50;
     applyVideo();
+}
+extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetZeroFg(JNIEnv *, jclass, jint multiplier)
+{
+    const int eff = (!hl_online::active() && (multiplier == 2 || multiplier == 3 || multiplier == 4)) ? multiplier : 0;
+    g_settings.zeroFg = eff;
+    if (g_gsxSetZeroFg)
+        g_gsxSetZeroFg(eff);
 }
 // The game menu's Controls tab: the one-tap special, its button, and what a tap is worth where the game asks to press repeatedly, at once
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetAssist(JNIEnv *, jclass, jint specialOne, jint specialButton, jint mashPercent)
@@ -672,6 +692,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char *a
     const auto gsxSurfaceDestroyed = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_SurfaceDestroyed"));
     const auto gsxStop = reinterpret_cast<void (*)(void)>(dlsym(gsx, "Bt4Gsx_Stop"));
     g_gsxSetVideo = reinterpret_cast<void (*)(const GsxVideo *)>(dlsym(gsx, "Bt4Gsx_SetVideo"));
+    g_gsxSetZeroFg = reinterpret_cast<void (*)(int)>(dlsym(gsx, "Bt4Gsx_SetZeroFg"));
     g_gsxPresentRate = reinterpret_cast<int (*)()>(dlsym(gsx, "Bt4Gsx_PresentRate"));
     hl_game::g_nativeOn = reinterpret_cast<bool (*)()>(dlsym(gsx, "Bt4Gsx_NativeOn"));
     hl_game::g_liveFight = reinterpret_cast<void (*)(bool)>(dlsym(gsx, "Bt4Gsx_LiveFight"));

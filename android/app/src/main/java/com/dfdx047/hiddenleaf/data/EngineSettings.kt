@@ -66,7 +66,8 @@ class EngineSettings(private val file: File) {
         const val SPECIAL_ONE = "special_one"     // 1: one tap does the Jutsu or Ougi, and answers the game's prompts (hl_game.cpp)
         const val SPECIAL_BUTTON = "special_button" // its button, in the game's bits of the pad: 0x20 circle...
         const val MASH_PERCENT = "mash_percent"   // what a tap is worth where the game asks to press repeatedly: 100..200
-        const val FPS_MODE = "fps_mode"           // 30, 50 (the game's), 60, 90 or 120 (interpolated)
+        const val FPS_MODE = "fps_mode"           // 30 or 50 (the game's original rate)
+        const val ZERO_FG = "zero_fg"             // ZeroFG 1.2 real Vulkan frame generation (offline only): 0 off, 2 = 2x, 3 = 3x, 4 = 4x
         const val SKIP_INTRO = "skip_intro"       // 1 (default): the logos and opening movies skipped, START pressed for the player
         const val LIGHT_MODE = "light_mode"       // 1: light mode, for weaker phones (Snapdragon 665 class): Nominum's VIF1 and VU1 (its recompiled
                                                   // microprograms) and, on the Snapdragon 665, the GS in two threads; faster, some effects may fail.

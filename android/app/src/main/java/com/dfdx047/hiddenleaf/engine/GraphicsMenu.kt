@@ -279,7 +279,8 @@ private fun GraphicsMenuContent(
                         }
                         2 -> {
                             val filter = get(EngineSettings.FILTER, 0)
-                            val fps = get(EngineSettings.FPS_MODE, 50)
+                            val fps = if (get(EngineSettings.FPS_MODE, 50) == 30) 30 else 50
+                            val fg = get(EngineSettings.ZERO_FG, 0)
                             WoodOptionRow(
                                 label = stringResource(R.string.screen_filter),
                                 value = filterName(filter),
@@ -288,18 +289,25 @@ private fun GraphicsMenuContent(
                                 onPrev = { onSet(EngineSettings.FILTER, (filter + 3) % 4) },
                                 onNext = { onSet(EngineSettings.FILTER, (filter + 1) % 4) },
                             )
-                            val rates = listOf(30, 50, 60, 90, 120)
                             WoodOptionRow(
                                 label = stringResource(R.string.panel_fps_limit),
-                                value = if (fps > 50) "$fps FPS (interp · reinicie)" else "$fps FPS",
+                                value = "$fps FPS",
+                                kanit = kanit, pulse = pulse.value,
+                                onPrev = { onSet(EngineSettings.FPS_MODE, if (fps == 30) 50 else 30) },
+                                onNext = { onSet(EngineSettings.FPS_MODE, if (fps == 30) 50 else 30) },
+                            )
+                            val fgs = listOf(0, 2, 3, 4)
+                            WoodOptionRow(
+                                label = "Frame Gen (ZeroFG · Offline)",
+                                value = if (fg == 0) "Desligado" else "${fg}x (Vulkan 1.3)",
                                 kanit = kanit, pulse = pulse.value,
                                 onPrev = {
-                                    val idx = rates.indexOf(fps).let { if (it <= 0) rates.lastIndex else it - 1 }
-                                    onSet(EngineSettings.FPS_MODE, rates[idx])
+                                    val idx = fgs.indexOf(fg).let { if (it <= 0) fgs.lastIndex else it - 1 }
+                                    onSet(EngineSettings.ZERO_FG, fgs[idx])
                                 },
                                 onNext = {
-                                    val idx = rates.indexOf(fps).let { if (it < 0 || it >= rates.lastIndex) 0 else it + 1 }
-                                    onSet(EngineSettings.FPS_MODE, rates[idx])
+                                    val idx = fgs.indexOf(fg).let { if (it < 0 || it >= fgs.lastIndex) 0 else it + 1 }
+                                    onSet(EngineSettings.ZERO_FG, fgs[idx])
                                 },
                             )
                             WoodBoard(stringResource(R.string.cancel), null, shojumaru, kanit, pulse.value, onClick = onBack)

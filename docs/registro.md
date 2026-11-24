@@ -61,6 +61,24 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 20:52: Frame Generation real ZeroFG 1.2 (somente Offline), reorganização do menu Online (`CasualDedicatedScreen`) e verificação completa pós-luta nos 3 aparelhos
+
+- **Frame Generation real (ZeroFG 1.2 · `0001-zerofg-1.2.patch`, `hl_gsx.cpp`, `un5_main.cpp`, `SettingsScreen.kt`, `GameMenu.kt`, `GraphicsMenu.kt`, `GameActivity.kt`):**
+  - Removida a opção antiga de FPS interpolado (60/90/120) que não surtia efeito real; mantido o limite nativo (`30` / `50 original`).
+  - Integrado o **ZeroFG 1.2** (do ARMSX2 PR `#1050` + biblioteca standalone Apache-2.0 `ZeroFG`, sem necessidade de DLL externa) direto na `libbt4gsx.so`, rodando em dispositivo Vulkan 1.3 dedicado (Device B) no modo ZeroGS (`ZeroFGMode = 7`, com separação de HUD e detecção de corte de cena) e multiplicadores `Desligado`, `2x`, `3x`, `4x` (`zero_fg`).
+  - **Exclusivo do modo Offline:** `un5_main.cpp` força `ZeroFGEnabled = false` automaticamente quando `hl_online::active()` para manter o modo Online justo a 50 Hz nativos.
+  - Verificado ao vivo nos 3 aparelhos:
+    - **Retroid Pocket 5 (Adreno 650):** ZeroFG 1.2 ativo no Device B (`1920x1080`, `status=0`).
+    - **Anbernic RG Cube (Mali-G57):** ZeroFG 1.2 ativo (`704x528`, `status=0`), dobrando o jogo de 25 FPS para **50–59 FPS** na tela.
+    - **Xiaomi Mi A3 (Adreno 610, Vulkan 1.1.128 stock):** fallback gracioso sem crash (`ZeroFG: unavailable, the GPU's driver is Vulkan 1.1.128, ZeroFG needs 1.3`), ativando automaticamente se usar driver Turnip Vulkan 1.3.
+- **Reorganização do menu Online (`OnlineScreen.kt`):**
+  - Tela principal Online enxuta: seletor `Online (internet)` / `Rede local (Wi-Fi)`, nome do jogador, botão **`Modo Casual`** (abre `CasualDedicatedScreen`), botão **`Modo Ranqueado`** (abre `RankedDedicatedScreen`) e, fora deles, apenas as configurações de conexão/servidor (Atraso, Relay, URL do servidor e Testar).
+  - Removido o filtro global de controle da tela principal e colocado um filtro dedicado (`Só Tela` / `Só Controle` / `Todos`) separadamente dentro de **Modo Casual** e dentro de **Modo Ranqueado**.
+  - **`CasualDedicatedScreen`** reúne tudo do Casual em 2 colunas (paisagem): Filtro de Controle, Partida Rápida, Treinar na Fila, Criar/Entrar Sala 1v1 e **Sala Personalizada & Espectador (2–8 jogadores)**.
+- **Verificação pós-luta nos 3 aparelhos (RP5, RG Cube, Mi A3):**
+  - Testado fluxo real: entrar em luta no Free Battle → pausar e sair → voltar para Seleção de Personagem → voltar para o Mode Select.
+  - Capturas inspecionadas visualmente nos 3 aparelhos (e comparadas antes vs depois da luta no RP5): **0 texturas invertidas ou corrompidas**.
+
 ### 2026-11-24 20:12: Correção das texturas de menu bugadas pós-luta (`libbt4gsx.so`) e aba de Drivers com PanVK, MaliSX2, RADV (Jim & Paulo Wesley) + fallback anti-403
 
 - **Texturas do menu bugadas ao voltar de uma luta (`hl_gsx.cpp`, `hl_native.cpp`, `hl_native.h`):**
