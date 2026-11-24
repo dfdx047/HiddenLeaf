@@ -16,11 +16,9 @@ object GpuProfiles {
         val gpu: String,
         val tier: Int,
         val scale4: Int,        // internal resolution in quarters (4 = 1x)
-        val interp: Int,        // smooth motion: 0 off, 1 = 60
-        val fragDepth: Int,     // precise depth
-        val frameSkip: Int,     // skip pictures instead of slowing down
-        val fxOffAdd: Int,      // PS2 effects switched off (bits: 16 distance blur, 32 movement blur)
-        val filter: Int,        // screen filter: 0 bilinear
+        val fpsMode: Int,       // 50 (the game's own) or 60 (interpolated)
+        val lightMode: Int,     // 1: Nominum VU1 + GS split on weak SoCs
+        val filter: Int,        // screen filter: 0 bilinear, 1 sharp bilinear
     )
 
     /** [family]: a regular expression over the lower-case name; [from]..[to]: its three-digit model number (0..0: any). */
@@ -73,11 +71,11 @@ object GpuProfiles {
     fun profile(gpu: String): Profile? {
         val t = tierOf(gpu)
         return when (t) {
-            0 -> Profile(gpu, 0, scale4 = 4, interp = 0, fragDepth = 0, frameSkip = 1, fxOffAdd = 16 or 32, filter = 0)
-            1 -> Profile(gpu, 1, scale4 = 4, interp = 0, fragDepth = 0, frameSkip = 1, fxOffAdd = 32, filter = 0)
-            2 -> Profile(gpu, 2, scale4 = 6, interp = 0, fragDepth = 0, frameSkip = 1, fxOffAdd = 0, filter = 0)
-            3 -> Profile(gpu, 3, scale4 = 8, interp = 0, fragDepth = 1, frameSkip = 1, fxOffAdd = 0, filter = 0)
-            4 -> Profile(gpu, 4, scale4 = 8, interp = 1, fragDepth = 1, frameSkip = 1, fxOffAdd = 0, filter = 0)
+            0 -> Profile(gpu, 0, scale4 = 4, fpsMode = 50, lightMode = 1, filter = 0)
+            1 -> Profile(gpu, 1, scale4 = 5, fpsMode = 50, lightMode = 1, filter = 0)
+            2 -> Profile(gpu, 2, scale4 = 6, fpsMode = 50, lightMode = 1, filter = 0)
+            3 -> Profile(gpu, 3, scale4 = 8, fpsMode = 50, lightMode = 1, filter = 0)
+            4 -> Profile(gpu, 4, scale4 = 12, fpsMode = 60, lightMode = 1, filter = 0)
             else -> null
         }
     }
@@ -85,11 +83,8 @@ object GpuProfiles {
     /** Writes the profile's settings (the player said yes); the tier is kept so that it is not offered again. */
     fun apply(p: Profile, s: EngineSettings) {
         s.set(EngineSettings.SCALE4, p.scale4)
-        s.set(EngineSettings.SCALE, EngineSettings.wholeScale(p.scale4))
-        s.set(EngineSettings.INTERP, p.interp)
-        s.set(EngineSettings.FRAG_DEPTH, p.fragDepth)
-        s.set(EngineSettings.FRAME_SKIP, p.frameSkip)
-        s.set(EngineSettings.FX_OFF, s.get(EngineSettings.FX_OFF, 0) or p.fxOffAdd)
+        s.set(EngineSettings.FPS_MODE, p.fpsMode)
+        s.set(EngineSettings.LIGHT_MODE, p.lightMode)
         s.set(EngineSettings.FILTER, p.filter)
         s.set(EngineSettings.GPU_TIER, p.tier)
     }

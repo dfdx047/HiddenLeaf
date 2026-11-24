@@ -61,6 +61,17 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 01:05: Fase 1 — otimização do motor (Nominum VU1 zero-copy, ring buffer zero-copy, GS split, GpuProfiles reais)
+
+- **Nominum VU1 zero-copy (`0109-nominum-vu1-zero-copy.patch`, `hl_nominum_vu1.cpp`):** `PS2Memory` agora aponta `getVU1Code()`/`getVU1Data()` direto para os buffers internos de `nominum::core::Vif1` (sincronizados por `HL_VU_SYNC()` em `mapVuMemory()`), eliminando 48 KB de `memcmp`/`memcpy` por transferência VIF1 (`micro memory loaded by address 1 times` nos 3 aparelhos).
+- **Ring buffer zero-copy (`hl_gsx.cpp`):** pacotes GIF contíguos no anel agora são lidos e modificados in-place sem cópia para `s_packet`, com `consume()` diferido para o próximo `live_next()`.
+- **Modo leve (`NOMINUM_VU1=1`) ligado por padrão + `GSBackThreadMode=1` expandido (`un5_main.cpp`):** ativado por padrão após a correção dos patches `0107`/`0108`, com GS em duas threads habilitado também para SoCs `trinket`, `bengal`, `khaje`, `ums9620` e `mt676x`/`mt678x`.
+- **`GpuProfiles.kt` e `GpuOfferDialog.kt`:** removidas as chaves mortas legadas do BT3 (`interp`, `frag_depth`, `frame_skip`, `fx_off`, `scale`); o perfil agora aplica e exibe as configurações reais do Hidden Leaf (`scale4`, `fps_mode`, `light_mode`, `filter`).
+- **Verificado nos 3 aparelhos (rota `hl_env_v3.txt` até v8400, 0 `missing-target`, 0 crashes, capturas conferidas):**
+  - **Mi A3 (SD665, `libun5_v80.so`, GS 2 threads):** Luta 1 **49,3 fps** (mín 43,5, VU1 15,0 ms), Ougi **49,4 fps** (mín 43,0, VU1 14,7 ms), Vitória **50,4 fps** (mín 48,9, VU1 14,4 ms).
+  - **RG Cube (Mali-G57, `ums9620`, GS 2 threads):** Luta 1 **50,0 fps** (mín 50,0, VU1 5,1 ms), Ougi **50,0 fps** (mín 50,0, VU1 6,4 ms), Vitória **50,0 fps** (mín 49,8, VU1 7,5 ms).
+  - **Retroid Pocket 5 capado (`sd480p`):** Luta 1 **50,0 fps** (mín 49,6, VU1 5,7 ms), Ougi **50,0 fps** (mín 49,1, VU1 8,6 ms), Vitória **50,0 fps** (mín 49,9, VU1 9,2 ms).
+
 ### 2026-11-14 12:20: documentação do release e da chave de assinatura
 
 - A pedido do desenvolvedor (a próxima atualização deve sair em 2–3 semanas, em outra sessão): `docs/release.md` com a

@@ -178,11 +178,10 @@ namespace
         int fpsMode = 50;    // 30, 50 (the game's), 60 or 120 (the last two by interpolation)
     };
     Settings g_settings;
-    // The launcher's "Modo leve" (light_mode=1): Nominum's VIF1 and VU1 and, on the Snapdragon 665, the GS in two threads.
-    // Off (the default) the runtime's VU1 and the GS in one thread: the developer saw effects missing and the screen
-    // breaking with them (Hinata's awakening, the victory screen) and kept them for the phones that need the speed
-    // (docs/registro.md, 2026-11-13). NOMINUM_VU1 and HL_GS_SPLIT in hl_env.txt still decide over it.
-    bool g_lightMode = false;
+    // The launcher's "Modo leve" (light_mode=1, on by default since 0107/0108 fixed the DIRECT-PACKED bug):
+    // Nominum's VIF1 and VU1 (zero-copy) and, on weak/mid 4-big-core SoCs, the GS in two threads.
+    // NOMINUM_VU1 and HL_GS_SPLIT in hl_env.txt still decide over it.
+    bool g_lightMode = true;
 
     void loadSettings(const std::string &path)
     {
@@ -311,7 +310,10 @@ namespace
             char platform[PROP_VALUE_MAX] = {};
             __system_property_get("ro.board.platform", platform);
             const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
-            const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && std::strcmp(platform, "trinket") == 0;
+            const bool splitPlatform = std::strcmp(platform, "trinket") == 0 || std::strcmp(platform, "bengal") == 0 ||
+                                       std::strcmp(platform, "khaje") == 0 || std::strcmp(platform, "ums9620") == 0 ||
+                                       std::strncmp(platform, "mt676", 5) == 0 || std::strncmp(platform, "mt678", 5) == 0;
+            const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && splitPlatform;
             if (on)
             {
                 std::fprintf(f, "GSBackThreadMode = 1\n");

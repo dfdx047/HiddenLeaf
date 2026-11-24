@@ -26,11 +26,8 @@ fun GpuOfferDialog(vm: AppViewModel) {
     val offer = p ?: return
     val items = buildList {
         add(stringResource(R.string.gpu_opt_resolution, if (offer.scale4 % 4 == 0) "${offer.scale4 / 4}x" else "${offer.scale4 / 4.0}x"))
-        add(stringResource(if (offer.interp == 0) R.string.gpu_opt_interp_off else R.string.gpu_opt_interp_60))
-        add(stringResource(if (offer.fragDepth == 0) R.string.gpu_opt_depth_off else R.string.gpu_opt_depth_on))
-        add(stringResource(R.string.gpu_opt_frameskip))
-        if (offer.fxOffAdd and 16 != 0) add(stringResource(R.string.gpu_opt_blur_far))
-        if (offer.fxOffAdd and 32 != 0) add(stringResource(R.string.gpu_opt_blur_move))
+        add(stringResource(if (offer.fpsMode <= 50) R.string.gpu_opt_interp_off else R.string.gpu_opt_interp_60))
+        if (offer.lightMode != 0) add(stringResource(R.string.gpu_opt_light_on))
         add(stringResource(R.string.gpu_opt_filter))
     }
     AlertDialog(

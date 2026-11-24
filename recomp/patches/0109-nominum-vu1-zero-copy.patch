@@ -1,0 +1,134 @@
+--- a/ps2xRuntime/include/runtime/hl_nominum_vu1.h
++++ b/ps2xRuntime/include/runtime/hl_nominum_vu1.h
+@@ -24,6 +24,10 @@
+     using MaskFn = void (*)(void *ctx, bool masked); // MSKPATH3 changed
+     // returns true when the transfer changed the micro memory (MPG)
+     using TransferFn = bool (*)(const Shared &shared, const uint8_t *data, uint32_t size, GifFn gif, MaskFn mask, void *ctx);
++    using CodeDirtyFn = void (*)();
+ 
+     extern TransferFn g_transfer;
++    extern uint8_t *g_vu1Code;
++    extern uint8_t *g_vu1Data;
++    extern CodeDirtyFn g_vu1CodeDirty;
+ }
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -12,6 +12,7 @@
+ #include <mutex>
+ 
+ #include "gs/ps2_gif_arbiter.h"
++#include "hl_nominum_vu1.h"
+ #include "hl_vu_worker.h"
+ #if defined(_MSC_VER)
+ #include <intrin.h>
+@@ -330,10 +331,10 @@
+     using Vu1MscntCallback = std::function<void(uint32_t top, uint32_t itop)>;
+     void setVu1MscntCallback(Vu1MscntCallback cb) { m_vu1MscntCallback = std::move(cb); }
+ 
+-    uint8_t *getVU1Code() { return m_vu1Code; }
+-    const uint8_t *getVU1Code() const { return m_vu1Code; }
+-    uint8_t *getVU1Data() { return m_vu1Data; }
+-    const uint8_t *getVU1Data() const { return m_vu1Data; }
++    uint8_t *getVU1Code() { return hl_nvu1::g_vu1Code ? hl_nvu1::g_vu1Code : m_vu1Code; }
++    const uint8_t *getVU1Code() const { return hl_nvu1::g_vu1Code ? hl_nvu1::g_vu1Code : m_vu1Code; }
++    uint8_t *getVU1Data() { return hl_nvu1::g_vu1Data ? hl_nvu1::g_vu1Data : m_vu1Data; }
++    const uint8_t *getVU1Data() const { return hl_nvu1::g_vu1Data ? hl_nvu1::g_vu1Data : m_vu1Data; }
+     uint8_t *getVU0Code() { return m_vu0Code; }
+     const uint8_t *getVU0Code() const { return m_vu0Code; }
+     uint8_t *getVU0Data() { return m_vu0Data; }
+@@ -447,7 +448,12 @@
+     bool isAddressInRegion(uint32_t address, const CodeRegion &region);
+     void markModified(uint32_t address, uint32_t size);
+     void markVU0CodeModified() { m_vu0CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
+-    void markVU1CodeModified() { m_vu1CodeGeneration.fetch_add(1, std::memory_order_relaxed); }
++    void markVU1CodeModified()
++    {
++        m_vu1CodeGeneration.fetch_add(1, std::memory_order_relaxed);
++        if (hl_nvu1::g_vu1CodeDirty)
++            hl_nvu1::g_vu1CodeDirty();
++    }
+     bool isScratchpad(uint32_t address) const { return ps2IsScratchpadAddress(address); } // (Hidden Leaf: in line)
+     uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit);
+     const uint8_t *mapVuMemory(uint32_t physAddr, uint32_t size, uint32_t &offset, uint32_t &limit) const;
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -586,11 +586,11 @@
+     }
+     if (physAddr >= PS2_VU1_CODE_BASE && physAddr < PS2_VU1_DATA_BASE + PS2_VU1_DATA_SIZE)
+         HL_VU_SYNC(); // VU1's memory belongs to the worker
+-    if (const uint8_t *ptr = mapRange(PS2_VU1_CODE_BASE, PS2_VU1_CODE_SIZE, m_vu1Code))
++    if (const uint8_t *ptr = mapRange(PS2_VU1_CODE_BASE, PS2_VU1_CODE_SIZE, getVU1Code()))
+     {
+         return ptr;
+     }
+-    return mapRange(PS2_VU1_DATA_BASE, PS2_VU1_DATA_SIZE, m_vu1Data);
++    return mapRange(PS2_VU1_DATA_BASE, PS2_VU1_DATA_SIZE, getVU1Data());
+ }
+ 
+ uint32_t PS2Memory::translateAddressSlow(uint32_t virtualAddress)
+@@ -914,7 +914,7 @@
+             vuMem[vuOffset] = value;
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+-            else if (vuMem == m_vu1Code)
++            else if (vuMem == getVU1Code())
+                 markVU1CodeModified();
+             return;
+         }
+@@ -957,7 +957,7 @@
+             storeScalar<uint16_t>(vuMem, vuOffset, vuLimit, value, "write16 vu", address);
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+-            else if (vuMem == m_vu1Code)
++            else if (vuMem == getVU1Code())
+                 markVU1CodeModified();
+             return;
+         }
+@@ -1022,7 +1022,7 @@
+             storeScalar<uint32_t>(vuMem, vuOffset, vuLimit, value, "write32 vu", address);
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+-            else if (vuMem == m_vu1Code)
++            else if (vuMem == getVU1Code())
+                 markVU1CodeModified();
+             return;
+         }
+@@ -1078,7 +1078,7 @@
+             storeScalar<uint64_t>(vuMem, vuOffset, vuLimit, value, "write64 vu", address);
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+-            else if (vuMem == m_vu1Code)
++            else if (vuMem == getVU1Code())
+                 markVU1CodeModified();
+             return;
+         }
+@@ -1136,7 +1136,7 @@
+             _mm_storeu_si128(reinterpret_cast<__m128i *>(vuMem + vuOffset), value);
+             if (vuMem == m_vu0Code)
+                 markVU0CodeModified();
+-            else if (vuMem == m_vu1Code)
++            else if (vuMem == getVU1Code())
+                 markVU1CodeModified();
+             return;
+         }
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -323,6 +323,9 @@
+ }
+ 
+ hl_nvu1::TransferFn hl_nvu1::g_transfer = nullptr;
++uint8_t *hl_nvu1::g_vu1Code = nullptr;
++uint8_t *hl_nvu1::g_vu1Data = nullptr;
++hl_nvu1::CodeDirtyFn hl_nvu1::g_vu1CodeDirty = nullptr;
+ 
+ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ {
+@@ -348,7 +351,7 @@
+     if (hl_nvu1::g_transfer != nullptr)
+     {
+         static_assert(sizeof(VIFRegisters) == 23u * 4u, "Nominum's VIF1 takes the 23 words");
+-        const hl_nvu1::Shared shared{m_vu1Code, m_vu1Data, reinterpret_cast<uint32_t *>(&vif1_regs), &m_vif1PendingDirectQwc,
++        const hl_nvu1::Shared shared{getVU1Code(), getVU1Data(), reinterpret_cast<uint32_t *>(&vif1_regs), &m_vif1PendingDirectQwc,
+                                      &m_vif1PendingPath2ImageQwc, &m_vif1PendingPath2DirectHl, &m_path3Masked};
+         const bool codeChanged = hl_nvu1::g_transfer(
+             shared, data, sizeBytes,

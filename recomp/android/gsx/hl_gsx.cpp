@@ -67,6 +67,7 @@ namespace
 	ps2live::RingHeader* s_ring = nullptr;
 	uint8_t* s_data = nullptr;
 	uint64_t s_capacity = 0;
+	uint64_t s_deferredConsume = 0;
 	std::vector<uint8_t> s_packet;
 	std::atomic<bool> s_stop{false};
 	std::atomic<bool> s_hold{false}; // the app's menu is up: the stream is not read (the game waits on its ring)
@@ -410,6 +411,11 @@ namespace
 	{
 		static LivePacketHeld s_held;
 		static bool s_memoryReleased = false;
+		if (s_deferredConsume)
+		{
+			consume(s_deferredConsume);
+			s_deferredConsume = 0;
+		}
 		if (!s_memoryReleased)
 		{
 			s_memoryReleased = true;
@@ -459,16 +465,33 @@ namespace
 					const uint32_t length = value<uint32_t>(2);
 					if (!wait_for(6ull + length))
 						continue;
-					s_packet.resize(length);
-					peek(6, s_packet.data(), length);
-					consume(6ull + length);
+					const uint64_t startPos = (static_cast<uint64_t>(s_ring->readPos) + 6ull) % s_capacity;
+					uint8_t* pkt = nullptr;
+					const bool zeroCopy = (length == 0u) || (startPos + length <= s_capacity);
+					if (zeroCopy)
+					{
+						pkt = s_data + startPos;
+					}
+					else
+					{
+						s_packet.resize(length);
+						peek(6, s_packet.data(), length);
+						consume(6ull + length);
+						pkt = s_packet.data();
+					}
 					if (!s_dumps.empty())
-						dumpTransfer(path, s_packet.data(), length);
-					if (hl_native::transfer(path, s_packet.data(), length))
+						dumpTransfer(path, pkt, length);
+					if (hl_native::transfer(path, pkt, length))
+					{
+						if (zeroCopy)
+							consume(6ull + length);
 						continue;
+					}
 					if (!hl_native::sceneOn() && !g_bt4WideCamera.load(std::memory_order_relaxed))
-						hl_native::widen2d(s_packet.data(), length);
-					*out = {type, path, s_packet.data(), length};
+						hl_native::widen2d(pkt, length);
+					if (zeroCopy)
+						s_deferredConsume = 6ull + length;
+					*out = {type, path, pkt, length};
 					return true;
 				}
 				case kTypeVSync:
@@ -669,6 +692,7 @@ __attribute__((visibility("default"))) int Bt4Gsx_Run(const Bt4GsxArgs* a)
 	s_ring = static_cast<ps2live::RingHeader*>(a->ring);
 	s_data = ps2live::ringData(s_ring);
 	s_capacity = s_ring->capacity;
+	s_deferredConsume = 0;
 	s_stop = false;
 	{
 		std::lock_guard<std::mutex> lock(s_window_lock);

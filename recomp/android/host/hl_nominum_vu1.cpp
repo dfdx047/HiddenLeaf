@@ -35,14 +35,18 @@ namespace
         s_mask = mask;
         s_ctx = ctx;
         constexpr uint32_t kCode = nominum::vu1::PS2_VU1_CODE_SIZE, kData = nominum::vu1::PS2_VU1_DATA_SIZE;
-        // what the game may have written by address since the last transfer
-        if (std::memcmp(v.code(), shared.code, kCode) != 0)
+        // Zero-copy path: PS2Memory aliases v.code()/v.data() directly (synchronized via HL_VU_SYNC in mapVuMemory).
+        // Fallback path handles any caller that passes separate buffers.
+        const bool sharedCode = (shared.code == v.code());
+        const bool sharedData = (shared.data == v.data());
+        if (!sharedCode && std::memcmp(v.code(), shared.code, kCode) != 0)
         {
             std::memcpy(v.code(), shared.code, kCode);
             v.codeChanged();
             ++s_codeLoads;
         }
-        std::memcpy(v.data(), shared.data, kData);
+        if (!sharedData)
+            std::memcpy(v.data(), shared.data, kData);
         std::memcpy(&v.regs(), shared.regs, sizeof(nominum::core::Vif1Regs));
         nominum::core::Vif1Pending &p = v.pending();
         p.directQwc = *shared.pendingDirectQwc;
@@ -54,9 +58,10 @@ namespace
         v.transfer(data, size);
         const bool codeChanged = v.getVU1CodeGeneration() != generation;
 
-        if (codeChanged)
+        if (codeChanged && !sharedCode)
             std::memcpy(shared.code, v.code(), kCode);
-        std::memcpy(shared.data, v.data(), kData);
+        if (!sharedData)
+            std::memcpy(shared.data, v.data(), kData);
         std::memcpy(shared.regs, &v.regs(), sizeof(nominum::core::Vif1Regs));
         *shared.pendingDirectQwc = p.directQwc;
         *shared.pendingImageQwc = p.imageQwc;
@@ -82,6 +87,16 @@ namespace hl_nominum_vu1
         s_vif = std::make_unique<nominum::core::Vif1>();
         s_vif->setSink([](int path, const uint8_t *d, uint32_t s, bool directHl) { s_gif(s_ctx, path, d, s, directHl); });
         s_vif->setPath3MaskCallback([](bool masked) { s_mask(s_ctx, masked); });
+        hl_nvu1::g_vu1Code = s_vif->code();
+        hl_nvu1::g_vu1Data = s_vif->data();
+        hl_nvu1::g_vu1CodeDirty = []()
+        {
+            if (s_vif)
+            {
+                s_vif->codeChanged();
+                ++s_codeLoads;
+            }
+        };
         hl_nvu1::g_transfer = transfer;
         const char *rec = std::getenv("NOMINUM_VU1_REC");
         std::fprintf(stderr, "[nvu1] Nominum's VIF1 and VU1 (core/vif1, %s) in place of the runtime's\n",
