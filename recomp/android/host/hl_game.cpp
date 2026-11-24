@@ -495,6 +495,15 @@ namespace
             progress = kSaveProgressMax;
             std::memcpy(state + kSaveProgress, &progress, 4);
         }
+        // 0x1C5C (save + 0xDFC + 0xE60): Story Mode clear counter checked by sub_001FEA10 (>= 0x66 unlocks R1 starting transformations on Character Select!)
+        constexpr uint32_t kSaveStoryProgress = 0x1C5Cu;
+        uint32_t storyProg;
+        std::memcpy(&storyProg, state + kSaveStoryProgress, 4);
+        if (storyProg < kSaveProgressMax)
+        {
+            storyProg = kSaveProgressMax;
+            std::memcpy(state + kSaveStoryProgress, &storyProg, 4);
+        }
     }
 
     // HL_FTRACE=1: every change of a fighter's action and input, for finding how the game's moves work

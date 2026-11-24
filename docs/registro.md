@@ -61,6 +61,11 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 20:03: Desbloqueio real das transformações iniciais com R1 (Save 100%, Trapaça e Online)
+
+- **Causa raiz (`sub_003C8880` → `sub_001FEA10` → `sub_001E9B40`):** Na Seleção de Personagem, ao segurar **R1** (`0x58($s0) & 8`), o jogo chama `sub_001FEA10`, que lê `*(save + 0xDFC + 0xE60)` = **`save + 0x1C5C`** e exige `>= 0x66` (102) para liberar as transformações iniciais. Antes só escrevíamos `0x6E` em `0xE68` (faltando o offset `+ 0xDFC`).
+- **Correção:** `0x1C5C = 0x6E` adicionado em `SaveManager.kt` (Save 100% real em `data01`/`data04` com checksum recalculado) e em `hl_game.cpp::unlockEverything()` (cobre também a trapaça "Desbloquear tudo" e o Modo Online). Recompiladas as 4 bibliotecas nativas + APK e atualizado o Save 100% nos 3 aparelhos.
+
 ### 2026-11-24 19:52: Correção de gráficos/efeitos faltando no Modo Leve e reversão do HL_NATIVE automático em 60+ FPS
 
 - **Causa raiz:** (1) `HL_NATIVE=1` ativado automaticamente em `fps_mode > 50` trocava o PCSX2 GS pelo renderizador nativo incompleto (que perde efeitos e quebra com filtros/resoluções); (2) `light_mode` estava ligado por padrão até em GPUs fortes (tier 2–4, como RP5/SD865) e o aliasing zero-copy (`g_vu1Code`/`g_vu1Data`) em `hl_nominum_vu1.cpp` podia pular o `memcmp` de microcódigo VU1.

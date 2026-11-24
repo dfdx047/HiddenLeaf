@@ -77,8 +77,10 @@ class SaveManager(private val context: Context, private val paths: GamePaths) {
         for (i in 0xDF4 until 0xDF8) data[i] = 0xFF.toByte()
         // 0x130C..0x138B (save+8+0x1304): jutsus, abilities & shop items
         for (i in 0x130C until 0x138C) if ((data[i].toInt() and 0xFF) < 3) data[i] = 3
-        // 0xE68..0xE6B: story progress counter (0x6E = 110, 100% clear)
+        // 0xE68..0xE6B: collection progress counter (0x6E = 110, 100% clear)
         data[0xE68] = 0x6E; data[0xE69] = 0; data[0xE6A] = 0; data[0xE6B] = 0
+        // 0x1C5C..0x1C5F (save + 0xDFC + 0xE60): Story Mode clear counter checked by sub_001FEA10 (>= 0x66 unlocks R1 starting transformations!)
+        data[0x1C5C] = 0x6E; data[0x1C5D] = 0; data[0x1C5E] = 0; data[0x1C5F] = 0
         // Recompute UN5 16-bit checksum: sum of bytes [0..1] + [4..9215], stored little-endian at [2..3]
         var sum = (data[0].toInt() and 0xFF) + (data[1].toInt() and 0xFF)
         for (i in 4 until SLOT_SIZE) sum += (data[i].toInt() and 0xFF)
