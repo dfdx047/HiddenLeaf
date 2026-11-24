@@ -2632,11 +2632,6 @@ namespace wide2d
 	uint32_t s_ofx[2] = {}, s_fbw[2] = {}, s_fbp[2] = {}, s_tbp[2] = {};
 	uint32_t s_targets[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}; // the frames drawn into lately (FBP): a texture at one of them is a copy of a picture
 	uint32_t s_targetNext = 0u;
-	void resetTargets()
-	{
-		for (uint32_t& t : s_targets) t = 0xFFFFFFFFu;
-		s_targetNext = 0u;
-	}
 	bool isTarget(uint32_t tbp)
 	{
 		for (uint32_t t : s_targets)
@@ -3101,6 +3096,4 @@ bool next(uint8_t* path, const uint8_t** data, uint32_t* size)
 	}
 	return false;
 }
-void resetWideTargets() { wide2d::resetTargets(); }
-
 } // namespace hl_native

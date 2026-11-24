@@ -61,6 +61,15 @@ imagem do jogo (fumaça, poeira, clarão). Falta: outros cenários, Ougi, campan
 
 ## Histórico (mais novo primeiro)
 
+### 2026-11-24 20:12: Correção das texturas de menu bugadas pós-luta (`libbt4gsx.so`) e aba de Drivers com PanVK, MaliSX2, RADV (Jim & Paulo Wesley) + fallback anti-403
+
+- **Texturas do menu bugadas ao voltar de uma luta (`hl_gsx.cpp`, `hl_native.cpp`, `hl_native.h`):**
+  - Causa raiz: a mutação in-place no anel zero-copy (`s_deferredConsume`) + `resetWideTargets()` limpava `s_targets[8]` na transição luta → menu, fazendo `widen2d` corromper cópias de framebuffer/textura dos menus após qualquer luta.
+  - Restaurados `hl_gsx.cpp`, `hl_native.cpp` e `hl_native.h` para a versão estável de `main` e recompilada `libbt4gsx.so`.
+- **Aba de Drivers (`DriverSources.kt`, `DriversScreen.kt`):**
+  - Causa raiz da aba parada: a API REST anônima do GitHub (`api.github.com`) retornava HTTP 403 (rate limit 60 req/h). Adicionado fallback automático via `releases.atom` + `releases/expanded_assets/<tag>` (sem limite de taxa).
+  - Adicionadas famílias por detecção automática de GPU (`DriverFamily.forGpu`): **Turnip (Adreno)** (`ARMSX2 · Turnip`, `Mr. Purple`, `StevenMXZ`, `K11MCH1`, `crueter 8 Elite`, `Banner's Turnip`), **PanVK / MaliSX2 (Mali)** (`ARMSX2 · MaliSX2`, `JimVulkan · PanVK`, `PanVK kbase`, `FristOneRR · PanVK`) e **RADV (Samsung Xclipse)** (`JimVulkan · RADV`, `Paulo Wesley · RADV` `paulowesll/mesa`).
+
 ### 2026-11-24 20:03: Desbloqueio real das transformações iniciais com R1 (Save 100%, Trapaça e Online)
 
 - **Causa raiz (`sub_003C8880` → `sub_001FEA10` → `sub_001E9B40`):** Na Seleção de Personagem, ao segurar **R1** (`0x58($s0) & 8`), o jogo chama `sub_001FEA10`, que lê `*(save + 0xDFC + 0xE60)` = **`save + 0x1C5C`** e exige `>= 0x66` (102) para liberar as transformações iniciais. Antes só escrevíamos `0x6E` em `0xE68` (faltando o offset `+ 0xDFC`).

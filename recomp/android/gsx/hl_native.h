@@ -26,7 +26,6 @@ namespace hl_native
 	int presentRate();
 	// A packet to send to the GS ahead of whatever is read next. Runs what is queued for the GS thread on the way.
 	bool next(uint8_t* path, const uint8_t** data, uint32_t* size);
-	void widen2d(uint8_t* data, uint32_t size);
-	void resetWideTargets(); // the menus' 2D in the screen's shape (the GS draws them)
+	void widen2d(uint8_t* data, uint32_t size); // the menus' 2D in the screen's shape (the GS draws them)
 	void privRegs(const uint8_t* regs, uint32_t size); // the display's width and frame (for widen2d)
 } // namespace hl_native

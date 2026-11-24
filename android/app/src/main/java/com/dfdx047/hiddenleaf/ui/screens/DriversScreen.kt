@@ -5,17 +5,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeveloperBoard
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.Warning
@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +48,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dfdx047.hiddenleaf.AppViewModel
 import com.dfdx047.hiddenleaf.R
+import com.dfdx047.hiddenleaf.data.DriverFamily
 import com.dfdx047.hiddenleaf.data.DriverSource
 import com.dfdx047.hiddenleaf.data.formatBytes
 import com.dfdx047.hiddenleaf.ui.components.ScreenTitle
@@ -56,8 +56,8 @@ import com.dfdx047.hiddenleaf.ui.components.SectionCard
 import com.dfdx047.hiddenleaf.ui.theme.Konoha
 
 /**
- * Custom Vulkan drivers for Adreno GPUs (Turnip and newer Qualcomm builds, loaded through adrenotools): the ones
- * installed, a zip from the files, and the latest releases of the people who build them, downloaded from GitHub.
+ * Custom Vulkan drivers organized by GPU family (Turnip for Adreno, PanVK/MaliSX2 for Mali, RADV for Samsung Xclipse):
+ * automatically opens the tab matching the device's detected GPU.
  */
 @Composable
 fun DriversScreen(vm: AppViewModel) {
@@ -66,12 +66,16 @@ fun DriversScreen(vm: AppViewModel) {
     val gpu by vm.gpuName.collectAsStateWithLifecycle()
     val lists by vm.driverLists.collectAsStateWithLifecycle()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importDriver(it) } }
-    var sourceIndex by rememberSaveable { mutableIntStateOf(0) }
-    val source = DriverSource.entries[sourceIndex]
+    val mine = remember(gpu) { DriverFamily.forGpu(gpu) }
+    var familyIndex by rememberSaveable(mine) { mutableIntStateOf(mine?.ordinal ?: 0) }
+    val family = DriverFamily.entries[familyIndex.coerceIn(0, DriverFamily.entries.size - 1)]
+    val sources = remember(family) { DriverSource.of(family) }
+    var sourceIndex by rememberSaveable(family) { mutableIntStateOf(0) }
+    val source = sources.getOrNull(sourceIndex.coerceIn(0, (sources.size - 1).coerceAtLeast(0)))
     var confirmDelete by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.GpuDriver?>(null) }
     val uri = LocalUriHandler.current
 
-    LaunchedEffect(source) { vm.loadDrivers(source) }
+    LaunchedEffect(source) { source?.let { vm.loadDrivers(it) } }
 
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
@@ -79,17 +83,16 @@ fun DriversScreen(vm: AppViewModel) {
     ) {
         ScreenTitle(stringResource(R.string.nav_drivers), stringResource(R.string.drivers_sub))
 
-        if (gpu.isNotEmpty() && !gpu.contains("Adreno", ignoreCase = true)) {
-            SectionCard(stringResource(R.string.drivers_not_adreno_title), Icons.Rounded.Warning, accent = MaterialTheme.colorScheme.error) {
-                Text(
-                    stringResource(R.string.drivers_not_adreno, gpu),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        SectionCard(gpu.ifEmpty { "GPU ?" }, Icons.Rounded.DeveloperBoard, accent = Konoha.ChakraAmber) {
+            Text(
+                if (mine != null) "GPU detectada: $gpu · Família recomendada: ${mine.label} (${mine.gpuMaker})"
+                else "GPU detectada: ${gpu.ifEmpty { "desconhecida" }} · Use o driver do sistema se nenhum pacote abaixo for compatível.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         SectionCard(stringResource(R.string.drivers_installed), NinjaIcons.Bolt, accent = Konoha.ChakraBlue) {
-            // (the whole row chooses, not only the circle)
             Row(Modifier.selectable(selected = chosen == null, role = Role.RadioButton) { vm.selectDriver(null) }, verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(selected = chosen == null, onClick = null, modifier = Modifier.padding(14.dp))
                 Text(stringResource(R.string.gpu_driver_system), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
@@ -115,38 +118,63 @@ fun DriversScreen(vm: AppViewModel) {
         SectionCard(stringResource(R.string.drivers_download), Icons.Rounded.CloudDownload, accent = Konoha.ChakraAmber) {
             Text(stringResource(R.string.drivers_download_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             ChipRow(
-                options = DriverSource.entries.map { it.label to it.ordinal },
-                selected = sourceIndex,
-                onSelect = { sourceIndex = it },
+                options = DriverFamily.entries.map { f -> (if (f == mine) "★ " else "") + "${f.label} · ${f.gpuMaker}" to f.ordinal },
+                selected = familyIndex,
+                onSelect = { familyIndex = it },
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(source.repo, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                IconButton(onClick = { vm.loadDrivers(source, again = true) }) { Icon(Icons.Rounded.Refresh, stringResource(R.string.drivers_refresh)) }
-                IconButton(onClick = { runCatching { uri.openUri(source.page) } }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.drivers_open_page)) }
-            }
-            when (val l = lists[source]) {
-                null, AppViewModel.DriverList.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(10.dp))
-                    Text(stringResource(R.string.drivers_loading), style = MaterialTheme.typography.bodyMedium)
+            if (mine != null && family != mine) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        "Estes drivers são para GPUs ${family.gpuMaker} (seu aparelho usa $gpu).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
-                AppViewModel.DriverList.Failed -> Text(
-                    stringResource(R.string.drivers_failed), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error,
-                )
-                is AppViewModel.DriverList.Loaded -> {
-                    if (l.releases.isEmpty()) Text(stringResource(R.string.drivers_none), style = MaterialTheme.typography.bodyMedium)
-                    l.releases.forEachIndexed { i, r ->
-                        if (i > 0) HorizontalDivider()
-                        Text(r.title, style = MaterialTheme.typography.titleSmall)
-                        Text("${r.tag} · ${r.date}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        r.assets.forEach { a ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(a.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    if (a.size > 0) Text(formatBytes(a.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                TextButton(onClick = { vm.downloadDriver(a) }) {
-                                    Icon(Icons.Rounded.Download, null, Modifier.size(18.dp)); Spacer(Modifier.size(4.dp)); Text(stringResource(R.string.drivers_install))
+            }
+            if (source != null) {
+                if (sources.size > 1) {
+                    ChipRow(
+                        options = sources.mapIndexed { i, it -> it.label to i },
+                        selected = sourceIndex.coerceIn(0, sources.lastIndex),
+                        onSelect = { sourceIndex = it },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (source.experimental) "${source.repo} · experimental" else source.repo,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { vm.loadDrivers(source, again = true) }) { Icon(Icons.Rounded.Refresh, stringResource(R.string.drivers_refresh)) }
+                    IconButton(onClick = { runCatching { uri.openUri(source.page) } }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.drivers_open_page)) }
+                }
+                when (val l = lists[source]) {
+                    null, AppViewModel.DriverList.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(10.dp))
+                        Text(stringResource(R.string.drivers_loading), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    AppViewModel.DriverList.Failed -> Text(
+                        stringResource(R.string.drivers_failed), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error,
+                    )
+                    is AppViewModel.DriverList.Loaded -> {
+                        if (l.releases.isEmpty()) Text(stringResource(R.string.drivers_none), style = MaterialTheme.typography.bodyMedium)
+                        l.releases.forEachIndexed { i, r ->
+                            if (i > 0) HorizontalDivider()
+                            Text(r.title, style = MaterialTheme.typography.titleSmall)
+                            Text("${r.tag} · ${r.date}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            r.assets.forEach { a ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(a.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (a.size > 0) Text(formatBytes(a.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    TextButton(onClick = { vm.downloadDriver(a) }) {
+                                        Icon(Icons.Rounded.Download, null, Modifier.size(18.dp)); Spacer(Modifier.size(4.dp)); Text(stringResource(R.string.drivers_install))
+                                    }
                                 }
                             }
                         }
