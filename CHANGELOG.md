@@ -2,6 +2,28 @@
 
 **English** · [Português](CHANGELOG.pt-BR.md) · [Español](CHANGELOG.es.md)
 
+## v0.2.2 (2026-11-26)
+
+Critical update focused on **fixing Online & Local Wi-Fi (LAN) multiplayer desync**, **automatic 1-match Ranked room disconnect**, and **extra entry-level device optimizations in Light Mode**.
+
+**Download:** `HiddenLeaf-v0.2.2.apk` (Android 10+, 64-bit ARM — installs cleanly over `v0.2.1` and `v0.2.0-beta`, keeping all game data and saves).
+
+### Online & Local (LAN) Desync Fixes
+
+- **Cycle-Exact Synchronous IOP in Multiplayer (`HL_IOP_THREAD=0`):** previously, the asynchronous IOP worker thread could drift several VBlanks behind on slower devices, causing CDVD/SIF loads, Ultimate Jutsu (Ougi) audio, and post-match transitions to finish on different frames between peers — leading to mismatched Ougi button prompts and diverging match outcomes. Multiplayer (Online and LAN) now runs IOP synchronously by EE cycle so both devices stay locked to the exact same frame.
+- **Deterministic EE Scheduler during Lockstep (`HL_ONLINE_DETERMINISTIC=1`):** patched `EeScheduler` so internal game alarms and `VBlankEnd` are dispatched strictly by EE cycle and never gated or reordered by host wall-clock delays during network waits; wall-clock pacing applies only to `VBlankStart`.
+- **Deterministic Memory Card Timestamps (`HL_FIXED_CLOCK`) & Unified Boot (`HL_SKIP_INTRO=0`):** `sceMcGetDir` now returns deterministic timestamps instead of leaking real host clock values, and multiplayer sessions use identical boot flow across both peers.
+- **Updated Online Fingerprint (`a20299`):** ensures `v0.2.2` players only match with other `v0.2.2` deterministic clients.
+
+### Ranked Mode: 1 Match & Auto-Disconnect
+
+- **Automatic Room Close After 1 Ranked Match:** once a Ranked match ends by KO, the app submits and confirms the bilateral ELO/RP report (`/v1/ranked/report`), displays the RP banner (`+RP` / `-RP`), automatically disconnects the room, and opens the post-match summary modal to return to the menu. Players simply queue again for their next match — preventing rematch farming and accumulated post-match drift.
+
+### Extra Entry-Level Optimizations (Light Mode)
+
+- **Automatic 2-Thread Vulkan GS (`GSBackThreadMode=1`) on Any 6+ Core Device in Light Mode:** expanded platform detection (`mt67*`, `mt68*`, `s5e*`) plus automatic enablement on any 6+ core CPU when Light Mode is active.
+- **Lighter Vulkan Pipeline in Light Mode:** disables `accurate_blending_unit`, `mipmapping`, `trilinear_filtering`, and `dithering_ps2`, and enables `texture_preloading = 1` to improve FPS and reduce frame-time spikes on budget phones while leaving mid/high GPUs (Tier 2–4) untouched.
+
 ## v0.2.1 (2026-11-26)
 
 Update focused on **Ranked Mode**, **Character Mastery**, **Live Spectator**, **Inspectable Ninja Profiles**, and **Touch Controls** — resolving the top community feedback reports from `v0.2.0-beta`.

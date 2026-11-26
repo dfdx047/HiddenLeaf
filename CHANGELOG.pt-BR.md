@@ -2,6 +2,28 @@
 
 [English](CHANGELOG.md) · **Português** · [Español](CHANGELOG.es.md)
 
+## v0.2.2 (26/11/2026)
+
+Atualização crítica focada na **correção definitiva de dessincronização (desync) no Online e Rede Local**, **fim automático de sala após 1 partida no Modo Ranqueado** e **otimizações extras para celulares de entrada no Modo Leve**.
+
+**Download:** `HiddenLeaf-v0.2.2.apk` (Android 10+, ARM de 64 bits — instala diretamente por cima da `v0.2.1` e da `v0.2.0-beta` mantendo todos os dados e saves).
+
+### Correção de Dessincronização (Online & Rede Local)
+
+- **IOP síncrono e determinístico no multiplayer (`HL_IOP_THREAD=0`):** anteriormente, a thread assíncrona do IOP podia ficar vários quadros atrasada em celulares mais lentos, fazendo leituras de CDVD/SIF, falas de Especial (Ougi) e carregamentos pós-luta concluírem em VBlanks diferentes entre os dois jogadores — causando botões diferentes no Especial e telas divergentes ("aqui eu ganhei, lá ele ganhou"). Agora o IOP roda de forma síncrona por ciclo no Online e na Rede Local (LAN), mantendo os dois aparelhos no mesmo quadro exato.
+- **Agendador da EE 100% determinístico em partidas online (`HL_ONLINE_DETERMINISTIC=1`):** corrigido o `EeScheduler` para que alarmes internos do jogo e o `VBlankEnd` nunca sejam reordenados ou segurados pelo relógio real do celular durante esperas de rede (lockstep). Somente o `VBlankStart` controla o ritmo real de quadros.
+- **Relógio fixo no Memory Card (`HL_FIXED_CLOCK`) e boot unificado (`HL_SKIP_INTRO=0`):** timestamps de diretório do Memory Card (`sceMcGetDir`) agora usam relógio determinístico em vez do horário do sistema, e o fluxo de inicialização no multiplayer é idêntico para todos os jogadores.
+- **Fingerprint atualizado (`a20299`):** garante que jogadores na `v0.2.2` pareiem apenas entre si, evitando desync contra versões antigas.
+
+### Modo Ranqueado: 1 Partida por Sala
+
+- **Desconexão automática após 1 luta no Modo Ranqueado:** ao final de uma luta ranqueada, o jogo envia e confirma o relatório bilateral de ELO/RP (`/v1/ranked/report`), exibe o resultado (`+RP` / `-RP`), encerra a sala automaticamente e mostra o resumo da partida para voltar ao menu. Para jogar novamente, basta buscar uma nova partida — evitando farm de revanche na mesma sala e desync acumulado entre lutas seguidas.
+
+### Otimizações Extras para Celulares de Entrada (Modo Leve)
+
+- **GS em 2 threads (`GSBackThreadMode=1`) automático em qualquer dispositivo 6+ núcleos no Modo Leve:** além dos SoCs já listados (incluindo expansão para `mt67*`, `mt68*` e `s5e*`), qualquer aparelho com 6 ou mais núcleos rodando no Modo Leve agora paraleliza o renderizador Vulkan automaticamente.
+- **Perfil Vulkan mais leve no Modo Leve:** desativa `accurate_blending_unit`, `mipmapping`, `trilinear_filtering` e `dithering_ps2`, além de habilitar `texture_preloading = 1` para reduzir travadinhas (stutters) em celulares de entrada, mantendo GPUs intermediárias e fortes (Tier 2–4) intactas.
+
 ## v0.2.1 (26/11/2026)
 
 Atualização focada no **Modo Ranqueado**, **Maestria de Personagens**, **Espectador ao Vivo**, **Perfis Ninja** e **Controles Touch** — corrigindo os principais relatos da comunidade na `v0.2.0-beta`.

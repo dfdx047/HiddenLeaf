@@ -2,6 +2,28 @@
 
 [English](CHANGELOG.md) · [Português](CHANGELOG.pt-BR.md) · **Español**
 
+## v0.2.2 (26/11/2026)
+
+Actualización crítica enfocada en la **corrección definitiva de la desincronización (desync) en Línea y Red Local**, **desconexión automática tras 1 combate en el Modo Clasificatorio** y **optimizaciones extra para dispositivos de gama de entrada en Modo Ligero**.
+
+**Descarga:** `HiddenLeaf-v0.2.2.apk` (Android 10+, ARM de 64 bits — se instala directamente encima de `v0.2.1` y `v0.2.0-beta` conservando todos tus datos y guardados).
+
+### Corrección de Desincronización (En Línea y Red Local)
+
+- **IOP síncrono y determinista en multijugador (`HL_IOP_THREAD=0`):** anteriormente, el hilo asíncrono del IOP podía atrasarse varios cuadros en teléfonos más lentos, haciendo que lecturas CDVD/SIF, audios de Especial (Ougi) y pantallas post-combate finalizaran en VBlanks distintos entre ambos jugadores — provocando botones diferentes en el Especial y resultados divergentes ("aquí gané yo, allá ganó él"). Ahora el IOP se ejecuta de forma síncrona por ciclo tanto En Línea como en Red Local (LAN).
+- **Planificador EE 100% determinista en partidas en línea (`HL_ONLINE_DETERMINISTIC=1`):** corregido `EeScheduler` para que las alarmas internas y `VBlankEnd` se procesen estrictamente por ciclo EE sin ser alterados por el reloj real del dispositivo durante esperas de red; el control de ritmo real se aplica únicamente a `VBlankStart`.
+- **Reloj determinista en Memory Card (`HL_FIXED_CLOCK`) y arranque unificado (`HL_SKIP_INTRO=0`):** las fechas de `sceMcGetDir` ahora usan un reloj fijo en lugar de la hora del sistema, y ambos jugadores siguen exactamente el mismo flujo de arranque.
+- **Huella en línea actualizada (`a20299`):** garantiza que los jugadores de `v0.2.2` solo se emparejen con otros clientes deterministas `v0.2.2`.
+
+### Modo Clasificatorio: 1 Combate por Sala
+
+- **Desconexión automática al terminar 1 combate Clasificatorio:** tras finalizar una pelea clasificatoria por KO, el juego confirma el reporte bilateral de ELO/RP (`/v1/ranked/report`), muestra el resultado (`+RP` / `-RP`), cierra la sala automáticamente y abre el resumen post-combate para volver al menú. Para jugar de nuevo solo hay que buscar otra partida, evitando revanchas repetidas en la misma sala y desincronización acumulada.
+
+### Optimizaciones Extra para Dispositivos de Entrada (Modo Ligero)
+
+- **GS Vulkan en 2 hilos (`GSBackThreadMode=1`) automático en dispositivos de 6+ núcleos en Modo Ligero:** además de ampliar la detección de plataformas (`mt67*`, `mt68*`, `s5e*`), cualquier dispositivo de 6 o más núcleos en Modo Ligero activa ahora el paralelismo del renderizador Vulkan automáticamente.
+- **Perfil Vulkan más ligero en Modo Ligero:** desactiva `accurate_blending_unit`, `mipmapping`, `trilinear_filtering` y `dithering_ps2`, y habilita `texture_preloading = 1` para mejorar la fluidez en teléfonos modestos sin afectar a GPUs medias o altas (Tier 2–4).
+
 ## v0.2.1 (26/11/2026)
 
 Actualización enfocada en el **Modo Clasificatorio**, **Maestría de Personajes**, **Espectador en Vivo**, **Perfiles Ninja** y **Controles Táctiles** — corrigiendo los principales reportes de la comunidad en `v0.2.0-beta`.
