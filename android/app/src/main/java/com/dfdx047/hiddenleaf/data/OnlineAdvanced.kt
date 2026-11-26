@@ -171,12 +171,14 @@ object OnlineAdvanced {
 
     suspend fun fetchLeaderboard(server: String, mode: String = "all", limit: Int = 100): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
         if (!Online.isAllowedServer(server)) return@withContext emptyList()
-        val url = "$server/v1/leaderboard?limit=$limit&mode=${URLEncoder.encode(mode, "UTF-8")}"
+        val url = "$server/v1/leaderboard?limit=$limit&mode=${URLEncoder.encode(mode, "UTF-8")}&t=${System.currentTimeMillis()}"
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "GET"
+            c.useCaches = false
             c.connectTimeout = 6000
             c.readTimeout = 8000
+            c.setRequestProperty("Cache-Control", "no-cache")
             c.setRequestProperty("User-Agent", "HiddenLeaf-Android")
             if (c.responseCode >= 400) return@withContext emptyList()
             val text = c.inputStream.bufferedReader().use { it.readText() }

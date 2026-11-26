@@ -95,22 +95,53 @@ fun UpdateDialog(vm: AppViewModel) {
             }
         }
 
-        is UpdateState.Downloading -> AlertDialog(
+        is UpdateState.Downloading -> Dialog(
             onDismissRequest = {},
-            title = { Text(stringResource(R.string.update_downloading)) },
-            text = {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (s.total > 0) LinearProgressIndicator(progress = { (s.done.toFloat() / s.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                    else LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(
-                        formatBytes(s.done) + if (s.total > 0) " / ${formatBytes(s.total)}" else "",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            val maxH = (LocalConfiguration.current.screenHeightDp * 0.9f).dp
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth(0.94f).widthIn(max = 640.dp).heightIn(max = maxH),
+            ) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep.copy(alpha = 0.55f), Konoha.SasukeBlue.copy(alpha = 0.45f))))
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(32.dp), tint = Konoha.ChakraAmber)
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.update_downloading), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                "${s.info.version} · " + formatBytes(s.done) + if (s.total > 0) " / ${formatBytes(s.total)}" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (s.total > 0) LinearProgressIndicator(progress = { (s.done.toFloat() / s.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                        else LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    if (s.info.notes.isNotBlank()) {
+                        Column(
+                            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MarkdownNotes(s.info.notes)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = vm::cancelUpdate) { Text(stringResource(R.string.cancel)) }
+                    }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = vm::cancelUpdate) { Text(stringResource(R.string.cancel)) } },
-        )
+            }
+        }
 
         is UpdateState.NeedPermission -> AlertDialog(
             onDismissRequest = vm::dismissUpdate,

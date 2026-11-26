@@ -8,6 +8,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -437,6 +439,7 @@ private fun Busy(text: String, onCancel: (() -> Unit)?) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CasualDedicatedScreen(
     vm: AppViewModel,
@@ -577,6 +580,7 @@ private fun CasualDedicatedScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RankedDedicatedScreen(
     vm: AppViewModel,
@@ -647,16 +651,16 @@ private fun RankedDedicatedScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(onClick = { pickAvatar.launch(arrayOf("image/*")) }) {
-                                    Text("Imagem da Galeria")
+                                    Text("Imagem da Galeria", maxLines = 1)
                                 }
                                 if (com.dfdx047.hiddenleaf.data.OnlineAdvanced.hasCustomAvatar(context)) {
                                     OutlinedButton(onClick = {
                                         com.dfdx047.hiddenleaf.data.OnlineAdvanced.clearCustomAvatar(context)
                                         avatarVersion++
                                     }) {
-                                        Text("Usar Arte do Ninja")
+                                        Text("Usar Arte do Ninja", maxLines = 1)
                                     }
                                 }
                             }
@@ -713,7 +717,7 @@ private fun RankedDedicatedScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     for ((key, label) in listOf("touch" to "Só Tela", "gamepad" to "Só Controle", "any" to "Todos")) {
                         FilterChip(
                             selected = prefs.inputMode == key || (prefs.inputMode == "auto" && effectiveMode == key),
@@ -777,14 +781,23 @@ private fun RankedDedicatedScreen(
 
     val rightCol: @Composable () -> Unit = {
         SectionCard("Top 100 Global · Maestria", NinjaIcons.Scroll, accent = Konoha.ChakraAmber) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     for ((m, lbl) in listOf("all" to "Todos", "touch" to "Tela", "gamepad" to "Controle")) {
-                        FilterChip(selected = lbMode == m, onClick = { lbMode = m }, label = { Text(lbl) })
+                        FilterChip(
+                            selected = lbMode == m,
+                            onClick = { lbMode = m },
+                            label = { Text(lbl, maxLines = 1) },
+                        )
                     }
                 }
-                TextButton(
+                OutlinedButton(
                     enabled = serverSet && !loadingRank,
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         loadingRank = true
                         scope.launch {
@@ -798,7 +811,12 @@ private fun RankedDedicatedScreen(
                             loadingRank = false
                         }
                     },
-                ) { Text(stringResource(R.string.online_ranked_refresh)) }
+                ) {
+                    Text(
+                        if (loadingRank) "Atualizando..." else stringResource(R.string.online_ranked_refresh),
+                        maxLines = 1,
+                    )
+                }
             }
             if (leaderboard.isEmpty()) {
                 Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

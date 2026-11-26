@@ -501,12 +501,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (info != null) ActivityLog.info("update", "available: ${info}")
             _update.value = if (info != null) UpdateState.Available(info) else UpdateState.Idle
             if (manual && info == null) say(str(if (r.isSuccess) R.string.update_none else R.string.update_check_failed))
-            // On Wi-Fi (a network without data charges) the new version comes down by itself and the system installer
-            // opens when it is done; on mobile data the dialog asks first (the APK is big).
-            if (info != null && !info.nightly && unmetered()) {
-                ActivityLog.info("update", "unmetered network: downloading by itself")
-                startUpdate()
-            }
+            // Always show the in-app UpdateDialog with the full changelog first so every player sees what changed
+            // before downloading/installing (never silently skip the changelog on Wi-Fi).
         }
     }
 

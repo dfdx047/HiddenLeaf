@@ -278,7 +278,7 @@ export async function handle(request, env, now) {
         }));
         return new Response(JSON.stringify({ entries, updated: now }), {
             status: 200,
-            headers: { "content-type": "application/json", "cache-control": "public, max-age=60" },
+            headers: { "content-type": "application/json", "cache-control": "no-store" },
         });
     }
     if (request.method === "GET" && url.pathname === "/v1/ws") {
