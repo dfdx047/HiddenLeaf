@@ -125,19 +125,24 @@ fun CharacterCutout(
     showLevel: Boolean = true,
     useCustomAvatar: Boolean = false,
     avatarVersion: Int = 0,
+    avatarB64: String? = null,
 ) {
     val info = remember(charId) { charInfoOf(charId) }
     val ctx = LocalContext.current
-    var loadedBmp by remember(charId, useCustomAvatar, avatarVersion) {
-        val dir = File(GamePaths(ctx).root, "portraits")
-        val candidates = buildList {
-            if (useCustomAvatar) add(File(dir, "custom_avatar.png"))
-            add(File(dir, "bank_${info.id}.png"))
+    var loadedBmp by remember(charId, useCustomAvatar, avatarVersion, avatarB64) {
+        val remoteBmp = if (!avatarB64.isNullOrBlank()) OnlineAdvanced.decodeAvatarBase64(avatarB64)?.asImageBitmap() else null
+        val initial: androidx.compose.ui.graphics.ImageBitmap? = remoteBmp ?: run {
+            val dir = File(GamePaths(ctx).root, "portraits")
+            val candidates = buildList {
+                if (useCustomAvatar) add(File(dir, "custom_avatar.png"))
+                add(File(dir, "bank_${info.id}.png"))
+            }
+            val f = candidates.firstOrNull { it.exists() && it.length() > 512L }
+            if (f != null) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null
         }
-        val f = candidates.firstOrNull { it.exists() && it.length() > 512L }
-        mutableStateOf(if (f != null) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null)
+        mutableStateOf(initial)
     }
-    LaunchedEffect(info.id, useCustomAvatar, avatarVersion) {
+    LaunchedEffect(info.id, useCustomAvatar, avatarVersion, avatarB64) {
         if (loadedBmp == null) {
             val f = OnlineAdvanced.fetchCharacterArt(ctx, info.id)
             if (f != null && f.exists()) {

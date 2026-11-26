@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS hl_players (
     fav_char_lvl INTEGER NOT NULL DEFAULT 1,
     fav_char_xp INTEGER NOT NULL DEFAULT 0,
     char_mastery TEXT NOT NULL DEFAULT '{}',
+    profile_public INTEGER NOT NULL DEFAULT 1,
+    avatar_b64 TEXT NOT NULL DEFAULT '',
     updated INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS hl_players_rank ON hl_players (points DESC, wins DESC);

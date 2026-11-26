@@ -30,6 +30,7 @@ object OnlineAdvanced {
         val favCharLvl: Int = 1,
         val favCharXp: Int = 0,
         val mastery: Map<String, CharMastery> = emptyMap(),
+        val profilePublic: Boolean = true,
     )
 
     data class LeaderboardEntry(
@@ -44,6 +45,27 @@ object OnlineAdvanced {
         val tier: String,
         val favChar: String = "naruto",
         val favCharLvl: Int = 1,
+        val profilePublic: Boolean = true,
+        val avatarB64: String = "",
+    )
+
+    data class PublicPlayerProfile(
+        val playerId: String,
+        val name: String,
+        val rank: Int,
+        val points: Int,
+        val tier: String,
+        val profilePublic: Boolean,
+        val wins: Int = 0,
+        val losses: Int = 0,
+        val matches: Int = 0,
+        val streak: Int = 0,
+        val inputMode: String = "any",
+        val favChar: String = "naruto",
+        val favCharLvl: Int = 1,
+        val favCharXp: Int = 0,
+        val mastery: Map<String, CharMastery> = emptyMap(),
+        val avatarB64: String = "",
     )
 
     data class LobbyMember(val id: String, val name: String, val role: String)
@@ -80,6 +102,37 @@ object OnlineAdvanced {
 
     fun saveFavChar(context: Context, charId: String) {
         context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).edit().putString("fav_char", charId).apply()
+    }
+
+    fun savedProfilePublic(context: Context): Boolean =
+        context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).getBoolean("profile_public", true)
+
+    fun saveProfilePublic(context: Context, isPublic: Boolean) {
+        context.getSharedPreferences("online_ranked", Context.MODE_PRIVATE).edit().putBoolean("profile_public", isPublic).apply()
+    }
+
+    /** Encodes custom_avatar.png into a compact 96x96 JPEG base64 thumbnail (<= 20KB) for public profile sharing. */
+    fun encodeCustomAvatarBase64(context: Context): String {
+        val f = customAvatarFile(context)
+        if (!f.exists() || f.length() < 512L) return ""
+        return runCatching {
+            val bmp = android.graphics.BitmapFactory.decodeFile(f.absolutePath) ?: return ""
+            val sc = android.graphics.Bitmap.createScaledBitmap(bmp, 96, 96, true)
+            val baos = java.io.ByteArrayOutputStream()
+            sc.compress(android.graphics.Bitmap.CompressFormat.JPEG, 74, baos)
+            if (sc !== bmp) sc.recycle()
+            bmp.recycle()
+            val b64 = android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
+            if (b64.length <= 24000) b64 else ""
+        }.getOrDefault("")
+    }
+
+    fun decodeAvatarBase64(b64: String?): android.graphics.Bitmap? {
+        if (b64.isNullOrBlank()) return null
+        return runCatching {
+            val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
     }
 
     /** Maps UN5 internal character ID (fighter+0x68) to a stable slug; unknown/mod IDs map to "char_<id>". */
@@ -133,17 +186,27 @@ object OnlineAdvanced {
         return out
     }
 
-    suspend fun syncProfile(context: Context, server: String, name: String, inputMode: String, favChar: String = savedFavChar(context)): RankedProfile = withContext(Dispatchers.IO) {
+    suspend fun syncProfile(
+        context: Context,
+        server: String,
+        name: String,
+        inputMode: String,
+        favChar: String = savedFavChar(context),
+        profilePublic: Boolean = savedProfilePublic(context),
+    ): RankedProfile = withContext(Dispatchers.IO) {
         val (pid, secret) = identity(context)
         val local = localMastery(context)
         val localObj = JSONObject()
         for ((k, v) in local) localObj.put(k, JSONObject().put("xp", v.xp).put("lvl", v.lvl).put("matches", v.matches))
+        val avatarB64 = encodeCustomAvatarBase64(context)
         val r = postJson(server, "/v1/profile", JSONObject()
             .put("player_id", pid)
             .put("secret", secret)
             .put("name", Online.cleanName(name).ifEmpty { "Ninja" })
             .put("input_mode", inputMode)
             .put("fav_char", favChar)
+            .put("profile_public", profilePublic)
+            .put("avatar_b64", avatarB64)
             .put("char_mastery", localObj))
         val merged = parseMasteryJson(r.optJSONObject("char_mastery"))
         if (merged.isNotEmpty()) {
@@ -153,6 +216,8 @@ object OnlineAdvanced {
         }
         val activeChar = r.optString("fav_char", favChar)
         val activeM = merged[activeChar]
+        val isPub = r.optBoolean("profile_public", profilePublic)
+        saveProfilePublic(context, isPub)
         RankedProfile(
             playerId = r.optString("player_id", pid),
             name = r.optString("name", name),
@@ -166,7 +231,48 @@ object OnlineAdvanced {
             favCharLvl = activeM?.lvl ?: r.optInt("fav_char_lvl", 1),
             favCharXp = activeM?.xp ?: r.optInt("fav_char_xp", 0),
             mastery = merged,
+            profilePublic = isPub,
         )
+    }
+
+    suspend fun fetchPublicProfile(server: String, playerId: String): PublicPlayerProfile? = withContext(Dispatchers.IO) {
+        if (!Online.isAllowedServer(server) || playerId.isBlank()) return@withContext null
+        val url = "$server/v1/player?id=${URLEncoder.encode(playerId, "UTF-8")}&t=${System.currentTimeMillis()}"
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.requestMethod = "GET"
+            c.useCaches = false
+            c.connectTimeout = 6000
+            c.readTimeout = 8000
+            c.setRequestProperty("Cache-Control", "no-cache")
+            c.setRequestProperty("User-Agent", "HiddenLeaf-Android")
+            if (c.responseCode >= 400) return@withContext null
+            val text = c.inputStream.bufferedReader().use { it.readText() }
+            val o = JSONObject(text)
+            val isPub = o.optBoolean("profile_public", true)
+            PublicPlayerProfile(
+                playerId = o.optString("player_id", playerId),
+                name = o.optString("name", "Ninja"),
+                rank = o.optInt("rank", 1),
+                points = o.optInt("points", 1000),
+                tier = o.optString("tier", "Genin"),
+                profilePublic = isPub,
+                wins = o.optInt("wins", 0),
+                losses = o.optInt("losses", 0),
+                matches = o.optInt("matches", o.optInt("wins", 0) + o.optInt("losses", 0)),
+                streak = o.optInt("streak", 0),
+                inputMode = o.optString("input_mode", "any"),
+                favChar = o.optString("fav_char", "naruto"),
+                favCharLvl = o.optInt("fav_char_lvl", 1),
+                favCharXp = o.optInt("fav_char_xp", 0),
+                mastery = if (isPub) parseMasteryJson(o.optJSONObject("char_mastery")) else emptyMap(),
+                avatarB64 = if (isPub) o.optString("avatar_b64", "") else "",
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            c.disconnect()
+        }
     }
 
     suspend fun fetchLeaderboard(server: String, mode: String = "all", limit: Int = 100): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
@@ -197,6 +303,8 @@ object OnlineAdvanced {
                     tier = o.optString("tier", "Genin"),
                     favChar = o.optString("fav_char", "naruto"),
                     favCharLvl = o.optInt("fav_char_lvl", 1),
+                    profilePublic = o.optBoolean("profile_public", true),
+                    avatarB64 = o.optString("avatar_b64", ""),
                 )
             }
         } catch (_: Exception) {

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -601,6 +602,10 @@ private fun RankedDedicatedScreen(
     var loadingRank by remember { mutableStateOf(false) }
     var showAvatarDialog by remember { mutableStateOf(false) }
     var avatarVersion by remember { mutableStateOf(0) }
+    var inspectedPlayerId by remember { mutableStateOf<String?>(null) }
+    var inspectedProfile by remember { mutableStateOf<com.dfdx047.hiddenleaf.data.OnlineAdvanced.PublicPlayerProfile?>(null) }
+    var loadingInspected by remember { mutableStateOf(false) }
+    var profilePublic by remember { mutableStateOf(com.dfdx047.hiddenleaf.data.OnlineAdvanced.savedProfilePublic(context)) }
     val pickAvatar = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -608,8 +613,26 @@ private fun RankedDedicatedScreen(
             if (com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveCustomAvatarFromUri(context, uri)) {
                 avatarVersion++
                 showAvatarDialog = false
+                if (serverSet) {
+                    scope.launch {
+                        runCatching {
+                            profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                context, Online.cleanServer(prefs.server), prefs.name, Online.effectiveInputMode(prefs.inputMode),
+                                profilePublic = profilePublic,
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+    LaunchedEffect(inspectedPlayerId) {
+        val pid = inspectedPlayerId ?: return@LaunchedEffect
+        loadingInspected = true
+        inspectedProfile = null
+        val srv = Online.cleanServer(prefs.server)
+        inspectedProfile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchPublicProfile(srv, pid)
+        loadingInspected = false
     }
     val canPlay = ready && serverSet && !modsOn && prefs.name.isNotBlank()
     val effectiveMode = Online.effectiveInputMode(prefs.inputMode)
@@ -621,7 +644,7 @@ private fun RankedDedicatedScreen(
         runCatching {
             profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
                 context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
-            )
+            ).also { profilePublic = it.profilePublic }
         }
         leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 50)
         loadingRank = false
@@ -635,6 +658,46 @@ private fun RankedDedicatedScreen(
                     avatarVersion = avatarVersion,
                     onCycleChar = { showAvatarDialog = true },
                 )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .background(com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
+                        .border(1.dp, com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.4f), MaterialTheme.shapes.small)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (profilePublic) "Perfil público" else "Perfil privado",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD,
+                        )
+                        Text(
+                            if (profilePublic) "Outros jogadores podem ver sua foto, vitórias e maestrias"
+                            else "Seu histórico detalhado e foto ficam ocultos no ranking",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = profilePublic,
+                        onCheckedChange = { pub ->
+                            profilePublic = pub
+                            com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveProfilePublic(context, pub)
+                            if (serverSet) {
+                                scope.launch {
+                                    runCatching {
+                                        profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                            context, Online.cleanServer(prefs.server), prefs.name,
+                                            Online.effectiveInputMode(prefs.inputMode), p.favChar, profilePublic = pub,
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
             }
             if (showAvatarDialog) {
                 val p = profile
@@ -659,6 +722,16 @@ private fun RankedDedicatedScreen(
                                     OutlinedButton(onClick = {
                                         com.dfdx047.hiddenleaf.data.OnlineAdvanced.clearCustomAvatar(context)
                                         avatarVersion++
+                                        if (serverSet) {
+                                            scope.launch {
+                                                runCatching {
+                                                    profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                                        context, Online.cleanServer(prefs.server), prefs.name,
+                                                        Online.effectiveInputMode(prefs.inputMode), profilePublic = profilePublic,
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }) {
                                         Text("Usar Arte do Ninja", maxLines = 1)
                                     }
@@ -832,19 +905,28 @@ private fun RankedDedicatedScreen(
                                 .clip(MaterialTheme.shapes.small)
                                 .background(if (e.rank <= 3) tc.copy(alpha = 0.16f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
                                 .border(1.dp, if (e.rank <= 3) tc.copy(alpha = 0.65f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
+                                .clickable { inspectedPlayerId = e.playerId }
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(30.dp))
-                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 46)
+                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(
+                                e.favChar, e.favCharLvl, sizeDp = 46,
+                                avatarB64 = if (e.profilePublic) e.avatarB64 else null,
+                            )
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(e.name, style = MaterialTheme.typography.bodyMedium, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
                                     RankEmblem(e.tier, size = 18)
+                                    if (!e.profilePublic) Text("🔒", style = MaterialTheme.typography.labelSmall)
                                 }
                                 Text(
-                                    "${ch.name} Lv.${e.favCharLvl} · ${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else ""),
+                                    if (e.profilePublic) {
+                                        "${ch.name} Lv.${e.favCharLvl} · ${e.tier} · ${e.wins}V/${e.losses}D ($wr%)" + (if (e.streak >= 2) " 🔥${e.streak}" else "")
+                                    } else {
+                                        "${e.tier} · Perfil privado"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Konoha.ScrollCream.copy(alpha = 0.8f),
                                 )
@@ -878,6 +960,126 @@ private fun RankedDedicatedScreen(
             leftCol()
             rightCol()
         }
+    }
+
+    if (inspectedPlayerId != null) {
+        val ip = inspectedProfile
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { inspectedPlayerId = null },
+            title = {
+                Text(ip?.name ?: "Perfil Ninja", color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+            },
+            text = {
+                if (loadingInspected) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Carregando perfil...")
+                    }
+                } else if (ip == null) {
+                    Text("Não foi possível carregar o perfil deste ninja.")
+                } else if (!ip.profilePublic) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RankEmblem(ip.tier, size = 28)
+                            Text("#${ip.rank} · ${ip.tier} · ${ip.points} RP", style = MaterialTheme.typography.titleSmall, color = rankTierColor(ip.tier))
+                        }
+                        Text(
+                            "🔒 Este jogador optou por manter o perfil privado. Estatísticas detalhadas, foto personalizada e maestrias estão ocultas.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    val tc = rankTierColor(ip.tier)
+                    val wr = if (ip.matches > 0) (ip.wins * 100) / ip.matches else 0
+                    val modeLabel = when (ip.inputMode) { "touch" -> "Tela"; "gamepad" -> "Controle"; else -> "Todos" }
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(
+                                ip.favChar, ip.favCharLvl, sizeDp = 78,
+                                avatarB64 = ip.avatarB64,
+                            )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    RankEmblem(ip.tier, size = 22)
+                                    Text("#${ip.rank} · ${ip.tier}", style = MaterialTheme.typography.titleSmall, color = tc)
+                                }
+                                Text("${ip.points} RP", style = MaterialTheme.typography.titleMedium, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                                Text("Controle: $modeLabel" + if (ip.streak >= 2) " · 🔥 ${ip.streak} seguidas" else "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        // Detailed match stats
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for ((lbl, valStr, col) in listOf(
+                                Triple("Partidas", "${ip.matches}", com.dfdx047.hiddenleaf.ui.components.UN5_GOLD),
+                                Triple("Vitórias", "${ip.wins}", Konoha.LeeGreenLight),
+                                Triple("Derrotas", "${ip.losses}", MaterialTheme.colorScheme.error),
+                                Triple("Winrate", "$wr%", Konoha.SasukeBlueLight),
+                            )) {
+                                Column(
+                                    Modifier.weight(1f)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
+                                        .border(1.dp, com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
+                                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(valStr, style = MaterialTheme.typography.titleSmall, color = col, maxLines = 1)
+                                    Text(lbl, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
+                        }
+                        // Characters played & per-character mastery breakdown
+                        Text("Personagens e Maestria", style = MaterialTheme.typography.titleSmall, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                        val sortedMastery = ip.mastery.entries.sortedByDescending { it.value.xp }
+                        if (sortedMastery.isEmpty()) {
+                            Text("Nenhuma maestria registrada ainda.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for ((cid, m) in sortedMastery) {
+                                    val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(cid)
+                                    val xpInLvl = m.xp % 200
+                                    val frac = (xpInLvl / 200f).coerceIn(0.05f, 1f)
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .clip(MaterialTheme.shapes.small)
+                                            .background(com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
+                                            .border(1.dp, ch.primary.copy(alpha = 0.4f), MaterialTheme.shapes.small)
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        com.dfdx047.hiddenleaf.ui.components.CharacterCutout(cid, m.lvl, sizeDp = 42)
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text("${ch.name} · Lv.${m.lvl}", style = MaterialTheme.typography.labelLarge, color = ch.primary)
+                                                Text("${m.matches} lutas · ${m.xp} XP", style = MaterialTheme.typography.labelSmall, color = Konoha.ScrollCream.copy(alpha = 0.78f))
+                                            }
+                                            Box(
+                                                Modifier.fillMaxWidth().height(5.dp)
+                                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(3.dp))
+                                                    .background(Color(0xFF3A2416)),
+                                            ) {
+                                                Box(
+                                                    Modifier.fillMaxWidth(frac).height(5.dp)
+                                                        .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Konoha.NarutoOrangeDeep, com.dfdx047.hiddenleaf.ui.components.UN5_GOLD))),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { inspectedPlayerId = null }) { Text("Fechar") }
+            },
+        )
     }
 }
 

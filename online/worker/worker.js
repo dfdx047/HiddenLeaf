@@ -257,28 +257,74 @@ export async function handle(request, env, now) {
         const mode = url.searchParams.get("mode") || "all";
         let rows;
         if (mode === "touch" || mode === "gamepad") {
-            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl FROM hl_players WHERE input_mode = ? ORDER BY points DESC, wins DESC LIMIT ?")
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, profile_public, avatar_b64 FROM hl_players WHERE input_mode = ? ORDER BY points DESC, wins DESC LIMIT ?")
                 .bind(mode, limit).all()).results;
         } else {
-            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl FROM hl_players ORDER BY points DESC, wins DESC LIMIT ?")
+            rows = (await env.DB.prepare("SELECT player_id, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, profile_public, avatar_b64 FROM hl_players ORDER BY points DESC, wins DESC LIMIT ?")
                 .bind(limit).all()).results;
         }
-        const entries = rows.map((r, i) => ({
-            rank: i + 1,
-            player_id: r.player_id,
-            name: r.name,
-            points: r.points,
-            wins: r.wins,
-            losses: r.losses,
-            streak: r.streak,
-            input_mode: r.input_mode,
-            fav_char: r.fav_char || "naruto",
-            fav_char_lvl: r.fav_char_lvl || 1,
-            tier: ninjaTier(r.points),
-        }));
+        const entries = rows.map((r, i) => {
+            const isPub = r.profile_public !== 0;
+            return {
+                rank: i + 1,
+                player_id: r.player_id,
+                name: r.name,
+                points: r.points,
+                wins: r.wins,
+                losses: r.losses,
+                streak: r.streak,
+                input_mode: r.input_mode,
+                fav_char: r.fav_char || "naruto",
+                fav_char_lvl: r.fav_char_lvl || 1,
+                profile_public: isPub,
+                avatar_b64: isPub ? (r.avatar_b64 || "") : "",
+                tier: ninjaTier(r.points),
+            };
+        });
         return new Response(JSON.stringify({ entries, updated: now }), {
             status: 200,
             headers: { "content-type": "application/json", "cache-control": "no-store" },
+        });
+    }
+    if (request.method === "GET" && url.pathname === "/v1/player") {
+        const pid = cleanPlayerId(url.searchParams.get("id") || "");
+        if (pid.length < 8) return reply({ error: "bad request" }, 400);
+        const r = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
+        if (!r) return reply({ error: "not found" }, 404);
+        const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > ? OR (points = ? AND wins > ?)")
+            .bind(r.points, r.points, r.wins).first();
+        const rank = rankRow ? rankRow.rk : 1;
+        const isPub = r.profile_public !== 0;
+        if (!isPub) {
+            return reply({
+                player_id: r.player_id,
+                name: r.name,
+                rank,
+                points: r.points,
+                tier: ninjaTier(r.points),
+                profile_public: false,
+            });
+        }
+        let mastery = {};
+        try { mastery = JSON.parse(r.char_mastery || "{}"); } catch (e) {}
+        if (!mastery || typeof mastery !== "object" || Array.isArray(mastery)) mastery = {};
+        return reply({
+            player_id: r.player_id,
+            name: r.name,
+            rank,
+            points: r.points,
+            tier: ninjaTier(r.points),
+            wins: r.wins,
+            losses: r.losses,
+            matches: (r.wins || 0) + (r.losses || 0),
+            streak: r.streak,
+            input_mode: r.input_mode || "any",
+            fav_char: r.fav_char || "naruto",
+            fav_char_lvl: r.fav_char_lvl || 1,
+            fav_char_xp: r.fav_char_xp || 0,
+            char_mastery: mastery,
+            avatar_b64: r.avatar_b64 || "",
+            profile_public: true,
         });
     }
     if (request.method === "GET" && url.pathname === "/v1/ws") {
@@ -422,6 +468,10 @@ export async function handle(request, env, now) {
         const name = cleanName(body.name) || "Ninja";
         const mode = cleanInputMode(body.input_mode);
         const favChar = body.fav_char ? cleanCharId(body.fav_char) : null;
+        const hasPubField = typeof body.profile_public === "boolean";
+        const reqPub = body.profile_public === false ? 0 : 1;
+        const hasAvatarField = typeof body.avatar_b64 === "string";
+        const cleanAvatar = hasAvatarField && body.avatar_b64.length <= 24000 && /^[A-Za-z0-9+/=]*$/.test(body.avatar_b64) ? body.avatar_b64 : "";
         const hash = await sha256Hex(secret);
         const existing = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(pid).first();
         const parseMastery = (raw, fallbackChar, fallbackXp) => {
@@ -448,20 +498,23 @@ export async function handle(request, env, now) {
             return base;
         };
         if (existing) {
-            if (existing.auth_hash !== hash) return reply({ error: "unauthorized" }, 403);
+            if (existing.auth_hash && existing.auth_hash !== hash) return reply({ error: "unauthorized" }, 403);
             const mastery = mergeClientMastery(parseMastery(existing.char_mastery, existing.fav_char, existing.fav_char_xp), body.char_mastery);
             const nextChar = favChar || existing.fav_char || "naruto";
             if (!mastery[nextChar]) mastery[nextChar] = { xp: 0, lvl: 1, matches: 0 };
             const activeXp = mastery[nextChar].xp || 0;
             const activeLvl = charLevelFromXp(activeXp);
-            await env.DB.prepare("UPDATE hl_players SET name = ?, input_mode = ?, fav_char = ?, fav_char_lvl = ?, fav_char_xp = ?, char_mastery = ?, updated = ? WHERE player_id = ?")
-                .bind(name, mode, nextChar, activeLvl, activeXp, JSON.stringify(mastery), now, pid).run();
+            const nextPub = hasPubField ? reqPub : (existing.profile_public === 0 ? 0 : 1);
+            const nextAvatar = hasAvatarField ? cleanAvatar : (existing.avatar_b64 || "");
+            await env.DB.prepare("UPDATE hl_players SET auth_hash = ?, name = ?, input_mode = ?, fav_char = ?, fav_char_lvl = ?, fav_char_xp = ?, char_mastery = ?, profile_public = ?, avatar_b64 = ?, updated = ? WHERE player_id = ?")
+                .bind(existing.auth_hash || hash, name, mode, nextChar, activeLvl, activeXp, JSON.stringify(mastery), nextPub, nextAvatar, now, pid).run();
             const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > ? OR (points = ? AND wins > ?)")
                 .bind(existing.points, existing.points, existing.wins).first();
             return reply({
                 player_id: pid, name, points: existing.points, wins: existing.wins, losses: existing.losses,
                 streak: existing.streak, input_mode: mode, fav_char: nextChar,
                 fav_char_lvl: activeLvl, fav_char_xp: activeXp, char_mastery: mastery,
+                profile_public: nextPub !== 0,
                 rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(existing.points),
             });
         }
@@ -470,12 +523,14 @@ export async function handle(request, env, now) {
         const initMastery = mergeClientMastery({ [initChar]: { xp: 0, lvl: 1, matches: 0 } }, body.char_mastery);
         const initXp = (initMastery[initChar] && initMastery[initChar].xp) || 0;
         const initLvl = charLevelFromXp(initXp);
-        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?, ?, ?, ?, ?)")
-            .bind(pid, hash, name, mode, initChar, initLvl, initXp, JSON.stringify(initMastery), now).run();
+        const initPub = hasPubField ? reqPub : 1;
+        await env.DB.prepare("INSERT INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, profile_public, avatar_b64, updated) VALUES (?, ?, ?, 1000, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(pid, hash, name, mode, initChar, initLvl, initXp, JSON.stringify(initMastery), initPub, cleanAvatar, now).run();
         const rankRow = await env.DB.prepare("SELECT COUNT(*) + 1 AS rk FROM hl_players WHERE points > 1000 OR (points = 1000 AND wins > 0)").first();
         return reply({
             player_id: pid, name, points: 1000, wins: 0, losses: 0, streak: 0, input_mode: mode,
             fav_char: initChar, fav_char_lvl: initLvl, fav_char_xp: initXp, char_mastery: initMastery,
+            profile_public: initPub !== 0,
             rank: rankRow ? rankRow.rk : 1, tier: ninjaTier(1000),
         });
     }
