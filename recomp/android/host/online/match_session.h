@@ -35,6 +35,7 @@ struct SessionFile {
     std::string inputMode;                      // optional input mode ("touch", "gamepad", "any")
     bool spectator = false;                     // read-only live spectator (plays received [field, p1, p2] frames)
     bool broadcastSpec = false;                 // host streams [field, p1, p2] frames over relay WS for live spectators
+    bool ranked = false;                        // competitive ranked match (blocks START pause spam during fights)
 };
 bool parseSessionFile(const std::string& text, SessionFile& out);
 std::string formatSessionFile(const SessionFile& file);

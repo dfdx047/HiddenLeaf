@@ -16,6 +16,7 @@ namespace hl_game
     int divider();                             // vsyncs a game frame takes (the game's own: 2)
 
     int scene();                               // what the game shows: 0 unknown, 1 menu, 2 fight, 3 campaign, 4 campaign with the player held (a conversation)
+    bool inFightDeterministic();               // deterministic EE-tick fight state (safe in online lockstep: no wall-clock)
     extern std::atomic<bool> g_unlockAll;      // the launcher's "unlock everything"
     extern std::atomic<bool> g_specialOn;      // the launcher's "special with one button"
     extern std::atomic<uint32_t> g_specialMask; // its button, in the game's bits of the pad

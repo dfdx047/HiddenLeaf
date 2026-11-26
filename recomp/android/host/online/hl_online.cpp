@@ -311,11 +311,21 @@ namespace
             buttons = entryButtons(g_match.field(), g_match.iAmPlayer1());
             axes = 0x80808080u;
         }
+        const bool blockStart = g_file.ranked && g_match.running() && g_match.field() >= kEntryEnd && hl_game::inFightDeterministic();
+        if (blockStart)
+            buttons &= ~static_cast<unsigned>(kStart);
         const uint8_t local[6] = {static_cast<uint8_t>(buttons), static_cast<uint8_t>(buttons >> 8), static_cast<uint8_t>(axes),
                                   static_cast<uint8_t>(axes >> 8), static_cast<uint8_t>(axes >> 16), static_cast<uint8_t>(axes >> 24)};
         uint8_t p1[6], p2[6];
         if (g_match.padField(local, p1, p2))
         {
+            // Ranked anti-grief: deterministically strip START (0x08) for BOTH players during an active fight
+            // so neither side can spam-pause the match (works identically on both phones with zero desync).
+            if (g_file.ranked && g_match.field() >= kEntryEnd && hl_game::inFightDeterministic())
+            {
+                p1[0] &= static_cast<uint8_t>(~0x08u);
+                p2[0] &= static_cast<uint8_t>(~0x08u);
+            }
             g_pads[0].store(pack(p1), std::memory_order_release);
             g_pads[1].store(pack(p2), std::memory_order_release);
             g_padsOn.store(true, std::memory_order_release);

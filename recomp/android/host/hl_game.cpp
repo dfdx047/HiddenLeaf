@@ -1884,6 +1884,16 @@ int hl_game::divider()
 // went on longer than 8 s and its buttons became the menu's in the middle of the sequence (docs/registro.md, 2026-11-05).
 // With that, a fight's controls go 2 s after the last of these (the character select after a fight kept them 10 s); the
 // campaign keeps 8 s for the loading of an area.
+bool hl_game::inFightDeterministic()
+{
+    if (g_rdram == nullptr || overlay() != 1)
+        return false;
+    const uint64_t tick = g_tick;
+    return (g_fighterTick != 0u && tick - g_fighterTick < 60u) ||
+           (g_ougiTick != 0u && tick - g_ougiTick < 60u) ||
+           ougiOnScreen();
+}
+
 int hl_game::scene()
 {
     if (g_rdram == nullptr)
