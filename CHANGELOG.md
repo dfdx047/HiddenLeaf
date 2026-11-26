@@ -2,6 +2,31 @@
 
 **English** · [Português](CHANGELOG.pt-BR.md) · [Español](CHANGELOG.es.md)
 
+## v0.2.1 (2026-11-26)
+
+Update focused on **Ranked Mode**, **Character Mastery**, **Live Spectator**, **Inspectable Ninja Profiles**, and **Touch Controls** — resolving the top community feedback reports from `v0.2.0-beta`.
+
+**Download:** `HiddenLeaf-v0.2.1.apk` (Android 10+, 64-bit ARM — installs cleanly over `v0.2.0-beta`, keeping all game data and saves).
+
+### Ranked Mode, ELO, Mastery & Anti-Grief
+
+- **Working Ranked ELO / RP Progression:** the engine now deterministically detects KO winners directly from RDRAM (`fighter+0x6C`) at the end of every battle (including rematches in the same room), submits bilateral reports to Cloudflare (`/v1/ranked/report`), updates RP, Wins, Losses, Streak, and displays an in-game RP banner (`+RP` / `-RP`). Automatically awards victory if the opponent ragequits or drops mid-fight.
+- **Anti-Grief START Button Block in Ranked Fights:** deterministic engine-level guard (`hl_game::inFightDeterministic()`) blocks **START** for both P1 and P2 during active Ranked battles (touch, gamepad, and macros) with zero desync. START continues working normally on character select and post-match screens.
+- **Character Mastery Fixed:** XP is now awarded on **every single fight** (even when playing the same character repeatedly) plus bonus win/loss XP on the server.
+- **Clickable Global Top 100 Profiles + Privacy Toggle:**
+  - Tap any player on the leaderboard to open their **Ninja Profile** showing their photo/avatar, rank, tier, RP, total matches, wins, losses, winrate, streak, and full **per-character Mastery breakdown**.
+  - Added a **Public / Private Profile** toggle under your Ninja Info Card so players can hide their custom photo, detailed stats, and mastery list if desired.
+- **Custom Gallery Avatar + 20-Character Art Bank:** replaced broken screen-crop portraits with a unified picker supporting **custom images from your gallery** (synced to public profiles) and a **20-character cached art bank**.
+- **Fixed Ranked & Casual Screen Layouts:** full-width uncached (`no-store`) **Refresh Ranking** button and `FlowRow` filter chips that never clip on any screen size (Odin 2 Mini, RG Cube 1:1, portrait or landscape phones).
+
+### Live Spectator, Online, Controls & Diagnostics
+
+- **Real In-Game Live Spectator Playback:** in Custom Lobbies (2–8 players), spectators now watch fights live inside the engine via host frame streaming + late-join replay over the WebSocket relay.
+- **Desync Indicator (`⚠ Desync`):** re-enabled the online HUD desync warning so players immediately know if two games diverge.
+- **Fixed `↑ ↑ ○` & `↓ ↓ ○` Touch Macro Buttons:** fixed double-tap timing (removed dead gap before `○`), auto-centered left analog stick during directional macros, canceled overlapping macros, and prevented accidental slide activation onto `Jutsu (△ + ○)` / `Ougi`.
+- **In-App Update Changelog Always Shown:** removed silent Wi-Fi auto-download skipping so every player sees the full localized changelog inside the app before and during updates.
+- **Fixed Bug-Report Log Export (`un5_log.txt`):** updated `LogExport.kt`, `LastRun.kt`, and `PerfReport.kt` from legacy `bt3_log.txt` to `un5_log.txt` so player logs include the real engine log and settings.
+
 ## v0.2.0-beta (2026-11-24)
 
 Major performance, graphics and Online update: **real Frame Generation (ZeroFG 1.2)** for offline play, **reorganized Online hub** with dedicated **Casual Mode** (including 2–8P Custom Lobby & Spectator) and **Ranked Mode** (Genin → Kage, Per-Character Mastery & Global Top 100), **GPU-aware Vulkan Drivers tab** (Turnip, PanVK, MaliSX2 & RADV), **100% Save with R1 transformations unlocked**, **Skip Company Logos + Intro**, and permanent fix for post-fight menu textures.

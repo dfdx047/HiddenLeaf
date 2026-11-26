@@ -2,6 +2,31 @@
 
 [English](CHANGELOG.md) · [Português](CHANGELOG.pt-BR.md) · **Español**
 
+## v0.2.1 (26/11/2026)
+
+Actualización enfocada en el **Modo Clasificatorio**, **Maestría de Personajes**, **Espectador en Vivo**, **Perfiles Ninja** y **Controles Táctiles** — corrigiendo los principales reportes de la comunidad en `v0.2.0-beta`.
+
+**Descarga:** `HiddenLeaf-v0.2.1.apk` (Android 10+, ARM de 64 bits — se instala directamente encima de `v0.2.0-beta` conservando todos tus datos y guardados).
+
+### Modo Clasificatorio, ELO, Maestría y Anti-Grief
+
+- **Puntuación Clasificatoria (ELO / RP) funcionando de extremo a extremo:** el motor ahora detecta automáticamente al ganador por KO directo en la RDRAM (`fighter+0x6C`) al finalizar cada combate (incluyendo revanchas en la misma sala), envía reportes bilaterales a Cloudflare (`/v1/ranked/report`), actualiza RP, Victorias, Derrotas, Racha y muestra un aviso en pantalla (`+RP` / `-RP`). También otorga victoria automática ante desconexión/ragequit en pleno combate.
+- **Bloqueo del botón START durante combates Clasificatorios:** protección determinista en el motor (`hl_game::inFightDeterministic()`) que bloquea **START** para P1 y P2 durante las peleas clasificatorias (táctil, mando y macros) sin causar desincronización. En selección de personajes y menús posteriores, START sigue funcionando normal.
+- **Maestría de Personajes corregida:** ahora suma XP en **cada combate jugado** (incluso repitiendo el mismo personaje) y añade XP extra de victoria/derrota en el servidor.
+- **Perfiles clicables en el Top 100 Global + Control de Privacidad:**
+  - Tocar cualquier jugador en el ranking abre el modal **Perfil Ninja** con foto/avatar, rango, RP, partidas jugadas, victorias, derrotas, porcentaje de victoria, racha y la lista completa de **personajes jugados con su maestría individual**.
+  - Nuevo interruptor **Perfil público / Perfil privado** bajo tu Tarjeta Ninja para ocultar foto personalizada, estadísticas detalladas y maestrías si lo prefieres.
+- **Avatar personalizado (Galería) + Banco de Artes (20 Ninjas):** eliminado el recorte roto de pantalla; ahora puedes usar **una imagen de tu galería** (sincronizada en tu perfil público) o elegir entre **20 personajes del banco de artes** en caché local.
+- **Diseño de Clasificatorio y Casual corregido:** botón **Actualizar ranking** a ancho completo sin caché (`no-store`) y chips de filtro con ajuste automático (`FlowRow`) sin cortes en ninguna pantalla.
+
+### Espectador en Vivo, En Línea, Controles y Diagnóstico
+
+- **Modo Espectador en Vivo real dentro del juego:** en Salas Personalizadas (2–8 jugadores), los espectadores ahora ven el combate en tiempo real dentro del motor mediante retransmisión de cuadros por WebSocket.
+- **Indicador de desincronización (`⚠ Desync`):** reactivado el aviso en el HUD en línea cuando dos partidas divergen.
+- **Botones táctiles `↑ ↑ ○` y `↓ ↓ ○` corregidos:** mejorado el tiempo de doble toque (sin pausa muerta antes de `○`), centrado del stick izquierdo durante macros direccionales, cancelación de macros superpuestos y bloqueo de deslizamiento accidental hacia `Jutsu (△ + ○)` / `Ougi`.
+- **Changelog siempre visible dentro de la app al actualizar:** eliminada la descarga silenciosa en Wi-Fi que ocultaba las novedades; ahora todos los jugadores ven el changelog completo dentro de la app antes y durante la actualización.
+- **Exportación de logs corregida (`un5_log.txt`):** actualizados `LogExport.kt`, `LastRun.kt` y `PerfReport.kt` del antiguo `bt3_log.txt` a `un5_log.txt` para que los reportes incluyan el log real del motor y los ajustes.
+
 ## v0.2.0-beta (24/11/2026)
 
 Gran actualización de rendimiento, gráficos y Modo En Línea: **Frame Generation real (ZeroFG 1.2)** para el modo sin conexión, **menú En Línea reorganizado** con pantallas dedicadas para **Modo Casual** (incl. Sala Personalizada y Espectador 2–8J) y **Modo Clasificatorio** (Genin → Kage, Maestría por Personaje y Top 100 Global), **pestaña de Drivers** con detección automática de GPU (Turnip, PanVK, MaliSX2 y RADV), **Guardado 100% con transformaciones R1**, **Saltar Logos + Introducción** y corrección definitiva de texturas de menús tras los combates.

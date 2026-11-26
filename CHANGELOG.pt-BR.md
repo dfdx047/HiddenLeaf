@@ -2,6 +2,31 @@
 
 [English](CHANGELOG.md) · **Português** · [Español](CHANGELOG.es.md)
 
+## v0.2.1 (26/11/2026)
+
+Atualização focada no **Modo Ranqueado**, **Maestria de Personagens**, **Espectador ao Vivo**, **Perfis Ninja** e **Controles Touch** — corrigindo os principais relatos da comunidade na `v0.2.0-beta`.
+
+**Download:** `HiddenLeaf-v0.2.1.apk` (Android 10+, ARM de 64 bits — instala diretamente por cima da `v0.2.0-beta` mantendo todos os dados e saves).
+
+### Modo Ranqueado, ELO, Maestria & Anti-Grief
+
+- **Pontuação Ranqueada (ELO / RP) funcionando de ponta a ponta:** a engine agora detecta automaticamente o vencedor por KO direto na RDRAM (`fighter+0x6C`) ao fim de cada luta (inclusive revanches na mesma sala), reporta bilateralmente para o servidor Cloudflare (`/v1/ranked/report`), atualiza RP, Vitórias, Derrotas, Sequência e exibe banner na tela com o resultado (`+RP` / `-RP`). Também contabiliza vitória automática caso o adversário dê ragequit/caia no meio da luta.
+- **Bloqueio do botão START durante lutas Ranqueadas:** proteção determinística na engine (`hl_game::inFightDeterministic()`) que bloqueia o botão **START** de P1 e P2 durante combates ranqueados (toque, controle e macro), impedindo spam de pause com zero dessincronização. Fora do combate (seleção de personagens e tela pós-luta), o START funciona normalmente.
+- **Maestria de Personagens corrigida:** agora soma XP em **toda luta jogada** (mesmo repetindo o mesmo personagem várias vezes seguidas) e credita XP extra de vitória/derrota no servidor.
+- **Perfis clicáveis no Top 100 Global + Chave de Privacidade:**
+  - Tocar em qualquer jogador no ranking abre o modal **Perfil Ninja** com foto/avatar, patente, RP, partidas jogadas, vitórias, derrotas, winrate, sequência e a lista completa de **personagens jogados com maestria individual**.
+  - Nova opção **Perfil público / Perfil privado** abaixo do seu Cartão Ninja para quem prefere ocultar foto personalizada, estatísticas detalhadas e maestrias.
+- **Avatar personalizado (Galeria) + Banco de Artes (20 Ninjas):** removida a captura quebrada de retratos da tela; agora você pode escolher **uma foto da sua galeria** (sincronizada para o seu perfil público) ou escolher entre **20 personagens do banco de artes** cacheados localmente.
+- **Layout da Ranqueada e Casual corrigido:** botão **Atualizar ranking** em largura total sem cache (`no-store`) e chips de filtro com quebra automática (`FlowRow`), sem cortes em nenhuma tela (Odin 2 Mini, RG Cube 1:1, celulares em pé ou deitados).
+
+### Espectador ao Vivo, Online, Controles & Diagnóstico
+
+- **Modo Espectador ao Vivo real dentro do jogo:** nas Salas Personalizadas (2–8 jogadores), espectadores agora entram na partida em tempo real com replay automático dos quadros recebidos do host pelo relay WebSocket.
+- **Aviso de dessincronização (`⚠ Desync`):** reativado o indicador no HUD online quando duas partidas divergem, evitando lutas silenciosamente dessincronizadas.
+- **Botões touch `↑ ↑ ○` e `↓ ↓ ○` corrigidos:** ajustada a cadência de duplo toque (sem pausa morta antes do `○`), centralização do analógico durante macros direcionais, cancelamento de macros concorrentes e bloqueio de deslize acidental para `Jutsu (△ + ○)` / `Ougi`.
+- **Changelog sempre exibido dentro do app em updates:** removido o download silencioso no Wi-Fi que pulava a tela de novidades; agora todos os jogadores veem o changelog completo no app antes e durante a atualização.
+- **Exportação de logs corrigida (`un5_log.txt`):** corrigidos [LogExport.kt], [LastRun.kt] e [PerfReport.kt] que ainda buscavam o nome antigo `bt3_log.txt`, garantindo que relatórios de jogadores incluam o log real da engine e as configurações.
+
 ## v0.2.0-beta (24/11/2026)
 
 Grande atualização de desempenho, gráficos e Modo Online: **Frame Generation real (ZeroFG 1.2)** para o modo offline, **Modo Online reorganizado** com telas dedicadas para **Modo Casual** (incl. Sala Personalizada & Espectador 2–8P) e **Modo Ranqueado** (Genin → Kage, Maestria por Personagem e Top 100 Global), **aba de Drivers** com detecção automática de GPU (Turnip, PanVK, MaliSX2 e RADV), **Save 100% com transformações R1**, **Pular Logos + Abertura** e correção definitiva das texturas de menu pós-luta.
