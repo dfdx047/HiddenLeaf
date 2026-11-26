@@ -552,10 +552,18 @@ bool hl_online::setup(const std::string &root)
     std::filesystem::remove_all(saves, error);
     std::filesystem::create_directories(saves, error);
     setenv("HL_MC_ROOT", saves.c_str(), 1);
-    // the same clock, in UTC (the runtime's sceCdReadClock and the system configuration's time zone)
+    // the same clock, in UTC (the runtime's sceCdReadClock, MemoryCard and the system configuration's time zone)
     setenv("HL_FIXED_CLOCK", kFixedClock, 1);
     setenv("TZ", "UTC0", 1);
     tzset();
+    // Strict online/LAN determinism:
+    //  - HL_IOP_THREAD=0: run IOP synchronously on exact EE cycles (async IopWorker lagged up to 54 ms / 2.7 vsyncs
+    //    and caused SIF/CDVD/Ougi audio & post-match loads to complete on different vsyncs between fast and slow phones!)
+    //  - HL_ONLINE_DETERMINISTIC=1: never gate/reorder EE Alarms or VBlankEnd by host wall clock during lockstep waits
+    //  - HL_SKIP_INTRO=0: prevent per-phone intro-skip settings from altering boot timing
+    setenv("HL_IOP_THREAD", "0", 1);
+    setenv("HL_ONLINE_DETERMINISTIC", "1", 1);
+    setenv("HL_SKIP_INTRO", "0", 1);
     // the launcher's assists change the pads in the game's memory (hl_game.cpp): both games must do the same, so the game's own rules
     hl_game::g_unlockAll.store(true, std::memory_order_relaxed);
     hl_game::g_specialOn.store(false, std::memory_order_relaxed);

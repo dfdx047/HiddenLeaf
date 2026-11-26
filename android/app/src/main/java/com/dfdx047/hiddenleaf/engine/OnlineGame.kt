@@ -256,18 +256,21 @@ class OnlineGame private constructor(
         }
     }
 
-    private fun submitRankedResult(fightNum: Int, winnerClaim: String) {
+    private fun submitRankedResult(fightNum: Int, winnerClaim: String, autoDisconnect: Boolean = true) {
         if (!ranked || server.isEmpty() || opponentId.isEmpty() || roomCode.isEmpty()) return
         val myRole = if (isHost) "p1" else "p2"
         val matchId = "${roomCode}_f${fightNum}"
         val myChar = com.dfdx047.hiddenleaf.data.OnlineAdvanced.savedFavChar(activity)
         Thread({
             var res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
-            // If peer hasn't submitted yet, wait briefly and re-check so we display the final RP delta
-            if (res?.optBoolean("waiting", false) == true) {
-                Thread.sleep(2500L)
+            // Poll briefly if peer hasn't submitted yet so both players see their exact final RP delta
+            var tries = 0
+            while (res?.optBoolean("waiting", false) == true && tries < 3) {
+                tries++
+                Thread.sleep(1800L)
                 res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
             }
+            val finalMsg: String
             if (res?.optBoolean("resolved", false) == true) {
                 val myDelta = if (myRole == "p1") res.optInt("p1_delta", 0) else res.optInt("p2_delta", 0)
                 val myPts = if (myRole == "p1") res.optInt("p1_points", 0) else res.optInt("p2_points", 0)
@@ -276,8 +279,22 @@ class OnlineGame private constructor(
                 val label = if (won) "🏆 VITÓRIA RANQUEADA! $sign RP ($myPts RP)" else "💀 DERROTA RANQUEADA! $sign RP ($myPts RP)"
                 Log.i("un5", "ranked: resolved $matchId -> $label")
                 showRankedToast(label, won)
+                finalMsg = "$label\n\nPartida ranqueada concluída. Volte ao lobby para buscar um novo adversário!"
             } else {
                 Log.i("un5", "ranked: submitted $matchId ($winnerClaim as $myRole), resp=$res")
+                finalMsg = "Partida ranqueada concluída!\nResultado enviado ao servidor. Volte ao lobby para buscar um novo adversário."
+            }
+            // Ranked rule: 1 match and disconnect (no rematch farming or post-match room lingering)
+            if (autoDisconnect) {
+                Thread.sleep(3000L)
+                OnlineBridge.leave()
+                activity.runOnUiThread {
+                    runCatching { wifiLock?.release() }
+                    if (!endShown) {
+                        endShown = true
+                        showEnd(finalMsg)
+                    }
+                }
             }
         }, "ranked-report").apply { isDaemon = true; start() }
     }
@@ -340,7 +357,7 @@ class OnlineGame private constructor(
         if (ranked && phase == "over" && activeFight > lastReportedFight &&
             (s["reason"] == "the other player left" || s["reason"] == "the other game stopped answering")) {
             lastReportedFight = activeFight
-            submitRankedResult(activeFight, "ragequit")
+            submitRankedResult(activeFight, "ragequit", autoDisconnect = false)
         }
         if ((phase == "over" || phase == "failed") && !endShown && s["reason"] != "the player left") {
             endShown = true

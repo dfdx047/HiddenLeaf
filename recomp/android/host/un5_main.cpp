@@ -306,22 +306,35 @@ namespace
                      std::getenv("HL_PERF") ? "true" : "false",
                      (!hl_online::active() && g_settings.zeroFg >= 2) ? "true" : "false",
                      (g_settings.zeroFg >= 2 && g_settings.zeroFg <= 4) ? g_settings.zeroFg : 2);
+        // Entry-level device optimizations when Light Mode is active (Tier 0-1 GPUs / 3-4 GB RAM phones):
+        // Minimum blending accuracy + no trilinear/mipmapping/dithering + partial texture preloading reduces
+        // fragment shader & VRAM pressure significantly on Mali-G52/G57, PowerVR, Unisoc T6xx and Adreno 610.
+        if (g_lightMode)
+        {
+            std::fprintf(f,
+                         "accurate_blending_unit = 0\n"
+                         "mipmapping = 0\n"
+                         "trilinear_filtering = 0\n"
+                         "dithering_ps2 = 0\n"
+                         "texture_preloading = 1\n");
+        }
         // PCSX2's GS in two threads (GSBackThreadMode: one parses the GIF, "GS Back" draws) where the GS is the limit of a
-        // device with four fast cores: on the Mi A3 (Snapdragon 665, "trinket") the GS thread of a heavy fight went from 22-27
+        // device with 6+ cores: on the Mi A3 (Snapdragon 665, "trinket") the GS thread of a heavy fight went from 22-27
         // to 12-16 ms (docs/registro.md, 2026-11-13). Only with the GS on Vulkan and the native renderer off (hl_native's
-        // fight path works on the renderer object from the MTGS thread). The IOP then goes to the slow cores: five busy
-        // threads on four fast ones cost 2-3 fps. HL_GS_SPLIT=0/1 decides on any device.
+        // fight path works on the renderer object from the MTGS thread). HL_GS_SPLIT=0/1 overrides on any device.
         {
             const char *split = std::getenv("HL_GS_SPLIT");
             const char *nat = std::getenv("HL_NATIVE");
             const char *api = std::getenv("HL_GS_API");
             char platform[PROP_VALUE_MAX] = {};
             __system_property_get("ro.board.platform", platform);
+            const long cpus = sysconf(_SC_NPROCESSORS_ONLN);
             const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
-            const bool splitPlatform = std::strcmp(platform, "trinket") == 0 || std::strcmp(platform, "bengal") == 0 ||
+            const bool splitPlatform = cpus >= 6 ||
+                                       std::strcmp(platform, "trinket") == 0 || std::strcmp(platform, "bengal") == 0 ||
                                        std::strcmp(platform, "khaje") == 0 || std::strncmp(platform, "ums", 3) == 0 ||
-                                       std::strncmp(platform, "mt676", 5) == 0 || std::strncmp(platform, "mt678", 5) == 0 ||
-                                       std::strncmp(platform, "mt683", 5) == 0 || std::strncmp(platform, "exynos", 6) == 0 ||
+                                       std::strncmp(platform, "mt67", 4) == 0 || std::strncmp(platform, "mt68", 4) == 0 ||
+                                       std::strncmp(platform, "exynos", 6) == 0 || std::strncmp(platform, "s5e", 3) == 0 ||
                                        std::strncmp(platform, "sc9863", 6) == 0;
             const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && splitPlatform;
             if (on)
