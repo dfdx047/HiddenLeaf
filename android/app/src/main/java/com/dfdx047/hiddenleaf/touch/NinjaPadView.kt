@@ -322,13 +322,16 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
     }
 
     private fun recompute() {
-        var b = if (players.values.any { it.running && it.ownsDirs }) 0 else dpadBits
+        val macroOwnsDirs = players.values.any { it.running && it.ownsDirs }
+        var b = if (macroOwnsDirs) 0 else dpadBits
+        val sx = if (macroOwnsDirs) 128 else lx
+        val sy = if (macroOwnsDirs) 128 else ly
         for (e in pressed) if (e.ctl != null && e.kind != CtlKind.MACRO && e.kind != CtlKind.SYSTEM) b = b or e.ctl.bit
         for (p in players.values) b = b or p.mask
-        val packed = (b.toLong() shl 16) or (lx.toLong() shl 8) or ly.toLong()
+        val packed = (b.toLong() shl 16) or (sx.toLong() shl 8) or sy.toLong()
         if (packed != lastSent) {
             lastSent = packed
-            listener?.onPad(b, lx, ly, 128, 128)
+            listener?.onPad(b, sx, sy, 128, 128)
         }
         invalidate()
     }
@@ -523,6 +526,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         if (e.kind == CtlKind.MACRO) {
             val steps = e.macro?.steps ?: e.ctl?.steps ?: return
             val holdLast = e.ctl?.holdLast ?: false
+            // Cancel any other active macro so ↑↑○/↓↓○ can never overlap with Jutsu (△+○) or Ougi (△△○)
+            players.forEach { (k, p) -> if (k != e.key && p.running) p.cancel() }
             players.getOrPut(e.key) { Player(steps, e.macro?.repeat ?: false, holdLast) }.start()
         } else {
             pressedAt[e] = SystemClock.uptimeMillis()
@@ -562,8 +567,8 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
         val e = t.el
         val kinds = slideKinds()
         if (e == null) {
-            // a finger that landed between buttons and slides onto one presses it (never auto-slide onto GUARD/R2)
-            find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD }?.let { n ->
+            // a finger that landed between buttons and slides onto one presses it (never auto-slide onto GUARD/R2 or JUTSU/OUGI)
+            find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD && it.ctl != Ctl.JUTSU && it.ctl != Ctl.OUGI }?.let { n ->
                 t.el = n; press(n)
             }
             return
@@ -577,9 +582,9 @@ class NinjaPadView(context: Context, initial: TouchConfig, editing: Boolean = fa
             }
             CtlKind.STICK -> stick(e, t, x, y)
             in kinds -> if (!e.hit(x, y, max(1.25f, touchSlack() + 0.13f))) {
-                // sliding across the buttons: the one under the finger now (never auto-slide onto GUARD/R2 to prevent accidental Kawarimi)
+                // sliding across the buttons: the one under the finger now (never auto-slide onto GUARD/R2 or JUTSU/OUGI to prevent accidental Kawarimi or △+○)
                 letGo(t, e)
-                val n = find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD }
+                val n = find(x, y, 1.0f, kinds)?.takeIf { it.ctl != Ctl.GUARD && it.ctl != Ctl.JUTSU && it.ctl != Ctl.OUGI }
                 t.el = n
                 if (n != null) press(n)
             }

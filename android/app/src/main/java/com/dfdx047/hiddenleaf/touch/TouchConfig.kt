@@ -99,10 +99,10 @@ enum class Ctl(val kind: CtlKind, val bit: Int, val size: Float, val steps: List
         MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.TRIANGLE, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
     )),
     SPECIAL_UP(CtlKind.MACRO, 0, 56f, listOf(
-        MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.UP, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
+        MacroStep(Ps2.UP, 60), MacroStep(0, 45), MacroStep(Ps2.UP, 45), MacroStep(Ps2.UP or Ps2.CIRCLE, 90),
     ), holdLast = true),
     SPECIAL_DOWN(CtlKind.MACRO, 0, 56f, listOf(
-        MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.DOWN, 70), MacroStep(0, 50), MacroStep(Ps2.CIRCLE, 90),
+        MacroStep(Ps2.DOWN, 60), MacroStep(0, 45), MacroStep(Ps2.DOWN, 45), MacroStep(Ps2.DOWN or Ps2.CIRCLE, 90),
     ), holdLast = true),
     GUARD(CtlKind.BUTTON, Ps2.R2, 60f),
     AWAKEN(CtlKind.BUTTON, Ps2.R3, 52f),

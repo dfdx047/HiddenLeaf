@@ -28,6 +28,11 @@ class OnlineGame private constructor(
     private val peer: String,
     private val relayUrl: String?,
     val touchOnly: Boolean = false,
+    private val ranked: Boolean = false,
+    private val server: String = "",
+    private val roomCode: String = "",
+    private val opponentId: String = "",
+    private val isHost: Boolean = false,
 ) {
     @Volatile private var running = true
     @Volatile private var relay: RelaySocket? = null
@@ -221,6 +226,61 @@ class OnlineGame private constructor(
     private var shownSince = 0L
     private var lastPhase = ""
     private var endShown = false
+    private var lastReportedFight = 0
+    private var activeFight = 0
+    private var rankedBanner: TextView? = null
+
+    private fun showRankedToast(msg: String, win: Boolean) {
+        val layout = root ?: return
+        activity.runOnUiThread {
+            rankedBanner?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            val tv = TextView(activity).apply {
+                text = msg
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                typeface = font(R.font.kanit_bold, Typeface.DEFAULT_BOLD)
+                background = GradientDrawable().apply {
+                    setColor(if (win) 0xE61B5E20.toInt() else 0xE67F1D1D.toInt())
+                    cornerRadius = dp(12f)
+                    setStroke(dp(2f).toInt(), GOLD)
+                }
+                setPadding(dp(16f).toInt(), dp(8f).toInt(), dp(16f).toInt(), dp(8f).toInt())
+            }
+            layout.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = dp(12f).toInt()
+            })
+            rankedBanner = tv
+            tv.postDelayed({
+                tv.animate().alpha(0f).setDuration(400).withEndAction { (tv.parent as? ViewGroup)?.removeView(tv) }.start()
+            }, 5500L)
+        }
+    }
+
+    private fun submitRankedResult(fightNum: Int, winnerClaim: String) {
+        if (!ranked || server.isEmpty() || opponentId.isEmpty() || roomCode.isEmpty()) return
+        val myRole = if (isHost) "p1" else "p2"
+        val matchId = "${roomCode}_f${fightNum}"
+        val myChar = com.dfdx047.hiddenleaf.data.OnlineAdvanced.savedFavChar(activity)
+        Thread({
+            var res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
+            // If peer hasn't submitted yet, wait briefly and re-check so we display the final RP delta
+            if (res?.optBoolean("waiting", false) == true) {
+                Thread.sleep(2500L)
+                res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
+            }
+            if (res?.optBoolean("resolved", false) == true) {
+                val myDelta = if (myRole == "p1") res.optInt("p1_delta", 0) else res.optInt("p2_delta", 0)
+                val myPts = if (myRole == "p1") res.optInt("p1_points", 0) else res.optInt("p2_points", 0)
+                val won = myDelta >= 0
+                val sign = if (myDelta >= 0) "+$myDelta" else "$myDelta"
+                val label = if (won) "🏆 VITÓRIA RANQUEADA! $sign RP ($myPts RP)" else "💀 DERROTA RANQUEADA! $sign RP ($myPts RP)"
+                Log.i("un5", "ranked: resolved $matchId -> $label")
+                showRankedToast(label, won)
+            } else {
+                Log.i("un5", "ranked: submitted $matchId ($winnerClaim as $myRole), resp=$res")
+            }
+        }, "ranked-report").apply { isDaemon = true; start() }
+    }
 
     private fun show(t: TextView, s: Map<String, String>) {
         if (relayUrl != null && !relayStarted && s["want_relay"] == "1") {
@@ -229,6 +289,18 @@ class OnlineGame private constructor(
         }
         val phase = s["phase"] ?: "starting"
         updateCover(phase, s["field"]?.toIntOrNull() ?: 0)
+        // Poll deterministic KO winner from engine RDRAM during Ranked matches
+        if (ranked && phase == "playing") {
+            val mr = TouchBridge.matchResult()
+            val curFight = mr["fight"] ?: 0
+            if (curFight > activeFight) activeFight = curFight
+            val winFight = mr["win_fight"] ?: 0
+            val winner = mr["winner"] ?: 0
+            if (winFight > lastReportedFight && (winner == 1 || winner == 2)) {
+                lastReportedFight = winFight
+                submitRankedResult(winFight, if (winner == 1) "p1" else "p2")
+            }
+        }
         if (phase != lastPhase) {
             lastPhase = phase
             shownSince = System.currentTimeMillis()
@@ -241,9 +313,8 @@ class OnlineGame private constructor(
                 val rtt = s["rtt"]?.toIntOrNull() ?: -1
                 val side = if (s["p1"] == "1") "P1" else "P2"
                 val via = if (s["relay"] == "1") r.getString(R.string.online_game_via_relay) else ""
-                // (the memory check still differs in places outside the fight (2026-11-14, not mapped yet) while both screens
-                // stay the same: the line no longer says "the games differ" from it; the log keeps every difference)
-                val desync = ""
+                val desyncCount = s["desyncs"]?.toIntOrNull() ?: 0
+                val desync = if (desyncCount > 0) " · ⚠ Desync" else ""
                 // (once it is going the line keeps to a corner and says little: the ping and the side)
                 r.getString(R.string.online_game_playing, side, peer, if (rtt >= 0) "$rtt ms" else "?",
                     // (the delay is in vsyncs of 20 ms)
@@ -265,6 +336,12 @@ class OnlineGame private constructor(
         // (the developer, 2026-11-14: after a drop each phone went on alone. The engine now holds the game still once the match is
         // over; here the player is told why and goes back to the menu)
         if (phase == "over" || phase == "failed") runCatching { wifiLock?.release() }
+        // If opponent quit or dropped mid-fight in Ranked, award victory by ragequit
+        if (ranked && phase == "over" && activeFight > lastReportedFight &&
+            (s["reason"] == "the other player left" || s["reason"] == "the other game stopped answering")) {
+            lastReportedFight = activeFight
+            submitRankedResult(activeFight, "ragequit")
+        }
         if ((phase == "over" || phase == "failed") && !endShown && s["reason"] != "the player left") {
             endShown = true
             showEnd(line)
@@ -322,8 +399,13 @@ class OnlineGame private constructor(
             val relay = s["relay_url"]?.firstOrNull()?.takeIf { s["relay"]?.firstOrNull() == "1" && Online.isAllowedServer(it) }
             val peer = s["peer"]?.firstOrNull().orEmpty().ifEmpty { "?" }
             val touchOnly = s["input_mode"]?.firstOrNull() == "touch"
-            Log.i("un5", "online: match against $peer, relay ${if (relay != null) "lazy" else "off"}, touchOnly=$touchOnly")
-            return OnlineGame(activity, peer, relay, touchOnly)
+            val ranked = s["ranked"]?.firstOrNull() == "1"
+            val server = s["server"]?.firstOrNull().orEmpty()
+            val code = s["code"]?.firstOrNull().orEmpty()
+            val opponentId = s["opponent_id"]?.firstOrNull().orEmpty()
+            val isHost = s["role"]?.firstOrNull() == "host"
+            Log.i("un5", "online: match against $peer, relay ${if (relay != null) "lazy" else "off"}, touchOnly=$touchOnly, ranked=$ranked, opp=$opponentId")
+            return OnlineGame(activity, peer, relay, touchOnly, ranked, server, code, opponentId, isHost)
         }
     }
 }

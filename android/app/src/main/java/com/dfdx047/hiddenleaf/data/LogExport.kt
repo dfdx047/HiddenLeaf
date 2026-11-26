@@ -49,7 +49,7 @@ class LogExport(private val context: Context, private val paths: GamePaths) {
                 }
             }
         }.onFailure { appendLine("(could not be listed: ${it.message})") }
-        for (name in listOf("bt3_settings.txt", "bt3_env.txt", "match_url.txt", "dragonnet_url.txt")) {
+        for (name in listOf("un5_settings.txt", "un5_mods.txt", "hl_env.txt", "gpu_name.txt")) {
             val f = File(paths.root, name)
             if (f.exists()) {
                 appendLine("--- $name")
@@ -57,8 +57,8 @@ class LogExport(private val context: Context, private val paths: GamePaths) {
             }
         }
         appendLine()
-        appendLine("===== bt3_log.txt (the game's last run) =====")
-        val log = File(paths.root, "bt3_log.txt")
+        appendLine("===== un5_log.txt (the game's last run) =====")
+        val log = File(paths.root, "un5_log.txt")
         if (log.exists()) {
             val lines = log.readLines()
             if (lines.size > 3000) appendLine("(${lines.size - 3000} earlier lines left out)")
@@ -66,7 +66,7 @@ class LogExport(private val context: Context, private val paths: GamePaths) {
         } else {
             appendLine("(none: the game has not been started yet)")
         }
-        for ((name, label) in listOf("bt3_log.1.txt" to "the run before", "bt3_log.2.txt" to "two runs before")) {
+        for ((name, label) in listOf("un5_log.1.txt" to "the run before", "un5_log.2.txt" to "two runs before")) {
             val f = File(paths.root, name)
             if (!f.exists()) continue
             appendLine()

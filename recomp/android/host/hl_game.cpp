@@ -47,6 +47,10 @@ namespace hl_game
     std::atomic<bool> g_menuOnline{false};
     std::atomic<int> g_onlineMenu{0};
     std::atomic<int> g_p1CharId{0};
+    std::atomic<int> g_p2CharId{0};
+    std::atomic<int> g_fightCount{0};
+    std::atomic<int> g_lastWinFight{0};
+    std::atomic<int> g_lastWinner{0};
     bool (*g_nativeOn)() = nullptr;
     void (*g_liveFight)(bool) = nullptr;
     void (*g_wideCameraOut)(bool) = nullptr;
@@ -111,6 +115,12 @@ namespace
     {
         return n >= 1u && n <= g_fightStarts.size() ? g_fightStarts[n - 1u] : 0u;
     }
+    // Live battle HP tracking for deterministic KO / winner detection (Ranked ELO + per-fight mastery)
+    float g_p1Hp = -1.0f;
+    float g_p2Hp = -1.0f;
+    bool g_bothAlive = false;
+    int g_winnerRecordedFight = 0;
+
     void noteFightStart()
     {
         static const uint64_t s_gap = std::getenv("HL_FIGHT_GAP") ? std::strtoull(std::getenv("HL_FIGHT_GAP"), nullptr, 10) : 1500u;
@@ -118,6 +128,10 @@ namespace
         if (live != 0u && g_tick - live <= s_gap)
             return;
         g_fightStarts.push_back(g_tick);
+        g_p1Hp = -1.0f;
+        g_p2Hp = -1.0f;
+        g_bothAlive = false;
+        hl_game::g_fightCount.store(static_cast<int>(g_fightStarts.size()), std::memory_order_release);
         std::fprintf(stderr, "[route] v%llu fight %zu begins\n", static_cast<unsigned long long>(g_tick), g_fightStarts.size());
     }
 
@@ -1325,12 +1339,47 @@ namespace
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
         noteFightStart();
-        // Track Player 1's active character ID (fighter+0x68, verified in sub_002146A0) for automatic portrait export & per-character mastery
-        if (humanFighter(f) && (read16(f + kFighterKind) & 1u) == 0u)
+        // Track P1 & P2 active character IDs (fighter+0x68) and HP (fighter+0x6C) for mastery & Ranked KO detection
         {
+            const uint16_t kind = read16(f + kFighterKind);
+            const bool isP1 = (kind & 1u) == 0u;
             const uint32_t cid = read32(f + 0x68u);
-            if (cid > 0u && cid < 256u)
-                hl_game::g_p1CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
+            const float hp = readf(f + 0x6Cu);
+            if (isP1)
+            {
+                if (cid > 0u && cid < 256u)
+                    hl_game::g_p1CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
+                g_p1Hp = hp;
+            }
+            else
+            {
+                if (cid > 0u && cid < 256u)
+                    hl_game::g_p2CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
+                g_p2Hp = hp;
+            }
+            const int curFight = hl_game::g_fightCount.load(std::memory_order_relaxed);
+            if (curFight > 0)
+            {
+                if (g_p1Hp > 0.05f && g_p1Hp <= 1.5f && g_p2Hp > 0.05f && g_p2Hp <= 1.5f)
+                    g_bothAlive = true;
+                if (g_bothAlive && g_winnerRecordedFight != curFight)
+                {
+                    if (g_p1Hp >= -0.05f && g_p1Hp <= 0.001f && g_p2Hp > 0.001f && g_p2Hp <= 1.5f)
+                    {
+                        g_winnerRecordedFight = curFight;
+                        hl_game::g_lastWinner.store(2, std::memory_order_release);
+                        hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+                        std::fprintf(stderr, "[ranked] fight %d KO: P2 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+                    }
+                    else if (g_p2Hp >= -0.05f && g_p2Hp <= 0.001f && g_p1Hp > 0.001f && g_p1Hp <= 1.5f)
+                    {
+                        g_winnerRecordedFight = curFight;
+                        hl_game::g_lastWinner.store(1, std::memory_order_release);
+                        hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+                        std::fprintf(stderr, "[ranked] fight %d KO: P1 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+                    }
+                }
+            }
         }
         {
             // HL_SP_LOG: which fighter is the human one, its chakra and action, twice a second

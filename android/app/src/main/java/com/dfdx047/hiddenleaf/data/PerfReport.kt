@@ -19,10 +19,10 @@ data class PerfReport(
     val lines: List<String>,
 ) {
     companion object {
-        private val speed = Regex("""bt3: speed (\d+)% \(([\d.]+) game blanks/s, ([\d.]+) pictures/s over ([\d.]+) s(?:, ([^);]*))?""")
+        private val speed = Regex("""(?:un5|bt3): speed (\d+)% \(([\d.]+) game blanks/s, ([\d.]+) pictures/s over ([\d.]+) s(?:, ([^);]*))?""")
 
         fun read(paths: GamePaths): PerfReport? {
-            val log = File(paths.root, "bt3_log.txt")
+            val log = File(paths.root, "un5_log.txt")
             if (!log.exists()) return null
             var gpu = ""
             var renderer = ""
@@ -32,10 +32,10 @@ data class PerfReport(
             val last = ArrayDeque<String>()
             log.forEachLine { l ->
                 when {
-                    l.contains("bt3: GPU: ") -> gpu = l.substringAfter("bt3: GPU: ").substringBefore(", driver").trim()
-                    l.contains("bt3: GL renderer: ") -> gpu = l.substringAfter("bt3: GL renderer: ").substringBefore(" (").trim()
-                    l.contains("bt3: GPU renderer: ") -> renderer = l.substringAfter("bt3: GPU renderer: ").trim()
-                    l.contains("bt3: internal resolution ") -> resolution = l.substringAfter("bt3: internal resolution ").trim()
+                    l.contains("un5: GPU: ") -> gpu = l.substringAfter("un5: GPU: ").substringBefore(", driver").trim()
+                    l.contains("un5: GL renderer: ") -> gpu = l.substringAfter("un5: GL renderer: ").substringBefore(" (").trim()
+                    l.contains("un5: GPU renderer: ") -> renderer = l.substringAfter("un5: GPU renderer: ").trim()
+                    l.contains("un5: internal resolution ") -> resolution = l.substringAfter("un5: internal resolution ").trim()
                 }
                 val m = speed.find(l) ?: return@forEachLine
                 val pct = m.groupValues[1].toInt()
@@ -43,7 +43,7 @@ data class PerfReport(
                 val note = m.groupValues[5]
                 if (secs > 30.0 || note.contains("menu was open")) return@forEachLine // (in the background, or paused)
                 if (note == "fight") fight += pct to (m.groupValues[3].toDoubleOrNull() ?: 0.0) else menus += pct
-                last.addLast(l.substringAfter("bt3: ").take(140))
+                last.addLast(l.substringAfter("un5: ").take(140))
                 if (last.size > 12) last.removeFirst()
             }
             return PerfReport(

@@ -3,6 +3,7 @@ package com.dfdx047.hiddenleaf.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -594,6 +595,18 @@ private fun RankedDedicatedScreen(
     var leaderboard by remember { mutableStateOf<List<com.dfdx047.hiddenleaf.data.OnlineAdvanced.LeaderboardEntry>>(emptyList()) }
     var lbMode by remember { mutableStateOf("all") }
     var loadingRank by remember { mutableStateOf(false) }
+    var showAvatarDialog by remember { mutableStateOf(false) }
+    var avatarVersion by remember { mutableStateOf(0) }
+    val pickAvatar = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            if (com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveCustomAvatarFromUri(context, uri)) {
+                avatarVersion++
+                showAvatarDialog = false
+            }
+        }
+    }
     val canPlay = ready && serverSet && !modsOn && prefs.name.isNotBlank()
     val effectiveMode = Online.effectiveInputMode(prefs.inputMode)
 
@@ -615,23 +628,81 @@ private fun RankedDedicatedScreen(
             profile?.let { p ->
                 com.dfdx047.hiddenleaf.ui.components.NinjaInfoCard(
                     profile = p,
-                    onCycleChar = {
-                        val dynamicKeys = p.mastery.keys.toList()
-                        val allIds = (com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS.map { it.id } + dynamicKeys).distinct()
-                        val idx = allIds.indexOfFirst { it == p.favChar }.let { if (it < 0) 0 else (it + 1) % allIds.size }
-                        val nextId = allIds[idx]
-                        val nextM = p.mastery[nextId]
-                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveFavChar(context, nextId)
-                        profile = p.copy(favChar = nextId, favCharLvl = nextM?.lvl ?: 1, favCharXp = nextM?.xp ?: 0)
-                        if (serverSet) {
-                            scope.launch {
-                                runCatching {
-                                    profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
-                                        context, Online.cleanServer(prefs.server), prefs.name, Online.effectiveInputMode(prefs.inputMode), nextId,
-                                    )
+                    avatarVersion = avatarVersion,
+                    onCycleChar = { showAvatarDialog = true },
+                )
+            }
+            if (showAvatarDialog) {
+                val p = profile
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showAvatarDialog = false },
+                    title = { Text("Avatar & Personagem Principal") },
+                    text = {
+                        Column(
+                            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                "Escolha uma imagem da sua galeria ou um personagem do banco de artes:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { pickAvatar.launch(arrayOf("image/*")) }) {
+                                    Text("Imagem da Galeria")
+                                }
+                                if (com.dfdx047.hiddenleaf.data.OnlineAdvanced.hasCustomAvatar(context)) {
+                                    OutlinedButton(onClick = {
+                                        com.dfdx047.hiddenleaf.data.OnlineAdvanced.clearCustomAvatar(context)
+                                        avatarVersion++
+                                    }) {
+                                        Text("Usar Arte do Ninja")
+                                    }
+                                }
+                            }
+                            com.dfdx047.hiddenleaf.ui.components.UN5_CHARACTERS.chunked(4).forEach { rowChars ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    for (ch in rowChars) {
+                                        val m = p?.mastery?.get(ch.id)
+                                        val sel = p?.favChar == ch.id
+                                        Column(
+                                            Modifier.weight(1f)
+                                                .clip(MaterialTheme.shapes.small)
+                                                .background(if (sel) ch.primary.copy(alpha = 0.25f) else Color.Transparent)
+                                                .border(
+                                                    width = if (sel) 2.dp else 1.dp,
+                                                    color = if (sel) com.dfdx047.hiddenleaf.ui.components.UN5_GOLD else MaterialTheme.colorScheme.outlineVariant,
+                                                    shape = MaterialTheme.shapes.small,
+                                                )
+                                                .clickable {
+                                                    com.dfdx047.hiddenleaf.data.OnlineAdvanced.saveFavChar(context, ch.id)
+                                                    if (p != null) {
+                                                        profile = p.copy(favChar = ch.id, favCharLvl = m?.lvl ?: 1, favCharXp = m?.xp ?: 0)
+                                                    }
+                                                    showAvatarDialog = false
+                                                    if (serverSet) {
+                                                        scope.launch {
+                                                            runCatching {
+                                                                profile = com.dfdx047.hiddenleaf.data.OnlineAdvanced.syncProfile(
+                                                                    context, Online.cleanServer(prefs.server), prefs.name, Online.effectiveInputMode(prefs.inputMode), ch.id,
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                .padding(4.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                        ) {
+                                            com.dfdx047.hiddenleaf.ui.components.CharacterCutout(ch.id, m?.lvl ?: 1, sizeDp = 50)
+                                            Text(ch.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                        }
+                                    }
                                 }
                             }
                         }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showAvatarDialog = false }) { Text("Fechar") }
                     },
                 )
             }

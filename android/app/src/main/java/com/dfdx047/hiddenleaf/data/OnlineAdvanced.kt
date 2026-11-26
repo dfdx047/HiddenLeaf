@@ -204,18 +204,109 @@ object OnlineAdvanced {
         }
     }
 
-    suspend fun reportRanked(
-        context: Context, server: String, matchId: String, opponentId: String, role: String, winner: String,
-    ): JSONObject? = withContext(Dispatchers.IO) {
-        val (pid, secret) = identity(context)
+    /** Curated public anime/fan-art portrait URLs for Naruto characters (cached locally in <root>/portraits/bank_<id>.png). */
+    val CHARACTER_ART_URLS: Map<String, String> = mapOf(
+        "naruto" to "https://cdn.myanimelist.net/images/characters/2/284121.jpg",
+        "sasuke" to "https://cdn.myanimelist.net/images/characters/9/131317.jpg",
+        "itachi" to "https://cdn.myanimelist.net/images/characters/9/284122.jpg",
+        "minato" to "https://cdn.myanimelist.net/images/characters/4/49964.jpg",
+        "kakashi" to "https://cdn.myanimelist.net/images/characters/7/284129.jpg",
+        "gaara" to "https://cdn.myanimelist.net/images/characters/10/293375.jpg",
+        "lee" to "https://cdn.myanimelist.net/images/characters/13/433353.jpg",
+        "sakura" to "https://cdn.myanimelist.net/images/characters/9/69275.jpg",
+        "neji" to "https://cdn.myanimelist.net/images/characters/2/105538.jpg",
+        "jiraiya" to "https://cdn.myanimelist.net/images/characters/15/222159.jpg",
+        "deidara" to "https://cdn.myanimelist.net/images/characters/9/47166.jpg",
+        "pain" to "https://cdn.myanimelist.net/images/characters/12/421593.jpg",
+        "obito" to "https://cdn.myanimelist.net/images/characters/15/284128.jpg",
+        "orochimaru" to "https://cdn.myanimelist.net/images/characters/11/253973.jpg",
+        "tsunade" to "https://cdn.myanimelist.net/images/characters/7/284130.jpg",
+        "shikamaru" to "https://cdn.myanimelist.net/images/characters/3/131315.jpg",
+        "hinata" to "https://cdn.myanimelist.net/images/characters/6/278736.jpg",
+        "kisame" to "https://cdn.myanimelist.net/images/characters/14/49962.jpg",
+        "sasori" to "https://cdn.myanimelist.net/images/characters/14/57544.jpg",
+        "guy" to "https://cdn.myanimelist.net/images/characters/11/433351.jpg",
+    )
+
+    fun customAvatarFile(context: Context): java.io.File =
+        java.io.File(java.io.File(GamePaths(context).root, "portraits"), "custom_avatar.png")
+
+    fun hasCustomAvatar(context: Context): Boolean =
+        customAvatarFile(context).let { it.exists() && it.length() > 512L }
+
+    /** Imports any user-chosen gallery image, center-crops to square, scales to 192x192 PNG, and saves as custom_avatar.png. */
+    fun saveCustomAvatarFromUri(context: Context, uri: android.net.Uri): Boolean = runCatching {
+        val raw = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return false
+        val side = minOf(raw.width, raw.height)
+        val x = (raw.width - side) / 2
+        val y = (raw.height - side) / 2
+        val square = android.graphics.Bitmap.createBitmap(raw, x, y, side, side)
+        val scaled = android.graphics.Bitmap.createScaledBitmap(square, 192, 192, true)
+        val out = customAvatarFile(context)
+        out.parentFile?.mkdirs()
+        out.outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 92, it) }
+        if (scaled !== square) scaled.recycle()
+        if (square !== raw) square.recycle()
+        raw.recycle()
+        true
+    }.getOrDefault(false)
+
+    fun clearCustomAvatar(context: Context) {
+        runCatching { customAvatarFile(context).delete() }
+    }
+
+    /** Downloads and caches a character's portrait from the art bank into <root>/portraits/bank_<id>.png. */
+    suspend fun fetchCharacterArt(context: Context, charId: String): java.io.File? = withContext(Dispatchers.IO) {
+        val key = charId.lowercase()
+        val url = CHARACTER_ART_URLS[key] ?: return@withContext null
+        val out = java.io.File(java.io.File(GamePaths(context).root, "portraits"), "bank_$key.png")
+        if (out.exists() && out.length() > 1024L) return@withContext out
         runCatching {
-            postJson(server, "/v1/ranked/report", JSONObject()
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.connectTimeout = 5000
+            c.readTimeout = 7000
+            c.setRequestProperty("User-Agent", "HiddenLeaf-Android")
+            try {
+                if (c.responseCode in 200..299) {
+                    val bmp = c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching null
+                    val side = minOf(bmp.width, bmp.height)
+                    val x = (bmp.width - side) / 2
+                    val y = ((bmp.height - side) / 4).coerceAtLeast(0)
+                    val sq = android.graphics.Bitmap.createBitmap(bmp, x, y, side, side)
+                    val sc = android.graphics.Bitmap.createScaledBitmap(sq, 160, 160, true)
+                    out.parentFile?.mkdirs()
+                    out.outputStream().use { sc.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, it) }
+                    if (sc !== sq) sc.recycle()
+                    if (sq !== bmp) sq.recycle()
+                    bmp.recycle()
+                    out
+                } else null
+            } finally {
+                c.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    suspend fun reportRanked(
+        context: Context, server: String, matchId: String, opponentId: String, role: String, winner: String, charId: String? = null,
+    ): JSONObject? = withContext(Dispatchers.IO) {
+        reportRankedBlocking(context, server, matchId, opponentId, role, winner, charId)
+    }
+
+    fun reportRankedBlocking(
+        context: Context, server: String, matchId: String, opponentId: String, role: String, winner: String, charId: String? = null,
+    ): JSONObject? {
+        val (pid, secret) = identity(context)
+        return runCatching {
+            val body = JSONObject()
                 .put("match_id", matchId)
                 .put("player_id", pid)
                 .put("opponent_id", opponentId)
                 .put("secret", secret)
                 .put("role", role)
-                .put("winner", winner))
+                .put("winner", winner)
+            if (!charId.isNullOrBlank()) body.put("char_id", charId)
+            postJson(server, "/v1/ranked/report", body)
         }.getOrNull()
     }
 

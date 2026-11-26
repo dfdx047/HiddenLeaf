@@ -47,9 +47,19 @@ object TouchBridge {
     /** Player 1's active UN5 character ID during a fight (0 if not in a fight). */
     @JvmStatic external fun nativeP1CharId(): Int
 
+    /** Live fight counter, KO winner (1=P1, 2=P2), and P1/P2 character IDs ("fight=..;win_fight=..;winner=..;p1char=..;p2char=.."). */
+    @JvmStatic external fun nativeMatchResult(): String
+
     fun menuTap(nx: Float, ny: Float): Int = runCatching { nativeMenuTap(nx, ny) }.getOrDefault(0)
 
     fun p1CharId(): Int = runCatching { nativeP1CharId() }.getOrDefault(0)
+
+    fun matchResult(): Map<String, Int> = runCatching {
+        nativeMatchResult().split(';').mapNotNull {
+            val i = it.indexOf('=')
+            if (i > 0) it.substring(0, i) to (it.substring(i + 1).toIntOrNull() ?: 0) else null
+        }.toMap()
+    }.getOrDefault(emptyMap())
 
     fun perfLine(): String = runCatching { nativePerfLine() }.getOrDefault("")
 

@@ -168,10 +168,11 @@ async function makeRoom(env, body, ip, now) {
     const key = randomKey();
     const token = randomKey();
     const inputMode = cleanInputMode(body.input_mode);
+    const hostPid = cleanPlayerId(body.player_id);
     for (let tries = 0; tries < 8; tries++) {
         const code = randomCode();
-        const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, input_mode, session_secret, host_key, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(code, body.v, GAME, cleanFp(body.fp), inputMode, token, key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
+        const r = await env.DB.prepare("INSERT OR IGNORE INTO hl_rooms (code, v, game, fp, input_mode, session_secret, host_key, host_player_id, host_name, host_addrs, host_seen, opts, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(code, body.v, GAME, cleanFp(body.fp), inputMode, token, key, hostPid, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, JSON.stringify(cleanOpts(body.opts)), now, now).run();
         if (r.meta.changes === 1) return { code, key, token, input_mode: inputMode };
     }
     return null;
@@ -189,8 +190,9 @@ const WAITING = "FROM hl_queue q JOIN hl_rooms r ON r.code = q.code WHERE q.v = 
 // Makes the caller [room]'s guest, as /v1/join does; null if someone else got there first.
 async function takeRoom(env, room, body, ip, now) {
     const key = randomKey();
-    const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
-        .bind(key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, room.code).run();
+    const guestPid = cleanPlayerId(body.player_id);
+    const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_player_id = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
+        .bind(key, guestPid, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, room.code).run();
     return r.meta.changes === 1 ? { key, token: room.session_secret || "", input_mode: room.input_mode || "any", you: ip, host: hostOf(room), opts: JSON.parse(room.opts) } : null;
 }
 
@@ -212,11 +214,11 @@ async function whoIs(env, code, key, now) {
 }
 
 function hostOf(room) {
-    return { name: room.host_name, addrs: JSON.parse(room.host_addrs), seen: room.host_seen };
+    return { name: room.host_name, player_id: room.host_player_id || "", addrs: JSON.parse(room.host_addrs), seen: room.host_seen };
 }
 
 function guestOf(room) {
-    return room.guest_key ? { name: room.guest_name ?? "", addrs: JSON.parse(room.guest_addrs ?? "[]"), seen: room.guest_seen ?? "" } : null;
+    return room.guest_key ? { name: room.guest_name ?? "", player_id: room.guest_player_id || "", addrs: JSON.parse(room.guest_addrs ?? "[]"), seen: room.guest_seen ?? "" } : null;
 }
 
 // Cloudflare's TURN (Realtime > TURN): a login good for three hours, from the key the Worker keeps as secrets.
@@ -405,8 +407,9 @@ export async function handle(request, env, now) {
         if (roomMode !== "any" && reqMode !== "any" && roomMode !== reqMode) return reply({ error: "input_mode" }, 409);
         if (room.guest_key) return reply({ error: "full" }, 409);
         const key = randomKey();
-        const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
-            .bind(key, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, code).run();
+        const guestPid = cleanPlayerId(body.player_id);
+        const r = await env.DB.prepare("UPDATE hl_rooms SET guest_key = ?, guest_player_id = ?, guest_name = ?, guest_addrs = ?, guest_seen = ?, touched = ? WHERE code = ? AND guest_key IS NULL")
+            .bind(key, guestPid, cleanName(body.name), JSON.stringify(cleanAddrs(body.addrs)), ip, now, code).run();
         if (r.meta.changes !== 1) return reply({ error: "full" }, 409);
         return reply({ key, token: room.session_secret || "", input_mode: roomMode, you: ip, host: hostOf(room), opts: JSON.parse(room.opts) });
     }
@@ -438,7 +441,7 @@ export async function handle(request, env, now) {
                 if (!v || typeof v !== "object") continue;
                 const cur = base[cid] || { xp: 0, lvl: 1, matches: 0 };
                 // Cap client-reported XP bump per sync to prevent spoofing while allowing offline/training mastery progress
-                const reqXp = Math.max(0, Math.min(cur.xp + 200, Math.floor(Number(v.xp) || 0)));
+                const reqXp = Math.max(0, Math.min(cur.xp + 600, Math.floor(Number(v.xp) || 0)));
                 const nextXp = Math.max(cur.xp, reqXp);
                 base[cid] = { xp: nextXp, lvl: charLevelFromXp(nextXp), matches: Math.max(cur.matches || 0, Math.floor(Number(v.matches) || 0)) };
             }
@@ -521,8 +524,18 @@ export async function handle(request, env, now) {
         } else {
             return reply({ resolved: false, waiting: true });
         }
-        const p1 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p1_id).first();
-        const p2 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p2_id).first();
+        let p1 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p1_id).first();
+        let p2 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p2_id).first();
+        if (!p1) {
+            await env.DB.prepare("INSERT OR IGNORE INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, updated) VALUES (?, '', 'Ninja', 1000, 0, 0, 0, 'any', 'naruto', 1, 0, '{}', ?)")
+                .bind(m.p1_id, now).run();
+            p1 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p1_id).first();
+        }
+        if (!p2) {
+            await env.DB.prepare("INSERT OR IGNORE INTO hl_players (player_id, auth_hash, name, points, wins, losses, streak, input_mode, fav_char, fav_char_lvl, fav_char_xp, char_mastery, updated) VALUES (?, '', 'Ninja', 1000, 0, 0, 0, 'any', 'naruto', 1, 0, '{}', ?)")
+                .bind(m.p2_id, now).run();
+            p2 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p2_id).first();
+        }
         if (!p1 || !p2) return reply({ error: "no player" }, 404);
         const p1Won = winnerRole === "p1";
         const winner = p1Won ? p1 : p2;
@@ -532,19 +545,22 @@ export async function handle(request, env, now) {
         const lPts = Math.max(0, loser.points - loss);
         const p1Delta = p1Won ? gain : -loss;
         const p2Delta = p1Won ? -loss : gain;
-        const bumpMastery = (pl, deltaXp) => {
-            const cid = cleanCharId(pl.fav_char || "naruto");
-            let m = {};
-            try { m = JSON.parse(pl.char_mastery || "{}"); } catch (e) {}
-            if (!m || typeof m !== "object" || Array.isArray(m)) m = {};
-            const cur = m[cid] || { xp: pl.fav_char_xp || 0, lvl: pl.fav_char_lvl || 1, matches: 0 };
+        const reqChar = body.char_id ? cleanCharId(body.char_id) : "";
+        const bumpMastery = (pl, deltaXp, charOverride) => {
+            const cid = charOverride || cleanCharId(pl.fav_char || "naruto");
+            let map = {};
+            try { map = JSON.parse(pl.char_mastery || "{}"); } catch (e) {}
+            if (!map || typeof map !== "object" || Array.isArray(map)) map = {};
+            const cur = map[cid] || { xp: 0, lvl: 1, matches: 0 };
             const nextXp = (cur.xp || 0) + deltaXp;
             const nextLvl = charLevelFromXp(nextXp);
-            m[cid] = { xp: nextXp, lvl: nextLvl, matches: (cur.matches || 0) + 1 };
-            return { nextXp, nextLvl, json: JSON.stringify(m) };
+            map[cid] = { xp: nextXp, lvl: nextLvl, matches: (cur.matches || 0) + 1 };
+            const activeCid = cleanCharId(pl.fav_char || cid);
+            const active = map[activeCid] || map[cid];
+            return { nextXp: active.xp || nextXp, nextLvl: active.lvl || nextLvl, json: JSON.stringify(map) };
         };
-        const wM = bumpMastery(winner, 120);
-        const lM = bumpMastery(loser, 45);
+        const wM = bumpMastery(winner, 120, winner.player_id === pid ? reqChar : "");
+        const lM = bumpMastery(loser, 45, loser.player_id === pid ? reqChar : "");
         await env.DB.prepare("UPDATE hl_players SET points = ?, wins = wins + 1, streak = streak + 1, fav_char_xp = ?, fav_char_lvl = ?, char_mastery = ?, updated = ? WHERE player_id = ?")
             .bind(wPts, wM.nextXp, wM.nextLvl, wM.json, now, winner.player_id).run();
         await env.DB.prepare("UPDATE hl_players SET points = ?, losses = losses + 1, streak = 0, fav_char_xp = ?, fav_char_lvl = ?, char_mastery = ?, updated = ? WHERE player_id = ?")

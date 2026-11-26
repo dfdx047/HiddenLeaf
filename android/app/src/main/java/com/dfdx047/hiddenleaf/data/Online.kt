@@ -53,7 +53,7 @@ object Online {
     const val SESSION_MAX_AGE_S = 180L
 
     class Failure(val why: String) : Exception(why)
-    data class Peer(val name: String, val addrs: List<String>, val seen: String)
+    data class Peer(val name: String, val addrs: List<String>, val seen: String, val playerId: String = "")
     data class Opts(val delay: Int, val relay: Boolean)
     data class Room(val code: String, val key: String, val token: String = "", val inputMode: String = "any")
     data class Joined(val key: String, val host: Peer, val opts: Opts, val token: String = "", val inputMode: String = "any")
@@ -116,14 +116,18 @@ object Online {
     fun status(server: String, fp: String, inputMode: String = "any"): Int =
         post(server, "/v1/hello", JSONObject().put("v", NET_VERSION).put("game", GAME).put("fp", fp).put("input_mode", inputMode)).optInt("waiting", 0)
 
-    fun host(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, inputMode: String = "any"): Room {
-        val r = post(server, "/v1/host", base(name, fp, addrs).put("opts", optsJson(opts)).put("input_mode", inputMode))
+    fun host(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, inputMode: String = "any", playerId: String = ""): Room {
+        val body = base(name, fp, addrs).put("opts", optsJson(opts)).put("input_mode", inputMode)
+        if (playerId.isNotEmpty()) body.put("player_id", playerId)
+        val r = post(server, "/v1/host", body)
         return Room(r.getString("code"), r.getString("key"), r.optString("token", ""), r.optString("input_mode", inputMode))
     }
 
     /** Quick match: the room of whoever waits longest with the same [fp], or one of this phone's own that waits in the queue. */
-    fun quick(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, who: String, inputMode: String = "any"): Quick {
-        val r = post(server, "/v1/quick", base(name, fp, addrs).put("opts", optsJson(opts)).put("who", who).put("input_mode", inputMode))
+    fun quick(server: String, name: String, fp: String, addrs: List<String>, opts: Opts, who: String, inputMode: String = "any", playerId: String = ""): Quick {
+        val body = base(name, fp, addrs).put("opts", optsJson(opts)).put("who", who).put("input_mode", inputMode)
+        if (playerId.isNotEmpty()) body.put("player_id", playerId)
+        val r = post(server, "/v1/quick", body)
         val joined = r.optString("role") == "join"
         return Quick(
             r.getString("code"), r.getString("key"),
@@ -136,8 +140,10 @@ object Online {
 
     private fun optsJson(o: Opts) = JSONObject().put("delay", o.delay).put("relay", o.relay)
 
-    fun join(server: String, code: String, name: String, fp: String, addrs: List<String>, inputMode: String = "any"): Joined {
-        val r = post(server, "/v1/join", base(name, fp, addrs).put("code", code).put("input_mode", inputMode))
+    fun join(server: String, code: String, name: String, fp: String, addrs: List<String>, inputMode: String = "any", playerId: String = ""): Joined {
+        val body = base(name, fp, addrs).put("code", code).put("input_mode", inputMode)
+        if (playerId.isNotEmpty()) body.put("player_id", playerId)
+        val r = post(server, "/v1/join", body)
         return Joined(r.getString("key"), peer(r.getJSONObject("host")), opts(r.optJSONObject("opts")), r.optString("token", ""), r.optString("input_mode", "any"))
     }
 
@@ -157,7 +163,7 @@ object Online {
 
     private fun peer(o: JSONObject): Peer {
         val a = o.optJSONArray("addrs") ?: JSONArray()
-        return Peer(o.optString("name"), (0 until a.length()).map { a.getString(it) }, o.optString("seen"))
+        return Peer(o.optString("name"), (0 until a.length()).map { a.getString(it) }, o.optString("seen"), o.optString("player_id", ""))
     }
 
     private fun opts(o: JSONObject?) = Opts(o?.optInt("delay", 0)?.coerceIn(0, 4) ?: 0, o?.optBoolean("relay", true) ?: true)
@@ -313,6 +319,7 @@ object Online {
         val host: Boolean, val port: Int, val code: String, val me: String, val peer: String,
         val addrs: List<String>, val delay: Int, val relay: Boolean, val relayUrl: String,
         val token: String = "", val inputMode: String = "any", val broadcastSpec: Boolean = false,
+        val ranked: Boolean = false, val server: String = "", val opponentId: String = "",
     )
 
     fun writeSession(paths: GamePaths, s: Session) {
@@ -330,6 +337,9 @@ object Online {
             append("relay=${if (s.relay || s.broadcastSpec) 1 else 0}\n")
             if (s.relay || s.broadcastSpec) append("relay_url=${s.relayUrl}\n")
             if (s.broadcastSpec) append("broadcast_spec=1\n")
+            if (s.ranked) append("ranked=1\n")
+            if (s.server.isNotEmpty()) append("server=${s.server}\n")
+            if (s.opponentId.isNotEmpty()) append("opponent_id=${s.opponentId}\n")
             if (s.token.isNotEmpty()) append("token=${s.token}\n")
             if (s.inputMode.isNotEmpty()) append("input_mode=${s.inputMode}\n")
             s.addrs.forEach { append("addr=$it\n") }
@@ -514,13 +524,14 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 ActivityLog.info("online", "room: own addresses ${addrs.joinToString()}")
                 _state.value = LobbyState.Working(R.string.online_step_room)
                 val mode = Online.effectiveInputMode(p.inputMode)
-                val r = Online.host(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), mode)
+                val myPid = OnlineAdvanced.identity(getApplication()).first
+                val r = Online.host(server, p.name, fp, addrs, Online.Opts(p.delay, p.relay), mode, myPid)
                 room = r
                 roomServer = server
                 _state.value = LobbyState.Waiting(r.code)
                 onCode?.invoke(r.code)
                 ActivityLog.info("online", "room ${r.code} open (input=$mode)")
-                waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE, broadcastSpec = true)
+                waitForGuest(server, r, s, p, start, maxBackoff = 30_000L, until = Long.MAX_VALUE, broadcastSpec = true, ranked = false)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "room failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))
@@ -536,7 +547,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
      * The host's wait in its room [r]: a poll every 2 s (up to [maxBackoff] apart while the service does not answer), the router's
      * mapping kept alive, and the match once someone has joined. True once it started; false at [until] (ms) with nobody.
      */
-    private suspend fun waitForGuest(server: String, r: Online.Room, s: DatagramSocket, p: OnlinePrefs.State, start: () -> Unit, maxBackoff: Long, until: Long, broadcastSpec: Boolean = false): Boolean {
+    private suspend fun waitForGuest(server: String, r: Online.Room, s: DatagramSocket, p: OnlinePrefs.State, start: () -> Unit, maxBackoff: Long, until: Long, broadcastSpec: Boolean = false, ranked: Boolean = false): Boolean {
         var every = 2000L
         var lastStun = System.currentTimeMillis()
         while (System.currentTimeMillis() < until) {
@@ -548,7 +559,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
             }
             if (guest != null) {
                 ActivityLog.info("online", "room ${r.code}: ${guest.name} joined from ${guest.seen}, addresses ${guest.addrs.joinToString()}")
-                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay || broadcastSpec, Online.relayUrl(server, r.code, r.key), r.token, r.inputMode, broadcastSpec = broadcastSpec), start)
+                launchMatch(Online.Session(true, s.localPort, r.code, p.name, guest.name, Online.candidates(guest), p.delay, p.relay || broadcastSpec, Online.relayUrl(server, r.code, r.key), r.token, r.inputMode, broadcastSpec = broadcastSpec, ranked = ranked, server = server, opponentId = guest.playerId), start)
                 room = null // (the room stays on the service for the relay's connection; it goes by itself)
                 return true
             }
@@ -587,10 +598,11 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                         return@launch
                     }
                     val mode = forcedMode ?: Online.effectiveInputMode(p.inputMode)
-                    val q = Online.quick(server, p.name, queueFp, addrs, Online.Opts(p.delay, p.relay), who, mode)
+                    val myPid = OnlineAdvanced.identity(getApplication()).first
+                    val q = Online.quick(server, p.name, queueFp, addrs, Online.Opts(p.delay, p.relay), who, mode, myPid)
                     if (q.host != null) {
                         ActivityLog.info("online", "quick match: in room ${q.code} of ${q.host.name} (${q.host.seen}), addresses ${q.host.addrs.joinToString()}")
-                        launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key), q.token, q.inputMode), start)
+                        launchMatch(Online.Session(false, s.localPort, q.code, p.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && p.relay, Online.relayUrl(server, q.code, q.key), q.token, q.inputMode, ranked = ranked, server = server, opponentId = q.host.playerId), start)
                         return@launch
                     }
                     val r = Online.Room(q.code, q.key, q.token, q.inputMode)
@@ -598,7 +610,7 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                     roomServer = server
                     ActivityLog.info("online", "quick match: waiting in room ${r.code}")
                     try {
-                        if (waitForGuest(server, r, s, p, start, maxBackoff = 4000L, until = began + QUICK_MAX_MS)) return@launch
+                        if (waitForGuest(server, r, s, p, start, maxBackoff = 4000L, until = began + QUICK_MAX_MS, ranked = ranked)) return@launch
                     } catch (e: Online.Failure) {
                         if (e.why != "no room") throw e
                         ActivityLog.info("online", "quick match: room ${r.code} let go by the service, searching again")
@@ -633,9 +645,10 @@ class OnlineLobby(app: Application) : AndroidViewModel(app) {
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
                 _state.value = LobbyState.Working(R.string.online_step_join)
                 val mode = Online.effectiveInputMode(p.inputMode)
-                val j = Online.join(server, digits, p.name, fp, addrs, mode)
+                val myPid = OnlineAdvanced.identity(getApplication()).first
+                val j = Online.join(server, digits, p.name, fp, addrs, mode, myPid)
                 ActivityLog.info("online", "joined room $digits of ${j.host.name} (${j.host.seen}), addresses ${j.host.addrs.joinToString()}")
-                launchMatch(Online.Session(false, s.localPort, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key), j.token, j.inputMode), start)
+                launchMatch(Online.Session(false, s.localPort, digits, p.name, j.host.name, Online.candidates(j.host), j.opts.delay, j.opts.relay && p.relay, Online.relayUrl(server, digits, j.key), j.token, j.inputMode, server = server, opponentId = j.host.playerId), start)
             } catch (e: Online.Failure) {
                 ActivityLog.info("online", "join failed: ${e.why}")
                 _state.value = LobbyState.Failed(Online.explain(e.why))

@@ -29,8 +29,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +83,15 @@ val UN5_CHARACTERS = listOf(
     NinjaCharInfo("neji", "Neji", "Byakugan", Color(0xFFECEFF1), Color(0xFF5D4037), Color(0xFF3E2723), Color(0xFF263238)),
     NinjaCharInfo("jiraiya", "Jiraiya", "Sannin", Color(0xFFC62828), Color(0xFF4E6B3A), Color(0xFFECEFF1), Color(0xFFB71C1C)),
     NinjaCharInfo("deidara", "Deidara", "Akatsuki", Color(0xFFD32F2F), Color(0xFF141418), Color(0xFFFFEE58), Color(0xFF212121), akatsuki = true),
+    NinjaCharInfo("pain", "Pain", "Rinnegan", Color(0xFFD32F2F), Color(0xFF121216), Color(0xFFFF8A65), Color(0xFF263238), akatsuki = true),
+    NinjaCharInfo("obito", "Obito / Tobi", "Akatsuki", Color(0xFFFF6D00), Color(0xFF121216), Color(0xFF151518), Color(0xFF212121), akatsuki = true),
+    NinjaCharInfo("orochimaru", "Orochimaru", "Sannin", Color(0xFF7B1FA2), Color(0xFFECEFF1), Color(0xFF141418), Color(0xFF4A148C)),
+    NinjaCharInfo("tsunade", "Tsunade", "5ª Hokage", Color(0xFF43A047), Color(0xFFECEFF1), Color(0xFFFFEE58), Color(0xFF1B5E20)),
+    NinjaCharInfo("shikamaru", "Shikamaru", "Clã Nara", Color(0xFF2E7D32), Color(0xFF263238), Color(0xFF18181D), Color(0xFF37474F)),
+    NinjaCharInfo("hinata", "Hinata", "Byakugan", Color(0xFF7E57C2), Color(0xFFECEFF1), Color(0xFF1A237E), Color(0xFF37474F)),
+    NinjaCharInfo("kisame", "Kisame", "Akatsuki", Color(0xFF1565C0), Color(0xFF121216), Color(0xFF283593), Color(0xFF212121), akatsuki = true),
+    NinjaCharInfo("sasori", "Sasori", "Akatsuki", Color(0xFFC62828), Color(0xFF121216), Color(0xFFD32F2F), Color(0xFF212121), akatsuki = true),
+    NinjaCharInfo("guy", "Might Guy", "8 Portões", Color(0xFF2E7D32), Color(0xFFFF7043), Color(0xFF111115), Color(0xFFC62828)),
 )
 
 fun charInfoOf(id: String): NinjaCharInfo =
@@ -111,14 +123,29 @@ fun CharacterCutout(
     modifier: Modifier = Modifier,
     sizeDp: Int = 62,
     showLevel: Boolean = true,
+    useCustomAvatar: Boolean = false,
+    avatarVersion: Int = 0,
 ) {
     val info = remember(charId) { charInfoOf(charId) }
     val ctx = LocalContext.current
-    val customBmp = remember(charId) {
+    var loadedBmp by remember(charId, useCustomAvatar, avatarVersion) {
         val dir = File(GamePaths(ctx).root, "portraits")
-        val f = listOf(File(dir, "$charId.png"), File(dir, "${info.id}.png")).firstOrNull { it.exists() }
-        if (f != null) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null
+        val candidates = buildList {
+            if (useCustomAvatar) add(File(dir, "custom_avatar.png"))
+            add(File(dir, "bank_${info.id}.png"))
+        }
+        val f = candidates.firstOrNull { it.exists() && it.length() > 512L }
+        mutableStateOf(if (f != null) runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull() else null)
     }
+    LaunchedEffect(info.id, useCustomAvatar, avatarVersion) {
+        if (loadedBmp == null) {
+            val f = OnlineAdvanced.fetchCharacterArt(ctx, info.id)
+            if (f != null && f.exists()) {
+                loadedBmp = runCatching { BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull()
+            }
+        }
+    }
+    val customBmp = loadedBmp
     val shape = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
     Box(
         modifier
@@ -213,6 +240,7 @@ fun NinjaInfoCard(
     profile: OnlineAdvanced.RankedProfile,
     onCycleChar: () -> Unit,
     modifier: Modifier = Modifier,
+    avatarVersion: Int = 0,
 ) {
     val ch = remember(profile.favChar) { charInfoOf(profile.favChar) }
     val tierColor = com.dfdx047.hiddenleaf.ui.screens.rankTierColor(profile.tier)
@@ -235,6 +263,8 @@ fun NinjaInfoCard(
                 charId = profile.favChar,
                 level = profile.favCharLvl,
                 sizeDp = 72,
+                useCustomAvatar = true,
+                avatarVersion = avatarVersion,
                 modifier = Modifier.clickable(onClick = onCycleChar),
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {

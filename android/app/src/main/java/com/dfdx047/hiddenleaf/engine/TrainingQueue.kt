@@ -193,15 +193,17 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
                 val s = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(0)) }
                 socket = s
                 val addrs = (Online.stun(s) + Online.localAddresses(s.localPort)).distinct()
+                val myPid = com.dfdx047.hiddenleaf.data.OnlineAdvanced.identity(activity).first
+                val isRanked = req.fp.endsWith("#ranked")
                 while (running) {
                     val q = try {
-                        Online.quick(req.server, req.name, req.fp, addrs, Online.Opts(req.delay, req.relay), who, req.inputMode)
+                        Online.quick(req.server, req.name, req.fp, addrs, Online.Opts(req.delay, req.relay), who, req.inputMode, myPid)
                     } catch (_: Exception) {
                         Thread.sleep(4000)
                         continue
                     }
                     if (q.host != null) {
-                        val session = Online.Session(false, s.localPort, q.code, req.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && req.relay, Online.relayUrl(req.server, q.code, q.key), q.token, q.inputMode)
+                        val session = Online.Session(false, s.localPort, q.code, req.name, q.host.name, Online.candidates(q.host), q.opts.delay, q.opts.relay && req.relay, Online.relayUrl(req.server, q.code, q.key), q.token, q.inputMode, ranked = isRanked, server = req.server, opponentId = q.host.playerId)
                         showFound(session)
                         return@Thread
                     }
@@ -218,7 +220,7 @@ class TrainingQueueOverlay(private val activity: Activity, private val paths: Ga
                         }
                         if (guest != null) {
                             room = null
-                            val session = Online.Session(true, s.localPort, r.code, req.name, guest.name, Online.candidates(guest), req.delay, req.relay, Online.relayUrl(req.server, r.code, r.key), r.token, r.inputMode)
+                            val session = Online.Session(true, s.localPort, r.code, req.name, guest.name, Online.candidates(guest), req.delay, req.relay, Online.relayUrl(req.server, r.code, r.key), r.token, r.inputMode, ranked = isRanked, server = req.server, opponentId = guest.playerId)
                             showFound(session)
                             return@Thread
                         }

@@ -23,6 +23,10 @@ namespace hl_game
     extern std::atomic<bool> g_menuOnline;     // "Naruto Online" in the game's Mode Select (also HL_MENU_ONLINE=1; docs/menu-online.md)
     extern std::atomic<int> g_onlineMenu;      // how many times it was chosen (the launcher opens its lobby when this goes up)
     extern std::atomic<int> g_p1CharId;        // Player 1's active UN5 character ID (read from fighter+0x68 during fights)
+    extern std::atomic<int> g_p2CharId;        // Player 2's active UN5 character ID (read from fighter+0x68 during fights)
+    extern std::atomic<int> g_fightCount;      // Number of fights started in this engine session (increments each battle)
+    extern std::atomic<int> g_lastWinFight;    // Fight number whose winner was detected from HP KO
+    extern std::atomic<int> g_lastWinner;      // 0 = none, 1 = P1 won, 2 = P2 won
     int overlay();                             // the mode's code in memory: 0 none yet, 1 BTL (fight), 2 ADV (campaign), 3 other
     int menuTap(float nx, float ny);           // direct touch on Mode Select wooden boards: 0=default CROSS, 1=UP, 2=CROSS, 3=DOWN
 

@@ -530,6 +530,17 @@ extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeOnlineMenu(JNIEnv *, jclass) { return hl_game::g_onlineMenu.load(std::memory_order_relaxed); }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMenuTap(JNIEnv *, jclass, jfloat nx, jfloat ny) { return hl_game::menuTap(nx, ny); }
 extern "C" JNIEXPORT jint JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeP1CharId(JNIEnv *, jclass) { return hl_game::g_p1CharId.load(std::memory_order_relaxed); }
+extern "C" JNIEXPORT jstring JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeMatchResult(JNIEnv *env, jclass)
+{
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "fight=%d;win_fight=%d;winner=%d;p1char=%d;p2char=%d",
+                  hl_game::g_fightCount.load(std::memory_order_acquire),
+                  hl_game::g_lastWinFight.load(std::memory_order_acquire),
+                  hl_game::g_lastWinner.load(std::memory_order_acquire),
+                  hl_game::g_p1CharId.load(std::memory_order_relaxed),
+                  hl_game::g_p2CharId.load(std::memory_order_relaxed));
+    return env->NewStringUTF(buf);
+}
 // The online menu open over the game (OnlineMenu.kt): the controller and the touch pad move the menu, not the game behind it
 extern "C" JNIEXPORT void JNICALL Java_com_dfdx047_hiddenleaf_engine_TouchBridge_nativeSetPadHeld(JNIEnv *, jclass, jboolean held)
 {
