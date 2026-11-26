@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         // CI passes the tag (android-v0.1.0 -> 0.1.0) and the run number; a local build is named after the line below
-        val vName = System.getenv("HL_VERSION_NAME") ?: "0.1.0-beta"
+        val vName = System.getenv("HL_VERSION_NAME") ?: "0.2.0-beta"
         val vParts = vName.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
         // 0.1.0-beta -> 10001, 0.1.0-beta.2 -> 10002, 0.1.0 -> 10099: a later beta and the final release install over
         // the earlier one (the app's updater compares the names the same way, data/AppUpdates.kt)
