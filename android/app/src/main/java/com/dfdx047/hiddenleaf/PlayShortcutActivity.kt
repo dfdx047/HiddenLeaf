@@ -15,9 +15,22 @@ import com.dfdx047.hiddenleaf.engine.GameActivity
 class PlayShortcutActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val ready = GamePaths(this).installedMarker.exists() && EngineBridge.isAvailable(this)
+        val paths = GamePaths(this)
+        val ready = paths.installedMarker.exists() && EngineBridge.isAvailable(this)
+        if (ready) {
+            runCatching {
+                val dir = java.io.File(paths.root, "online")
+                java.io.File(dir, "session.txt").delete()
+                java.io.File(dir, "training.txt").delete()
+                java.io.File(dir, "training_ui.json").delete()
+            }
+        }
         val target = if (ready) GameActivity::class.java else MainActivity::class.java
-        startActivity(Intent(this, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startActivity(
+            Intent(this, target)
+                .putExtra(GameActivity.EXTRA_FRESH, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
         finish()
     }
 }

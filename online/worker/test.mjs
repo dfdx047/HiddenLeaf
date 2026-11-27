@@ -295,19 +295,42 @@ assert.equal(rep2.resolved, true);
 assert.equal(rep2.winner_id, "p1_deadbeef01");
 assert.ok(rep2.p1_points > 1000);
 assert.ok(rep2.p2_points < 1000);
+// Re-polling an already-resolved match returns actual p1_points and p2_points (never 0)
+const rep1Again = await call("ranked/report", { match_id: "m_100001", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "p1" });
+assert.equal(rep1Again.resolved, true);
+assert.equal(rep1Again.p1_points, rep2.p1_points);
+assert.equal(rep1Again.p2_points, rep2.p2_points);
 
-// disputed report (cheater claims opposite winner) -> 0 points awarded
+// disputed report (both claim KO win for themselves) -> 0 points awarded
 await call("ranked/report", { match_id: "m_100002", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "p1" });
 const disp = await call("ranked/report", { match_id: "m_100002", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "p2" });
 assert.equal(disp.resolved, false);
 assert.equal(disp.disputed, true);
 
-// cached global leaderboard
+// KO win + peer sends "ragequit" after winner auto-disconnects -> KO winner MUST win (never disputed!)
+const rqKo1 = await call("ranked/report", { match_id: "m_100003", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "p1" });
+assert.equal(rqKo1.waiting, true);
+const rqKo2 = await call("ranked/report", { match_id: "m_100003", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "ragequit" });
+assert.equal(rqKo2.resolved, true);
+assert.equal(rqKo2.winner_id, "p1_deadbeef01");
+
+// Voluntary forfeit -> opponent wins immediately
+const forf = await call("ranked/report", { match_id: "m_100004", player_id: "p1_deadbeef01", opponent_id: "p2_deadbeef02", secret: "secret_p1_0123456789", role: "p1", winner: "forfeit" });
+assert.equal(forf.resolved, true);
+assert.equal(forf.winner_id, "p2_deadbeef02");
+
+// Uncontested KO win where loser force-closed app right at KO -> resolves when peer_disconnected=true
+const un1 = await call("ranked/report", { match_id: "m_100005", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "p2" });
+assert.equal(un1.waiting, true);
+const un2 = await call("ranked/report", { match_id: "m_100005", player_id: "p2_deadbeef02", opponent_id: "p1_deadbeef01", secret: "secret_p2_0123456789", role: "p2", winner: "p2", peer_disconnected: true });
+assert.equal(un2.resolved, true);
+assert.equal(un2.winner_id, "p2_deadbeef02");
+
+// fresh uncached global leaderboard
 const lbRes = await handle(new Request("https://t/v1/leaderboard?limit=10&mode=touch"), env, now);
 assert.equal(lbRes.status, 200);
-assert.match(lbRes.headers.get("cache-control"), /max-age=60/);
+assert.match(lbRes.headers.get("cache-control"), /no-store/);
 const lb = await lbRes.json();
-assert.equal(lb.entries[0].name, "NarutoRP");
 assert.equal(lb.entries[0].rank, 1);
 
 // ---- Phase 8: Custom Lobby (2-8 players, King-of-the-Hill rotation + spectator WS)

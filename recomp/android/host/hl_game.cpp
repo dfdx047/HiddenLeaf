@@ -115,11 +115,58 @@ namespace
     {
         return n >= 1u && n <= g_fightStarts.size() ? g_fightStarts[n - 1u] : 0u;
     }
-    // Live battle HP tracking for deterministic KO / winner detection (Ranked ELO + per-fight mastery)
+    // Live battle HP tracking for deterministic KO / Ougi-KO / Time-Over winner detection (Ranked ELO + per-fight mastery)
+    uint32_t g_p1Fighter = 0u;
+    uint32_t g_p2Fighter = 0u;
+    bool g_p1Human = false;
+    bool g_p2Human = false;
     float g_p1Hp = -1.0f;
     float g_p2Hp = -1.0f;
     bool g_bothAlive = false;
     int g_winnerRecordedFight = 0;
+
+    void checkFightWinner(bool roundEndPanel)
+    {
+        const int curFight = hl_game::g_fightCount.load(std::memory_order_relaxed);
+        if (curFight <= 0)
+            return;
+        if (g_p1Hp > 0.05f && g_p1Hp <= 1.5f && g_p2Hp > 0.05f && g_p2Hp <= 1.5f)
+            g_bothAlive = true;
+        if (!g_bothAlive || g_winnerRecordedFight == curFight)
+            return;
+        if (g_p1Hp >= -0.05f && g_p1Hp <= 0.001f && g_p2Hp > 0.001f && g_p2Hp <= 1.5f)
+        {
+            g_winnerRecordedFight = curFight;
+            hl_game::g_lastWinner.store(2, std::memory_order_release);
+            hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+            std::fprintf(stderr, "[ranked] fight %d KO: P2 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+        }
+        else if (g_p2Hp >= -0.05f && g_p2Hp <= 0.001f && g_p1Hp > 0.001f && g_p1Hp <= 1.5f)
+        {
+            g_winnerRecordedFight = curFight;
+            hl_game::g_lastWinner.store(1, std::memory_order_release);
+            hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+            std::fprintf(stderr, "[ranked] fight %d KO: P1 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+        }
+        else if (roundEndPanel && g_p1Hp >= -0.05f && g_p1Hp <= 1.5f && g_p2Hp >= -0.05f && g_p2Hp <= 1.5f)
+        {
+            // Time Over or Ougi-finish where round-end art panel appeared
+            if (g_p1Hp > g_p2Hp + 0.002f)
+            {
+                g_winnerRecordedFight = curFight;
+                hl_game::g_lastWinner.store(1, std::memory_order_release);
+                hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+                std::fprintf(stderr, "[ranked] fight %d round-end: P1 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+            }
+            else if (g_p2Hp > g_p1Hp + 0.002f)
+            {
+                g_winnerRecordedFight = curFight;
+                hl_game::g_lastWinner.store(2, std::memory_order_release);
+                hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
+                std::fprintf(stderr, "[ranked] fight %d round-end: P2 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
+            }
+        }
+    }
 
     void noteFightStart()
     {
@@ -128,6 +175,10 @@ namespace
         if (live != 0u && g_tick - live <= s_gap)
             return;
         g_fightStarts.push_back(g_tick);
+        g_p1Fighter = 0u;
+        g_p2Fighter = 0u;
+        g_p1Human = false;
+        g_p2Human = false;
         g_p1Hp = -1.0f;
         g_p2Hp = -1.0f;
         g_bothAlive = false;
@@ -1339,47 +1390,53 @@ namespace
         const uint32_t f = GPR_U32(ctx, 4);
         g_inputOriginal(rdram, ctx, runtime);
         noteFightStart();
-        // Track P1 & P2 active character IDs (fighter+0x68) and HP (fighter+0x6C) for mastery & Ranked KO detection
+        // Track P1 & P2 main character IDs (fighter+0x68) and HP (fighter+0x6C) for mastery & Ranked KO detection.
+        // Map human fighters via controller->pad (0=P1, 1=P2) so CPU support/assist characters can never overwrite main HP!
         {
             const uint16_t kind = read16(f + kFighterKind);
-            const bool isP1 = (kind & 1u) == 0u;
             const uint32_t cid = read32(f + 0x68u);
             const float hp = readf(f + 0x6Cu);
-            if (isP1)
+            const bool isHuman = humanFighter(f);
+            int playerIdx = -1;
+            if (isHuman)
             {
+                const uint32_t ctrl = read32(f + kFighterController);
+                const uint32_t gfx = read32(kGfxPointer);
+                if (validAddress(ctrl) && validAddress(gfx))
+                {
+                    const uint32_t pad = read32(ctrl + 0x64u);
+                    const uint32_t idx = (pad - gfx - 0x1Cu) / 0x78u;
+                    if (idx < 2u && pad == gfx + 0x1Cu + idx * 0x78u)
+                        playerIdx = static_cast<int>(idx);
+                }
+                if (playerIdx < 0)
+                    playerIdx = (kind & 1u) == 0u ? 0 : 1;
+            }
+            else
+            {
+                const int guess = (kind & 1u) == 0u ? 0 : 1;
+                if ((guess == 0 && !g_p1Human) || (guess == 1 && !g_p2Human))
+                    playerIdx = guess;
+            }
+            if (playerIdx == 0)
+            {
+                if (isHuman)
+                    g_p1Human = true;
+                g_p1Fighter = f;
                 if (cid > 0u && cid < 256u)
                     hl_game::g_p1CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
                 g_p1Hp = hp;
             }
-            else
+            else if (playerIdx == 1)
             {
+                if (isHuman)
+                    g_p2Human = true;
+                g_p2Fighter = f;
                 if (cid > 0u && cid < 256u)
                     hl_game::g_p2CharId.store(static_cast<int>(cid), std::memory_order_relaxed);
                 g_p2Hp = hp;
             }
-            const int curFight = hl_game::g_fightCount.load(std::memory_order_relaxed);
-            if (curFight > 0)
-            {
-                if (g_p1Hp > 0.05f && g_p1Hp <= 1.5f && g_p2Hp > 0.05f && g_p2Hp <= 1.5f)
-                    g_bothAlive = true;
-                if (g_bothAlive && g_winnerRecordedFight != curFight)
-                {
-                    if (g_p1Hp >= -0.05f && g_p1Hp <= 0.001f && g_p2Hp > 0.001f && g_p2Hp <= 1.5f)
-                    {
-                        g_winnerRecordedFight = curFight;
-                        hl_game::g_lastWinner.store(2, std::memory_order_release);
-                        hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
-                        std::fprintf(stderr, "[ranked] fight %d KO: P2 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
-                    }
-                    else if (g_p2Hp >= -0.05f && g_p2Hp <= 0.001f && g_p1Hp > 0.001f && g_p1Hp <= 1.5f)
-                    {
-                        g_winnerRecordedFight = curFight;
-                        hl_game::g_lastWinner.store(1, std::memory_order_release);
-                        hl_game::g_lastWinFight.store(curFight, std::memory_order_release);
-                        std::fprintf(stderr, "[ranked] fight %d KO: P1 wins (p1Hp=%.4f p2Hp=%.4f)\n", curFight, g_p1Hp, g_p2Hp);
-                    }
-                }
-            }
+            checkFightWinner(false);
         }
         {
             // HL_SP_LOG: which fighter is the human one, its chakra and action, twice a second
@@ -1815,6 +1872,29 @@ namespace
                     std::fprintf(stderr, "[ram] v%llu %s\n", static_cast<unsigned long long>(tick), name.c_str());
                     at = 0u;
                 }
+        }
+        // Poll live fighter HP on every vsync during active battles (catches Ougi KOs and Time Over even when fighterInput stops running!)
+        if (hl_game::overlay() == 1 && g_bothAlive)
+        {
+            const int curFight = hl_game::g_fightCount.load(std::memory_order_relaxed);
+            const bool roundEnd = read32(kRoundEndPanel) != 0u;
+            if (curFight > 0 && g_winnerRecordedFight != curFight &&
+                ((g_fighterTick != 0u && tick - g_fighterTick < 150u) || ougiOnScreen() || roundEnd))
+            {
+                if (validAddress(g_p1Fighter))
+                {
+                    const float hp1 = readf(g_p1Fighter + 0x6Cu);
+                    if (hp1 >= -0.05f && hp1 <= 1.5f)
+                        g_p1Hp = hp1;
+                }
+                if (validAddress(g_p2Fighter))
+                {
+                    const float hp2 = readf(g_p2Fighter + 0x6Cu);
+                    if (hp2 >= -0.05f && hp2 <= 1.5f)
+                        g_p2Hp = hp2;
+                }
+                checkFightWinner(roundEnd);
+            }
         }
         // (for the native renderer's fight held without its detector: hl_native.cpp, s_held)
         if (hl_game::g_wideCameraOut != nullptr)

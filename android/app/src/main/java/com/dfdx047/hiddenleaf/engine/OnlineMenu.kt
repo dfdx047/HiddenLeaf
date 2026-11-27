@@ -250,7 +250,7 @@ private fun RankedBoards(lobby: OnlineLobby, fp: String, start: () -> Unit) {
                 ctx, srv, prefs.name, com.dfdx047.hiddenleaf.data.Online.effectiveInputMode(prefs.inputMode),
             )
         }
-        entries = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 50)
+        entries = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, "all", 100)
         loading = false
     }
 
@@ -279,21 +279,22 @@ private fun RankedBoards(lobby: OnlineLobby, fp: String, start: () -> Unit) {
         } else if (entries.isEmpty()) {
             Text(stringResource(R.string.online_ranked_empty), style = bodyStyle, textAlign = TextAlign.Center)
         } else {
-            for (e in entries.take(12)) {
+            for (e in entries.take(50)) {
                 val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
                 val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(e.favChar)
+                val isMe = profile?.playerId == e.playerId
                 Row(
                     Modifier.fillMaxWidth()
-                        .border(1.5.dp, if (e.rank <= 3) ORANGE else WOOD_EDGE, CutCornerShape(8.dp))
+                        .border(if (isMe) 2.dp else 1.5.dp, if (isMe) GOLD else if (e.rank <= 3) ORANGE else WOOD_EDGE, CutCornerShape(8.dp))
                         .background(Brush.verticalGradient(listOf(WOOD_TOP, WOOD_BOTTOM)), CutCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(medal, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp), modifier = Modifier.width(28.dp))
+                    Text(medal, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp), modifier = Modifier.width(34.dp))
                     com.dfdx047.hiddenleaf.ui.components.CharacterCutout(e.favChar, e.favCharLvl, sizeDp = 40)
                     Column(Modifier.weight(1f)) {
-                        Text(e.name, style = bodyStyle.copy(color = GOLD, fontSize = 14.sp))
+                        Text(e.name + if (isMe) " (Você)" else "", style = bodyStyle.copy(color = GOLD, fontSize = 14.sp))
                         Text("${e.tier} · ${ch.name} Lv.${e.favCharLvl} · ${e.wins}V/${e.losses}D", style = bodyStyle.copy(fontSize = 11.sp, color = CREAM.copy(alpha = 0.85f)))
                     }
                     Text("${e.points} RP", style = carved(15))

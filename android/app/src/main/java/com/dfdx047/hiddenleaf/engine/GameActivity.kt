@@ -89,6 +89,14 @@ class GameActivity : SDLActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (processStarted) {
+            super.onCreate(savedInstanceState)
+            android.util.Log.w("un5", "GameActivity: stale :game process detected, restarting cleanly")
+            restartIntoMatch()
+            finish()
+            return
+        }
+        processStarted = true
         paths = GamePaths(this).also { it.ensure() }
         es = EngineSettings(paths.settings)
         padStore = PadMapStore(paths.root)
@@ -798,6 +806,26 @@ class GameActivity : SDLActivity() {
         ""
     }
 
+    @Volatile private var quitting = false
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_FRESH, false)) {
+            android.util.Log.i("un5", "GameActivity: fresh start requested via onNewIntent, restarting :game")
+            trainingQueue?.stop()
+            online?.leave()
+            restartIntoMatch()
+        }
+    }
+
+    override fun onDestroy() {
+        trainingQueue?.stop()
+        super.onDestroy()
+        if (isFinishing) {
+            handler.postDelayed({ Process.killProcess(Process.myPid()) }, 250)
+        }
+    }
+
     /**
      * "Quit to launcher" of the in-game window (port/src/gs/ui.cpp, through JNI on the engine's thread): the launcher
      * comes forward and the game's own process ends. A game cannot be started again in the same process (the engine
@@ -805,8 +833,18 @@ class GameActivity : SDLActivity() {
      */
     @Suppress("unused")
     fun quitToApp(page: String? = null) {
+        if (quitting) return
+        quitting = true
         trainingQueue?.stop()
-        online?.leave() // (the other phone is told before this process goes)
+        val og = online
+        if (og != null) {
+            og.forfeitAndLeave { finishQuitToApp(page) }
+        } else {
+            finishQuitToApp(page)
+        }
+    }
+
+    private fun finishQuitToApp(page: String? = null) {
         runOnUiThread {
             TouchBridge.releaseAll()
             startActivity(
@@ -816,7 +854,7 @@ class GameActivity : SDLActivity() {
             )
         }
         // a moment for the launcher to be started, then this process goes (the engine's saves are closed as they are written)
-        Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 450)
+        handler.postDelayed({ Process.killProcess(Process.myPid()) }, 450)
     }
 
     /** The list of where the game's data tables come from (made with the engine, android.py) next to the game's files. */
@@ -984,6 +1022,11 @@ class GameActivity : SDLActivity() {
             "/proc/self/fd/${iso!!.fd}"
         }.getOrDefault("")
         return arrayOf(paths.root.path, applicationInfo.nativeLibraryDir, driver?.dir?.path ?: "", driver?.library ?: "", isoArg)
+    }
+
+    companion object {
+        const val EXTRA_FRESH = "fresh_start"
+        @Volatile private var processStarted = false
     }
 }
 

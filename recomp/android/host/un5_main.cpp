@@ -279,6 +279,7 @@ namespace
         FILE *f = std::fopen(path.c_str(), "w");
         if (!f)
             return;
+        const bool zeroFgOn = !hl_online::active() && g_settings.zeroFg >= 2;
         std::fprintf(f,
                      "; Ultimate Ninja 5 on PCSX2's GS: written by the game at every start\n"
                      "[EmuCore/GS]\n"
@@ -304,45 +305,30 @@ namespace
                      "ZeroFGMultiplier = %d\n",
                      static_cast<double>(upscale), g_settings.filter == 2 ? "true" : "false", g_settings.filter == 3 ? 1 : 0, g_settings.filter == 1 ? 2 : 1,
                      std::getenv("HL_PERF") ? "true" : "false",
-                     (!hl_online::active() && g_settings.zeroFg >= 2) ? "true" : "false",
+                     zeroFgOn ? "true" : "false",
                      (g_settings.zeroFg >= 2 && g_settings.zeroFg <= 4) ? g_settings.zeroFg : 2);
-        // Entry-level device optimizations when Light Mode is active (Tier 0-1 GPUs / 3-4 GB RAM phones):
-        // Minimum blending accuracy + no trilinear/mipmapping/dithering + partial texture preloading reduces
-        // fragment shader & VRAM pressure significantly on Mali-G52/G57, PowerVR, Unisoc T6xx and Adreno 610.
-        if (g_lightMode)
-        {
-            std::fprintf(f,
-                         "accurate_blending_unit = 0\n"
-                         "mipmapping = 0\n"
-                         "trilinear_filtering = 0\n"
-                         "dithering_ps2 = 0\n"
-                         "texture_preloading = 1\n");
-        }
-        // PCSX2's GS in two threads (GSBackThreadMode: one parses the GIF, "GS Back" draws) where the GS is the limit of a
-        // device with 6+ cores: on the Mi A3 (Snapdragon 665, "trinket") the GS thread of a heavy fight went from 22-27
-        // to 12-16 ms (docs/registro.md, 2026-11-13). Only with the GS on Vulkan and the native renderer off (hl_native's
-        // fight path works on the renderer object from the MTGS thread). HL_GS_SPLIT=0/1 overrides on any device.
+        // PCSX2's GS in two threads (GSBackThreadMode: one parses the GIF, "GS Back" draws):
+        // Keep strictly limited to the verified Qualcomm Adreno 610 family (trinket/bengal/khaje, 4 big cores)
+        // when Light Mode + Vulkan GS-only are active AND ZeroFG is off. Enabling GSBackThreadMode globally on
+        // Mali/PowerVR/Exynos/MediaTek/Unisoc or alongside ZeroFG causes black screens and frozen frames while audio continues.
+        // HL_GS_SPLIT=0/1 overrides on any device.
         {
             const char *split = std::getenv("HL_GS_SPLIT");
             const char *nat = std::getenv("HL_NATIVE");
             const char *api = std::getenv("HL_GS_API");
             char platform[PROP_VALUE_MAX] = {};
             __system_property_get("ro.board.platform", platform);
-            const long cpus = sysconf(_SC_NPROCESSORS_ONLN);
             const bool gsOnly = nat != nullptr && nat[0] == '0' && (api == nullptr || std::strcmp(api, "gl") != 0);
-            const bool splitPlatform = cpus >= 6 ||
-                                       std::strcmp(platform, "trinket") == 0 || std::strcmp(platform, "bengal") == 0 ||
-                                       std::strcmp(platform, "khaje") == 0 || std::strncmp(platform, "ums", 3) == 0 ||
-                                       std::strncmp(platform, "mt67", 4) == 0 || std::strncmp(platform, "mt68", 4) == 0 ||
-                                       std::strncmp(platform, "exynos", 6) == 0 || std::strncmp(platform, "s5e", 3) == 0 ||
-                                       std::strncmp(platform, "sc9863", 6) == 0;
-            const bool on = split != nullptr ? split[0] == '1' : g_lightMode && gsOnly && splitPlatform;
+            const bool splitPlatform = std::strcmp(platform, "trinket") == 0 ||
+                                       std::strcmp(platform, "bengal") == 0 ||
+                                       std::strcmp(platform, "khaje") == 0;
+            const bool on = split != nullptr ? split[0] == '1' : (g_lightMode && gsOnly && splitPlatform && !zeroFgOn);
             if (on)
             {
                 std::fprintf(f, "GSBackThreadMode = 1\n");
                 setenv("HL_PIN_IOP", "rest", 0);
             }
-            std::fprintf(stderr, "un5: GS in %s (platform %s)\n", on ? "two threads" : "one thread", platform);
+            std::fprintf(stderr, "un5: GS in %s (platform %s, zeroFg %s)\n", on ? "two threads" : "one thread", platform, zeroFgOn ? "on" : "off");
         }
         // HL_GS_EXTRA="key=value;key=value": GS settings to try (bench only)
         if (const char *extra = std::getenv("HL_GS_EXTRA"))

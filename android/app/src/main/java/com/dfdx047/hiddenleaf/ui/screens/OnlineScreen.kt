@@ -636,9 +636,13 @@ private fun RankedDedicatedScreen(
     }
     val canPlay = ready && serverSet && !modsOn && prefs.name.isNotBlank()
     val effectiveMode = Online.effectiveInputMode(prefs.inputMode)
+    var resumeTick by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        resumeTick++
+    }
 
-    LaunchedEffect(prefs.server, serverSet, lbMode) {
-        if (!serverSet) return@LaunchedEffect
+    LaunchedEffect(prefs.server, serverSet, lbMode, resumeTick) {
+        if (!serverSet || resumeTick == 0) return@LaunchedEffect
         loadingRank = true
         val srv = Online.cleanServer(prefs.server)
         runCatching {
@@ -646,7 +650,7 @@ private fun RankedDedicatedScreen(
                 context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
             ).also { profilePublic = it.profilePublic }
         }
-        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 50)
+        leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 100)
         loadingRank = false
     }
 
@@ -880,7 +884,7 @@ private fun RankedDedicatedScreen(
                                     context, srv, prefs.name, Online.effectiveInputMode(prefs.inputMode),
                                 )
                             }
-                            leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 50)
+                            leaderboard = com.dfdx047.hiddenleaf.data.OnlineAdvanced.fetchLeaderboard(srv, lbMode, 100)
                             loadingRank = false
                         }
                     },
@@ -895,29 +899,48 @@ private fun RankedDedicatedScreen(
                 Text(stringResource(R.string.online_ranked_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (e in leaderboard.take(20)) {
+                    for (e in leaderboard) {
                         val tc = rankTierColor(e.tier)
                         val ch = com.dfdx047.hiddenleaf.ui.components.charInfoOf(e.favChar)
                         val medal = when (e.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${e.rank}" }
                         val wr = if (e.wins + e.losses > 0) (e.wins * 100) / (e.wins + e.losses) else 0
+                        val isMe = profile?.playerId == e.playerId
                         Row(
                             Modifier.fillMaxWidth()
                                 .clip(MaterialTheme.shapes.small)
-                                .background(if (e.rank <= 3) tc.copy(alpha = 0.16f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG)
-                                .border(1.dp, if (e.rank <= 3) tc.copy(alpha = 0.65f) else com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f), MaterialTheme.shapes.small)
+                                .background(
+                                    when {
+                                        isMe -> com.dfdx047.hiddenleaf.ui.components.UN5_GOLD.copy(alpha = 0.14f)
+                                        e.rank <= 3 -> tc.copy(alpha = 0.16f)
+                                        else -> com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BG
+                                    },
+                                )
+                                .border(
+                                    width = if (isMe) 2.dp else 1.dp,
+                                    color = when {
+                                        isMe -> com.dfdx047.hiddenleaf.ui.components.UN5_GOLD
+                                        e.rank <= 3 -> tc.copy(alpha = 0.65f)
+                                        else -> com.dfdx047.hiddenleaf.ui.components.UN5_SCROLL_BORDER.copy(alpha = 0.35f)
+                                    },
+                                    shape = MaterialTheme.shapes.small,
+                                )
                                 .clickable { inspectedPlayerId = e.playerId }
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(30.dp))
+                            Text(medal, style = MaterialTheme.typography.labelLarge, color = tc, modifier = Modifier.width(36.dp))
                             com.dfdx047.hiddenleaf.ui.components.CharacterCutout(
                                 e.favChar, e.favCharLvl, sizeDp = 46,
                                 avatarB64 = if (e.profilePublic) e.avatarB64 else null,
                             )
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(e.name, style = MaterialTheme.typography.bodyMedium, color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD)
+                                    Text(
+                                        e.name + if (isMe) " (Você)" else "",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = com.dfdx047.hiddenleaf.ui.components.UN5_GOLD,
+                                    )
                                     RankEmblem(e.tier, size = 18)
                                     if (!e.profilePublic) Text("🔒", style = MaterialTheme.typography.labelSmall)
                                 }

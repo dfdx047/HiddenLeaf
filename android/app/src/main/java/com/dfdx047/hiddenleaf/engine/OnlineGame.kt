@@ -37,8 +37,13 @@ class OnlineGame private constructor(
     @Volatile private var running = true
     @Volatile private var relay: RelaySocket? = null
     @Volatile private var relayStarted = false
+    @Volatile private var rankedResolved = false
+    @Volatile private var peerLeftFlag = false
+    @Volatile private var matchLive = false
     private var text: TextView? = null
     private var root: ViewGroup? = null
+    private var endMsgView: TextView? = null
+    private var endBackBtn: TextView? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, activity.resources.displayMetrics)
@@ -49,7 +54,7 @@ class OnlineGame private constructor(
      * font): the developer found Android's plain white dialog out of place over the game. A dark veil holds the game behind it
      * (the engine already holds both pads still); one button goes back to the menu.
      */
-    private fun showEnd(message: String) {
+    private fun showEnd(message: String, backEnabled: Boolean = true) {
         val layout = root ?: return
         val r = activity.resources
         val veil = FrameLayout(activity).apply {
@@ -77,15 +82,16 @@ class OnlineGame private constructor(
             setPadding(dp(22f).toInt(), dp(6f).toInt(), dp(22f).toInt(), dp(8f).toInt())
             setShadowLayer(dp(2f), 0f, dp(1.5f), 0xAA000000.toInt())
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        card.addView(TextView(activity).apply {
+        val msgTv = TextView(activity).apply {
             text = message
             setTextColor(CREAM)
             textSize = 16f
             typeface = font(R.font.kanit_medium, Typeface.DEFAULT)
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16f).toInt() })
-        card.addView(TextView(activity).apply {
-            text = r.getString(R.string.online_game_back)
+        }
+        card.addView(msgTv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16f).toInt() })
+        val backBtn = TextView(activity).apply {
+            text = if (backEnabled) r.getString(R.string.online_game_back) else "Registrando..."
             setTextColor(Color.WHITE)
             textSize = 17f
             typeface = font(R.font.kanit_bold, Typeface.DEFAULT_BOLD)
@@ -96,12 +102,33 @@ class OnlineGame private constructor(
             }
             setPadding(dp(30f).toInt(), dp(10f).toInt(), dp(30f).toInt(), dp(12f).toInt())
             isFocusable = true
+            isEnabled = backEnabled
+            alpha = if (backEnabled) 1f else 0.45f
             setOnClickListener { isEnabled = false; (activity as? GameActivity)?.quitToApp() }
-            post { requestFocus() } // (a controller's ✕/A presses it too)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20f).toInt() })
+            if (backEnabled) post { requestFocus() } // (a controller's ✕/A presses it too)
+        }
+        card.addView(backBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20f).toInt() })
         veil.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         layout.addView(veil, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        endMsgView = msgTv
+        endBackBtn = backBtn
         text?.visibility = View.GONE
+    }
+
+    private fun updateEnd(message: String, backEnabled: Boolean = true) {
+        if (!endShown || endMsgView == null) {
+            endShown = true
+            showEnd(message, backEnabled)
+            return
+        }
+        val r = activity.resources
+        endMsgView?.text = message
+        endBackBtn?.apply {
+            text = if (backEnabled) r.getString(R.string.online_game_back) else "Registrando..."
+            isEnabled = backEnabled
+            alpha = if (backEnabled) 1f else 0.45f
+            if (backEnabled) post { requestFocus() }
+        }
     }
 
     /** After the engine is loaded (SDLActivity.onCreate): the line on screen and the relay's threads. */
@@ -256,44 +283,67 @@ class OnlineGame private constructor(
         }
     }
 
-    private fun submitRankedResult(fightNum: Int, winnerClaim: String, autoDisconnect: Boolean = true) {
+    private fun submitRankedResult(
+        fightNum: Int,
+        winnerClaim: String,
+        autoDisconnect: Boolean = true,
+        peerDisconnectedNow: Boolean = false,
+    ) {
         if (!ranked || server.isEmpty() || opponentId.isEmpty() || roomCode.isEmpty()) return
         val myRole = if (isHost) "p1" else "p2"
         val matchId = "${roomCode}_f${fightNum}"
         val myChar = com.dfdx047.hiddenleaf.data.OnlineAdvanced.savedFavChar(activity)
         Thread({
-            var res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
-            // Poll briefly if peer hasn't submitted yet so both players see their exact final RP delta
+            var res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(
+                activity, server, matchId, opponentId, myRole, winnerClaim, myChar,
+                peerDisconnected = peerDisconnectedNow || peerLeftFlag,
+            )
+            // Poll briefly if peer hasn't submitted yet (or on transient error) so both players see their exact final RP delta
             var tries = 0
-            while (res?.optBoolean("waiting", false) == true && tries < 3) {
+            while (tries < 6 && (res == null || res.optBoolean("waiting", false))) {
                 tries++
-                Thread.sleep(1800L)
-                res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(activity, server, matchId, opponentId, myRole, winnerClaim, myChar)
+                Thread.sleep(1500L)
+                val peerGone = peerDisconnectedNow || peerLeftFlag || tries >= 5
+                res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(
+                    activity, server, matchId, opponentId, myRole, winnerClaim, myChar,
+                    peerDisconnected = peerGone,
+                )
             }
             val finalMsg: String
             if (res?.optBoolean("resolved", false) == true) {
+                rankedResolved = true
                 val myDelta = if (myRole == "p1") res.optInt("p1_delta", 0) else res.optInt("p2_delta", 0)
                 val myPts = if (myRole == "p1") res.optInt("p1_points", 0) else res.optInt("p2_points", 0)
                 val won = myDelta >= 0
                 val sign = if (myDelta >= 0) "+$myDelta" else "$myDelta"
-                val label = if (won) "🏆 VITÓRIA RANQUEADA! $sign RP ($myPts RP)" else "💀 DERROTA RANQUEADA! $sign RP ($myPts RP)"
+                val label = when {
+                    won && winnerClaim == "ragequit" -> "🏆 VITÓRIA POR W.O.! $sign RP ($myPts RP)"
+                    won -> "🏆 VITÓRIA RANQUEADA! $sign RP ($myPts RP)"
+                    else -> "💀 DERROTA RANQUEADA! $sign RP ($myPts RP)"
+                }
                 Log.i("un5", "ranked: resolved $matchId -> $label")
                 showRankedToast(label, won)
                 finalMsg = "$label\n\nPartida ranqueada concluída. Volte ao lobby para buscar um novo adversário!"
+            } else if (res?.optBoolean("disputed", false) == true) {
+                rankedResolved = true
+                Log.w("un5", "ranked: disputed $matchId ($winnerClaim as $myRole), resp=$res")
+                finalMsg = "Partida encerrada com divergência (desync).\nNenhum ponto foi alterado."
             } else {
                 Log.i("un5", "ranked: submitted $matchId ($winnerClaim as $myRole), resp=$res")
                 finalMsg = "Partida ranqueada concluída!\nResultado enviado ao servidor. Volte ao lobby para buscar um novo adversário."
             }
             // Ranked rule: 1 match and disconnect (no rematch farming or post-match room lingering)
             if (autoDisconnect) {
-                Thread.sleep(3000L)
+                if (!peerLeftFlag) Thread.sleep(2500L)
                 OnlineBridge.leave()
                 activity.runOnUiThread {
                     runCatching { wifiLock?.release() }
-                    if (!endShown) {
-                        endShown = true
-                        showEnd(finalMsg)
-                    }
+                    updateEnd(finalMsg, backEnabled = true)
+                }
+            } else {
+                activity.runOnUiThread {
+                    runCatching { wifiLock?.release() }
+                    updateEnd(finalMsg, backEnabled = true)
                 }
             }
         }, "ranked-report").apply { isDaemon = true; start() }
@@ -305,17 +355,21 @@ class OnlineGame private constructor(
             startRelay(relayUrl)
         }
         val phase = s["phase"] ?: "starting"
-        updateCover(phase, s["field"]?.toIntOrNull() ?: 0)
-        // Poll deterministic KO winner from engine RDRAM during Ranked matches
-        if (ranked && phase == "playing") {
+        val field = s["field"]?.toIntOrNull() ?: 0
+        updateCover(phase, field)
+        if (phase == "playing" && field >= ENTRY_END + 80) matchLive = true
+        // Poll deterministic KO winner from engine RDRAM during Ranked matches (also on transition to "over")
+        var mrWinFight = 0
+        var mrWinner = 0
+        if (ranked && (phase == "playing" || phase == "over")) {
             val mr = TouchBridge.matchResult()
             val curFight = mr["fight"] ?: 0
             if (curFight > activeFight) activeFight = curFight
-            val winFight = mr["win_fight"] ?: 0
-            val winner = mr["winner"] ?: 0
-            if (winFight > lastReportedFight && (winner == 1 || winner == 2)) {
-                lastReportedFight = winFight
-                submitRankedResult(winFight, if (winner == 1) "p1" else "p2")
+            mrWinFight = mr["win_fight"] ?: 0
+            mrWinner = mr["winner"] ?: 0
+            if (phase == "playing" && mrWinFight > lastReportedFight && (mrWinner == 1 || mrWinner == 2)) {
+                lastReportedFight = mrWinFight
+                submitRankedResult(mrWinFight, if (mrWinner == 1) "p1" else "p2", autoDisconnect = true, peerDisconnectedNow = false)
             }
         }
         if (phase != lastPhase) {
@@ -353,13 +407,27 @@ class OnlineGame private constructor(
         // (the developer, 2026-11-14: after a drop each phone went on alone. The engine now holds the game still once the match is
         // over; here the player is told why and goes back to the menu)
         if (phase == "over" || phase == "failed") runCatching { wifiLock?.release() }
-        // If opponent quit or dropped mid-fight in Ranked, award victory by ragequit
-        if (ranked && phase == "over" && activeFight > lastReportedFight &&
-            (s["reason"] == "the other player left" || s["reason"] == "the other game stopped answering")) {
-            lastReportedFight = activeFight
-            submitRankedResult(activeFight, "ragequit", autoDisconnect = false)
+        // Ranked disconnect / ragequit protection: lock the end card until Cloudflare finishes awarding RP
+        val reason = s["reason"]
+        val peerDropped = reason == "the other player left" ||
+            reason == "the other game stopped answering" ||
+            reason == "the other game could not be reached"
+        if (ranked && phase == "over" && peerDropped) {
+            peerLeftFlag = true
+            if (mrWinFight > lastReportedFight && (mrWinner == 1 || mrWinner == 2)) {
+                lastReportedFight = mrWinFight
+                updateEnd("⏳ Registrando resultado ranqueado...", backEnabled = false)
+                submitRankedResult(mrWinFight, if (mrWinner == 1) "p1" else "p2", autoDisconnect = false, peerDisconnectedNow = true)
+            } else if (activeFight > lastReportedFight || (matchLive && lastReportedFight == 0)) {
+                val fNum = maxOf(activeFight, 1)
+                lastReportedFight = fNum
+                updateEnd("⏳ $peer desconectou. Registrando vitória por W.O. ...", backEnabled = false)
+                submitRankedResult(fNum, "ragequit", autoDisconnect = false, peerDisconnectedNow = true)
+            } else if (lastReportedFight > 0 && !rankedResolved && !endShown) {
+                updateEnd("⏳ Finalizando pontuação ranqueada...", backEnabled = false)
+            }
         }
-        if ((phase == "over" || phase == "failed") && !endShown && s["reason"] != "the player left") {
+        if ((phase == "over" || phase == "failed") && !endShown && reason != "the player left") {
             endShown = true
             showEnd(line)
         }
@@ -391,6 +459,41 @@ class OnlineGame private constructor(
                 if (phase == "over" || phase == "failed") break
             }
         }, "online-relay-pump").apply { isDaemon = true; start() }
+    }
+
+    /** Voluntarily leaving from the in-game drawer: if mid-match in Ranked, submit forfeit first so opponent gets full RP. */
+    fun forfeitAndLeave(onDone: () -> Unit) {
+        val shouldForfeit = ranked && !rankedResolved &&
+            server.isNotEmpty() && opponentId.isNotEmpty() && roomCode.isNotEmpty() &&
+            (activeFight > lastReportedFight || (matchLive && lastReportedFight == 0))
+        if (!shouldForfeit) {
+            leave()
+            onDone()
+            return
+        }
+        val fNum = maxOf(activeFight, 1)
+        lastReportedFight = fNum
+        rankedResolved = true
+        val myRole = if (isHost) "p1" else "p2"
+        val matchId = "${roomCode}_f${fNum}"
+        val myChar = com.dfdx047.hiddenleaf.data.OnlineAdvanced.savedFavChar(activity)
+        OnlineBridge.leave()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val finishOnce = {
+            if (done.compareAndSet(false, true)) {
+                running = false
+                runCatching { relay?.close() }
+                activity.runOnUiThread { onDone() }
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finishOnce() }, 2500L)
+        Thread({
+            val res = com.dfdx047.hiddenleaf.data.OnlineAdvanced.reportRankedBlocking(
+                activity, server, matchId, opponentId, myRole, "forfeit", myChar,
+            )
+            Log.i("un5", "ranked: forfeit submitted $matchId as $myRole, resp=$res")
+            finishOnce()
+        }, "ranked-forfeit").apply { isDaemon = true; start() }
     }
 
     /** The player quits the game (the panel's quit): the other side is told. */

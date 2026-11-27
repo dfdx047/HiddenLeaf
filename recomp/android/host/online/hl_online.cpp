@@ -181,6 +181,10 @@ namespace
                     {0xE97BC0u, 0xE97C80u}, {0xE98240u, 0xE98280u}};
         readRanges(std::getenv("HL_ONLINE_SKIP"), env.skip);
         env.strictDesync = std::getenv("HL_ONLINE_STRICT") != nullptr;
+        // 12 s silence timeout during active play (Link pings every 500 ms = 24 missed pings):
+        // when a Ranked opponent force-closes the app or disables Wi-Fi, the remaining player gets W.O. credit in 12 s
+        // instead of waiting 30 s on a frozen screen and quitting first.
+        env.silentRunningMs = 12000u;
         env.onWait = publishNow;
         env.onMet = [] { publish("playing"); };
         env.onEnded = [](const std::string &) {

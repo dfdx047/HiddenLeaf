@@ -642,12 +642,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- launch
 
+    /** Starts an offline game: clears any stale online/training session files so the engine never hangs on black screen waiting for a peer. */
+    fun playOffline() {
+        runCatching {
+            val dir = File(paths.root, "online")
+            File(dir, "session.txt").delete()
+            File(dir, "training.txt").delete()
+            File(dir, "training_ui.json").delete()
+        }
+        play()
+    }
+
     fun play() {
         when {
             _install.value !is InstallState.Installed -> say(str(R.string.msg_install_first))
             !engineAvailable -> say(str(R.string.msg_no_engine))
             else -> ActivityLog.info("game", "started (renderer ${_settings.value[EngineSettings.RENDERER] ?: 0}, mods ${_mods.value.filter { it.enabled }.joinToString { it.id }.ifEmpty { "none" }})").let { getApplication<android.app.Application>().startActivity(
                 android.content.Intent(getApplication(), com.dfdx047.hiddenleaf.engine.GameActivity::class.java)
+                    .putExtra(com.dfdx047.hiddenleaf.engine.GameActivity.EXTRA_FRESH, true)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             ) }
         }

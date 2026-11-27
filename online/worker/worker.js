@@ -540,8 +540,9 @@ export async function handle(request, env, now) {
         const oppId = cleanPlayerId(body.opponent_id);
         const secret = typeof body.secret === "string" ? body.secret : "";
         const matchId = cleanPlayerId(body.match_id);
-        const claim = body.winner === "p1" || body.winner === "p2" || body.winner === "ragequit" ? body.winner : "";
+        const claim = body.winner === "p1" || body.winner === "p2" || body.winner === "ragequit" || body.winner === "forfeit" ? body.winner : "";
         const role = body.role === "p1" || body.role === "p2" ? body.role : "";
+        const peerDisconnected = body.peer_disconnected === true;
         if (!pid || !oppId || pid === oppId || secret.length < 16 || matchId.length < 6 || !claim || !role) {
             return reply({ error: "bad request" }, 400);
         }
@@ -549,34 +550,84 @@ export async function handle(request, env, now) {
         if (!player || player.auth_hash !== (await sha256Hex(secret))) return reply({ error: "unauthorized" }, 403);
         const p1Id = role === "p1" ? pid : oppId;
         const p2Id = role === "p1" ? oppId : pid;
+        const resolvedReply = async (row) => {
+            const r1 = await env.DB.prepare("SELECT points FROM hl_players WHERE player_id = ?").bind(row.p1_id).first();
+            const r2 = await env.DB.prepare("SELECT points FROM hl_players WHERE player_id = ?").bind(row.p2_id).first();
+            return reply({
+                resolved: row.resolved === 1,
+                disputed: row.resolved === -1,
+                winner_id: row.winner_id,
+                p1_points: r1 ? r1.points : 1000,
+                p2_points: r2 ? r2.points : 1000,
+                p1_delta: row.p1_delta,
+                p2_delta: row.p2_delta,
+            });
+        };
         let m = await env.DB.prepare("SELECT * FROM hl_matches WHERE match_id = ?").bind(matchId).first();
         if (!m) {
             await env.DB.prepare("INSERT OR IGNORE INTO hl_matches (match_id, p1_id, p2_id, p1_claim, p2_claim, created) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(matchId, p1Id, p2Id, role === "p1" ? claim : null, role === "p2" ? claim : null, now).run();
             m = await env.DB.prepare("SELECT * FROM hl_matches WHERE match_id = ?").bind(matchId).first();
         } else {
-            if (m.resolved !== 0) return reply({ resolved: m.resolved === 1, winner_id: m.winner_id, p1_delta: m.p1_delta, p2_delta: m.p2_delta });
+            if (m.resolved === 1 || m.resolved === -1) return resolvedReply(m);
+            if (m.resolved === 2) return reply({ resolved: false, waiting: true }); // concurrent resolution in progress
             if (role === "p1" && m.p1_id === pid) {
-                await env.DB.prepare("UPDATE hl_matches SET p1_claim = ? WHERE match_id = ?").bind(claim, matchId).run();
-                m.p1_claim = claim;
+                if (m.p1_claim !== claim) {
+                    await env.DB.prepare("UPDATE hl_matches SET p1_claim = ? WHERE match_id = ? AND resolved = 0").bind(claim, matchId).run();
+                    m.p1_claim = claim;
+                }
             } else if (role === "p2" && m.p2_id === pid) {
-                await env.DB.prepare("UPDATE hl_matches SET p2_claim = ? WHERE match_id = ?").bind(claim, matchId).run();
-                m.p2_claim = claim;
+                if (m.p2_claim !== claim) {
+                    await env.DB.prepare("UPDATE hl_matches SET p2_claim = ? WHERE match_id = ? AND resolved = 0").bind(claim, matchId).run();
+                    m.p2_claim = claim;
+                }
             } else {
                 return reply({ error: "unauthorized" }, 403);
             }
         }
-        // Resolve when both sides agree, or when one side reports peer ragequit (the reporter wins)
+        // Resolution rules:
+        //  1) Explicit "forfeit" -> the opponent wins immediately.
+        //  2) Both sides submitted a KO claim ("p1" / "p2"):
+        //       - Agree -> winner is that role.
+        //       - Disagree -> disputed (-1, desync).
+        //  3) One side submitted a KO claim ("p1" / "p2") and the other submitted "ragequit":
+        //       - The KO claim wins! (Fixes the auto-disconnect / post-KO leave race where the loser's client
+        //         had not finished the KO screen yet and reported "the other player left" as ragequit.)
+        //  4) Single side submitted "ragequit" -> reporter stayed connected, reporter wins immediately.
+        //  5) Single side submitted a KO claim ("p1" / "p2") and opponent never confirmed:
+        //       - If peer_disconnected is flagged (opponent quit right at KO) or >= 8 s elapsed uncontested -> resolve for KO claim.
+        //       - Otherwise -> { resolved: false, waiting: true }.
         let winnerRole = "";
-        if (m.p1_claim && m.p2_claim) {
-            if (m.p1_claim === m.p2_claim && (m.p1_claim === "p1" || m.p1_claim === "p2")) winnerRole = m.p1_claim;
-            else {
-                await env.DB.prepare("UPDATE hl_matches SET resolved = -1 WHERE match_id = ?").bind(matchId).run();
+        const c1 = m.p1_claim;
+        const c2 = m.p2_claim;
+        const isKo = (c) => c === "p1" || c === "p2";
+        if (c1 === "forfeit" && c2 !== "forfeit") {
+            winnerRole = "p2";
+        } else if (c2 === "forfeit" && c1 !== "forfeit") {
+            winnerRole = "p1";
+        } else if (c1 && c2) {
+            if (c1 === c2 && isKo(c1)) {
+                winnerRole = c1;
+            } else if (isKo(c1) && c2 === "ragequit") {
+                winnerRole = c1;
+            } else if (isKo(c2) && c1 === "ragequit") {
+                winnerRole = c2;
+            } else {
+                await env.DB.prepare("UPDATE hl_matches SET resolved = -1 WHERE match_id = ? AND resolved = 0").bind(matchId).run();
                 return reply({ resolved: false, disputed: true });
             }
         } else if (claim === "ragequit") {
-            winnerRole = role; // reporter stayed connected
+            winnerRole = role;
+        } else if (isKo(claim) && (peerDisconnected || (now - (m.created || now)) >= 8)) {
+            winnerRole = claim;
         } else {
+            return reply({ resolved: false, waiting: true });
+        }
+        // Atomic resolution lock so concurrent p1+p2 requests can never double-credit RP or leave resolved=0
+        const lock = await env.DB.prepare("UPDATE hl_matches SET resolved = 2 WHERE match_id = ? AND resolved = 0").bind(matchId).run();
+        if (lock.meta.changes !== 1) {
+            const fresh = await env.DB.prepare("SELECT * FROM hl_matches WHERE match_id = ?").bind(matchId).first();
+            if (fresh && (fresh.resolved === 1 || fresh.resolved === -1)) return resolvedReply(fresh);
             return reply({ resolved: false, waiting: true });
         }
         let p1 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p1_id).first();
@@ -591,7 +642,10 @@ export async function handle(request, env, now) {
                 .bind(m.p2_id, now).run();
             p2 = await env.DB.prepare("SELECT * FROM hl_players WHERE player_id = ?").bind(m.p2_id).first();
         }
-        if (!p1 || !p2) return reply({ error: "no player" }, 404);
+        if (!p1 || !p2) {
+            await env.DB.prepare("UPDATE hl_matches SET resolved = 0 WHERE match_id = ? AND resolved = 2").bind(matchId).run();
+            return reply({ error: "no player" }, 404);
+        }
         const p1Won = winnerRole === "p1";
         const winner = p1Won ? p1 : p2;
         const loser = p1Won ? p2 : p1;

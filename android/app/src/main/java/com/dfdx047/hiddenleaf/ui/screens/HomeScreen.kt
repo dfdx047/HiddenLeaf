@@ -100,7 +100,7 @@ fun HomeScreen(vm: AppViewModel) {
         Hero()
 
         val installed = install is InstallState.Installed
-        PlayStage(enabled = installed, onClick = vm::play)
+        PlayStage(enabled = installed, onClick = vm::playOffline)
         val active = mods.filter { it.enabled }
         if (active.isNotEmpty()) {
             Text(

@@ -398,13 +398,27 @@ object OnlineAdvanced {
     }
 
     suspend fun reportRanked(
-        context: Context, server: String, matchId: String, opponentId: String, role: String, winner: String, charId: String? = null,
+        context: Context,
+        server: String,
+        matchId: String,
+        opponentId: String,
+        role: String,
+        winner: String,
+        charId: String? = null,
+        peerDisconnected: Boolean = false,
     ): JSONObject? = withContext(Dispatchers.IO) {
-        reportRankedBlocking(context, server, matchId, opponentId, role, winner, charId)
+        reportRankedBlocking(context, server, matchId, opponentId, role, winner, charId, peerDisconnected)
     }
 
     fun reportRankedBlocking(
-        context: Context, server: String, matchId: String, opponentId: String, role: String, winner: String, charId: String? = null,
+        context: Context,
+        server: String,
+        matchId: String,
+        opponentId: String,
+        role: String,
+        winner: String,
+        charId: String? = null,
+        peerDisconnected: Boolean = false,
     ): JSONObject? {
         val (pid, secret) = identity(context)
         return runCatching {
@@ -416,6 +430,7 @@ object OnlineAdvanced {
                 .put("role", role)
                 .put("winner", winner)
             if (!charId.isNullOrBlank()) body.put("char_id", charId)
+            if (peerDisconnected) body.put("peer_disconnected", true)
             postJson(server, "/v1/ranked/report", body)
         }.getOrNull()
     }
