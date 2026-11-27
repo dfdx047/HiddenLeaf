@@ -1,5 +1,7 @@
 package com.dfdx047.hiddenleaf.data
 
+import android.content.Context
+import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -23,13 +25,25 @@ sealed interface UpdateState {
  * "android-nightly" pre-release, whose text carries the run number; a normal build follows the highest version among
  * the `vX.Y.Z[-beta.N]` (and the older `android-vX.Y.Z`) releases, pre-releases included while the app is in beta:
  * 0.1.0-beta < 0.1.0-beta.2 < 0.1.0.
+ *
+ * Automatically falls back to GitHub's Atom feed + expanded_assets HTML when the anonymous REST API hits HTTP 403.
  */
 object AppUpdates {
-    suspend fun check(currentName: String, currentCode: Int): UpdateInfo? {
-        val releases = JSONArray(Net.getText("https://api.github.com/repos/$REPO/releases?per_page=30"))
+    private data class Candidate(val version: String, val tag: String, val body: String, val apkUrl: String, val size: Long, val nightly: Boolean)
+
+    suspend fun check(currentName: String, currentCode: Int, lang: String = java.util.Locale.getDefault().language): UpdateInfo? {
         val dev = currentName.contains("-dev")
-        var best: UpdateInfo? = null
-        var bestTag = ""
+        val cand = runCatching { bestFromApi(dev, currentCode) }.getOrNull()
+            ?: (if (!dev) bestFromAtom() else null)
+            ?: return null
+        if (!cand.nightly && compareVersions(cand.version, currentName) <= 0) return null
+        val notes = if (cand.nightly) cand.body else fetchChangelog(cand.tag, cand.version, lang, cand.body)
+        return UpdateInfo(cand.version, notes, cand.apkUrl, cand.size, cand.nightly)
+    }
+
+    private suspend fun bestFromApi(dev: Boolean, currentCode: Int): Candidate? {
+        val releases = JSONArray(Net.getText("https://api.github.com/repos/$REPO/releases?per_page=30"))
+        var best: Candidate? = null
         for (i in 0 until releases.length()) {
             val r = releases.getJSONObject(i)
             if (r.optBoolean("draft")) continue
@@ -38,27 +52,76 @@ object AppUpdates {
             if (dev) {
                 if (tag != "android-nightly") continue
                 val run = Regex("""dev\.(\d+)""").find(r.optString("body"))?.groupValues?.get(1)?.toIntOrNull() ?: return null
-                return if (run > currentCode) UpdateInfo("0.0.0-dev.$run", "", apkUrl, size, true) else null
+                return if (run > currentCode) Candidate("0.0.0-dev.$run", tag, "", apkUrl, size, true) else null
             }
             val name = versionOf(tag) ?: continue
             if (best == null || compareVersions(name, best.version) > 0) {
-                best = UpdateInfo(name, r.optString("body").trim().take(8000), apkUrl, size, false)
-                bestTag = tag
+                best = Candidate(name, tag, r.optString("body").trim().take(12000), apkUrl, size, false)
             }
         }
-        val found = best?.takeIf { compareVersions(it.version, currentName) > 0 } ?: return null
-        // The notes: that version's section of the changelog in the repository at its tag (CHANGELOG.pt-BR.md,
-        // CHANGELOG.es.md or CHANGELOG.md), else the release's own text.
-        val lang = java.util.Locale.getDefault().language
-        val raw = "https://raw.githubusercontent.com/$REPO/$bestTag"
+        return best
+    }
+
+    private suspend fun bestFromAtom(): Candidate? {
+        val xml = Net.getText("https://github.com/$REPO/releases.atom")
+        val tags = parseAtomTags(xml)
+        var bestPair: Pair<String, String>? = null
+        for (tag in tags) {
+            val name = versionOf(tag) ?: continue
+            if (bestPair == null || compareVersions(name, bestPair.first) > 0) {
+                bestPair = name to tag
+            }
+        }
+        val (name, tag) = bestPair ?: return null
+        val encodedTag = URLEncoder.encode(tag, "UTF-8").replace("+", "%20")
+        val html = Net.getText("https://github.com/$REPO/releases/expanded_assets/$encodedTag")
+        val href = Regex("""href="(/${Regex.escape(REPO)}/releases/download/[^"]+\.apk)"""", RegexOption.IGNORE_CASE)
+            .find(html)?.groupValues?.get(1) ?: return null
+        return Candidate(name, tag, "", "https://github.com$href", -1L, false)
+    }
+
+    internal fun parseAtomTags(xml: String): List<String> {
+        val tagRegex = Regex("""/releases/tag/([^"<\s]+)""")
+        val out = LinkedHashSet<String>()
+        for (m in tagRegex.findAll(xml)) out += m.groupValues[1]
+        return out.toList()
+    }
+
+    private suspend fun fetchChangelog(tag: String, version: String, lang: String, fallbackBody: String): String {
         suspend fun fetch(url: String) = runCatching { Net.getText(url) }.getOrDefault("")
-        val file = when (lang) {
-            "pt" -> fetch("$raw/CHANGELOG.pt-BR.md")
-            "es" -> fetch("$raw/CHANGELOG.es.md")
-            else -> ""
-        }.ifBlank { fetch("$raw/CHANGELOG.md") }
-        val notes = section(file)
-        return if (notes.isNotBlank()) found.copy(notes = notes) else found
+        val fileNames = when (lang.lowercase()) {
+            "pt" -> listOf("CHANGELOG.pt-BR.md", "CHANGELOG.md")
+            "es" -> listOf("CHANGELOG.es.md", "CHANGELOG.md")
+            else -> listOf("CHANGELOG.md")
+        }
+        // Try the release's exact tag first, then `main` (covers releases whose tag was moved or updated afterwards).
+        for (ref in listOf(tag, "main").distinct()) {
+            val raw = "https://raw.githubusercontent.com/$REPO/$ref"
+            for (name in fileNames) {
+                val content = fetch("$raw/$name")
+                if (content.isBlank()) continue
+                val notes = section(content, version)
+                if (notes.isNotBlank()) return notes
+            }
+        }
+        val fromBody = extractBodyForLanguage(fallbackBody, lang)
+        return fromBody.ifBlank { fallbackBody.trim().take(8000) }
+    }
+
+    /** Reads the localized changelog bundled in APK assets (`assets/changelog/CHANGELOG*.md`). */
+    fun loadBundledNotes(context: Context, version: String, lang: String = java.util.Locale.getDefault().language): String {
+        val fileNames = when (lang.lowercase()) {
+            "pt" -> listOf("changelog/CHANGELOG.pt-BR.md", "changelog/CHANGELOG.md")
+            "es" -> listOf("changelog/CHANGELOG.es.md", "changelog/CHANGELOG.md")
+            else -> listOf("changelog/CHANGELOG.md")
+        }
+        for (path in fileNames) {
+            val text = runCatching { context.assets.open(path).bufferedReader().use { it.readText() } }.getOrDefault("")
+            if (text.isBlank()) continue
+            val sec = section(text, version)
+            if (sec.isNotBlank()) return sec
+        }
+        return ""
     }
 
     /** "v0.1.0-beta" or "android-v0.2.0" -> "0.1.0-beta" / "0.2.0"; anything else (the nightly) -> null. */
@@ -67,13 +130,50 @@ object AppUpdates {
         return v.takeIf { parse(it) != null && v != tag }
     }
 
-    /** The newest version's part of a changelog: from its first "## " heading to the next one, without the heading. */
-    internal fun section(changelog: String): String {
-        val lines = changelog.lines()
-        val from = lines.indexOfFirst { it.startsWith("## ") }
+    /**
+     * Extracts [version]'s section (or the newest `## ` section when [version] is null / not explicitly found)
+     * from a CHANGELOG file, without the heading line itself.
+     */
+    internal fun section(changelog: String, version: String? = null): String {
+        val lines = changelog.replace("\r", "").lines()
+        val from = if (!version.isNullOrBlank()) {
+            val clean = version.removePrefix("v")
+            lines.indexOfFirst { it.startsWith("## ") && (it.contains("v$clean") || it.contains(clean)) }
+                .takeIf { it >= 0 } ?: lines.indexOfFirst { it.startsWith("## ") }
+        } else {
+            lines.indexOfFirst { it.startsWith("## ") }
+        }
         if (from < 0) return ""
         val to = (from + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
         return lines.subList(from + 1, to).joinToString("\n").trim().take(8000)
+    }
+
+    /**
+     * When falling back to a trilingual GitHub Release body (`## 🇧🇷 Português` / `## 🇺🇸 English` / `## 🇪🇸 Español`),
+     * returns only the user's language block instead of showing all three languages concatenated.
+     */
+    internal fun extractBodyForLanguage(body: String, lang: String): String {
+        if (body.isBlank()) return ""
+        val lines = body.replace("\r", "").lines()
+        val markers = when (lang.lowercase()) {
+            "pt" -> listOf("Português", "🇧🇷")
+            "es" -> listOf("Español", "🇪🇸")
+            else -> listOf("English", "🇺🇸")
+        }
+        val from = lines.indexOfFirst { line ->
+            line.startsWith("## ") && markers.any { line.contains(it, ignoreCase = true) }
+        }
+        if (from < 0) return body.trim().take(8000)
+        val to = (from + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
+        return lines.subList(from + 1, to).joinToString("\n").trim().take(8000)
+    }
+
+    /** Mirrors app/build.gradle.kts versionCode formula so releases always increase monotonically and install in place. */
+    internal fun expectedVersionCode(vName: String): Int {
+        val vParts = vName.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        val vSuffix = vName.substringAfter('-', "")
+        val vPre = if (vSuffix.isEmpty()) 99 else (Regex("""(\d+)$""").find(vSuffix)?.value?.toIntOrNull() ?: 1).coerceIn(1, 98)
+        return maxOf(1, (vParts.getOrElse(0) { 0 } * 10000 + vParts.getOrElse(1) { 0 } * 100 + vParts.getOrElse(2) { 0 }) * 100 + vPre)
     }
 
     /**

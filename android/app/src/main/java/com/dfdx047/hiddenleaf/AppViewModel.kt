@@ -478,16 +478,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- app updates (GitHub releases)
+    // ---- app updates (GitHub releases) & in-app changelog
 
     private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val update: StateFlow<UpdateState> = _update.asStateFlow()
+    private val _whatsNew = MutableStateFlow<Pair<String, String>?>(null)
+    /** Post-update / on-demand changelog modal: (version, markdown notes). */
+    val whatsNew: StateFlow<Pair<String, String>?> = _whatsNew.asStateFlow()
     private var updateFile: File? = null
     private var updateJob: Job? = null
 
+    private fun appLang(): String = runCatching {
+        getApplication<Application>().resources.configuration.locales[0].language
+    }.getOrDefault(java.util.Locale.getDefault().language)
+
     // (after the state above: properties are set up in order, and this reads _update)
     init {
+        checkWhatsNew()
         checkForUpdate(manual = false)
+    }
+
+    /** Shows the bundled changelog once right after upgrading to a new version (even if installed manually or from v0.2.0-beta). */
+    private fun checkWhatsNew() {
+        val app = getApplication<Application>()
+        val prefs = app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+        val seen = prefs.getString("seen_changelog_version", null)
+        if (seen == BuildConfig.VERSION_NAME) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val notes = AppUpdates.loadBundledNotes(app, BuildConfig.VERSION_NAME, appLang())
+            if (notes.isNotBlank()) {
+                _whatsNew.value = BuildConfig.VERSION_NAME to notes
+            } else {
+                prefs.edit().putString("seen_changelog_version", BuildConfig.VERSION_NAME).apply()
+            }
+        }
+    }
+
+    fun dismissWhatsNew() {
+        _whatsNew.value = null
+        getApplication<Application>().getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+            .edit().putString("seen_changelog_version", BuildConfig.VERSION_NAME).apply()
+    }
+
+    /** Opens the current version's localized changelog on demand (from More -> About). */
+    fun openCurrentChangelog() {
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            val notes = AppUpdates.loadBundledNotes(app, BuildConfig.VERSION_NAME, appLang())
+                .ifBlank { str(R.string.update_changelog_empty) }
+            _whatsNew.value = BuildConfig.VERSION_NAME to notes
+        }
     }
 
     /** Looks for a newer version. At start it only speaks up when there is one; from About it also says "up to date". */
@@ -495,22 +535,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (_update.value !is UpdateState.Idle) return
         _update.value = UpdateState.Checking
         viewModelScope.launch {
-            val r = runCatching { AppUpdates.check(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE) }
+            val r = runCatching { AppUpdates.check(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE, appLang()) }
             val info = r.getOrNull()
             r.exceptionOrNull()?.let { ActivityLog.warn("update", "check failed: ${it.javaClass.simpleName}: ${it.message}") }
-            if (info != null) ActivityLog.info("update", "available: ${info}")
+            if (info != null) ActivityLog.info("update", "available: ${info.version} (notes ${info.notes.length} chars, size ${info.size})")
             _update.value = if (info != null) UpdateState.Available(info) else UpdateState.Idle
             if (manual && info == null) say(str(if (r.isSuccess) R.string.update_none else R.string.update_check_failed))
             // Always show the in-app UpdateDialog with the full changelog first so every player sees what changed
             // before downloading/installing (never silently skip the changelog on Wi-Fi).
         }
     }
-
-    private fun unmetered(): Boolean = runCatching {
-        val cm = getApplication<Application>().getSystemService(android.net.ConnectivityManager::class.java)
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-    }.getOrDefault(false)
 
     fun dismissUpdate() {
         if (_update.value is UpdateState.Available || _update.value is UpdateState.NeedPermission) _update.value = UpdateState.Idle
@@ -531,10 +565,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val dir = File(app.cacheDir, "updates").apply { deleteRecursively(); mkdirs() }
                 val f = File(dir, "HiddenLeaf-update.apk")
                 Net.download(info.apkUrl, f) { d, t -> _update.value = UpdateState.Downloading(info, d, if (t > 0) t else info.size) }
-                val pkg = app.packageManager.getPackageArchiveInfo(f.path, 0)?.packageName
-                if (pkg != app.packageName) throw IOException(str(R.string.update_bad_apk))
+                val pm = app.packageManager
+                @Suppress("DEPRECATION")
+                val pkgInfo = pm.getPackageArchiveInfo(f.path, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                if (pkgInfo == null || pkgInfo.packageName != app.packageName) throw IOException(str(R.string.update_bad_apk))
+                // Verify versionCode is >= installed version so Android always installs in place (never forces uninstall)
+                val apkCode = pkgInfo.longVersionCode
+                if (apkCode < BuildConfig.VERSION_CODE.toLong()) {
+                    throw IOException(str(R.string.update_older_apk, BuildConfig.VERSION_NAME))
+                }
+                // Verify signing certificate matches the installed app so in-place upgrade succeeds cleanly
+                val curSigs = runCatching {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(app.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                        .signingInfo?.apkContentsSigners?.map { it.toByteArray() }.orEmpty()
+                }.getOrDefault(emptyList())
+                val newSigs = pkgInfo.signingInfo?.apkContentsSigners?.map { it.toByteArray() }.orEmpty()
+                if (curSigs.isNotEmpty() && newSigs.isNotEmpty() && curSigs.none { c -> newSigs.any { n -> c.contentEquals(n) } }) {
+                    throw IOException(str(R.string.update_sig_mismatch))
+                }
                 updateFile = f
-                ActivityLog.info("update", "downloaded ${f.length()} bytes")
+                ActivityLog.info("update", "downloaded ${f.length()} bytes (versionCode $apkCode, sig verified)")
                 installUpdate(info)
             } catch (e: CancellationException) {
                 throw e

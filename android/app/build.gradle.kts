@@ -74,6 +74,7 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/changelogs"))
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         // the engine is installed as files, with its symbols (crash reports name the functions)
@@ -82,6 +83,17 @@ android {
             keepDebugSymbols += "**/libun5.so"
         }
     }
+}
+
+val syncChangelogsToAssets by tasks.registering(Copy::class) {
+    from(rootProject.file("..")) {
+        include("CHANGELOG.md", "CHANGELOG.pt-BR.md", "CHANGELOG.es.md")
+    }
+    into(layout.buildDirectory.dir("generated/changelogs/changelog"))
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncChangelogsToAssets)
 }
 
 dependencies {

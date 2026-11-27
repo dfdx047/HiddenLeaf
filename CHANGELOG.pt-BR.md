@@ -2,6 +2,36 @@
 
 [English](CHANGELOG.md) · **Português** · [Español](CHANGELOG.es.md)
 
+## v0.2.3 (27/11/2026)
+
+Atualização de correções críticas focada em **eliminar a tela preta no Offline e o congelamento de imagem com áudio ativo**, **garantir pontos por W.O. contra ragequits na Ranqueada**, **corrigir a contabilização do ranking (Top 100)** e **reorganizar a aba Sobre + exibição garantida do Changelog no app**.
+
+**Download:** `HiddenLeaf-v0.2.3.apk` (Android 10+, ARM de 64 bits — instala diretamente por cima da `v0.2.2`, `v0.2.1` e `v0.2.0-beta` mantendo todos os dados, saves, drivers e mods).
+
+### Correção de Tela Preta no Offline e Congelamento de Tela com Som
+
+- **Modo Leve estável em GPUs Mali, PowerVR, MediaTek, Exynos e Unisoc:** removidas as flags experimentais adicionadas na `v0.2.2` (`accurate_blending_unit=0`, `texture_preloading=1`) e o `GSBackThreadMode=1` global em aparelhos de 6+ núcleos — que causavam tela preta ao entrar no offline ou congelamento de quadros enquanto o áudio continuava tocando. O GS em 2 threads volta a ficar restrito aos SoCs Qualcomm Adreno 610 validados (e desligado quando o ZeroFG está ativo), mantendo o ganho real de CPU via `NOMINUM_VU1=1`.
+- **Início Offline sempre limpo:** o botão **Jogar** e o atalho da tela inicial agora apagam qualquer arquivo `online/session.txt` residual antes de abrir o jogo e garantem reinício limpo do processo `:game` (`onNewIntent` + `onDestroy`), impedindo tela preta após sair de partidas online.
+
+### Modo Ranqueado: Anti-Ragequit (W.O.), Detecção de KO e Ranking Top 100
+
+- **W.O. rápido e garantido contra quem quita na Ranqueada:**
+  - Timeout de desconexão reduzido de **30s para 12s** quando o adversário fecha o app à força ou corta a internet.
+  - Sair pelo menu lateral no meio de uma luta ranqueada agora envia desistência imediata (`forfeit`) ao servidor, creditando os pontos ao vencedor e descontando RP de quem abandonou.
+  - A tela de fim de partida mantém o botão **Voltar ao menu** bloqueado (*"Registrando..."*) até o servidor confirmar a vitória por KO ou W.O. (`🏆 VITÓRIA POR W.O.! +X RP`), evitando que voltar rápido cancele o envio dos pontos.
+- **Fim das partidas ranqueadas anuladas (`KO + ragequit`) e detecção de KO por Especial (Ougi) / Time Over:**
+  - Corrigido o servidor Cloudflare para resolver corretamente a favor do vencedor real quando um jogador envia KO e o outro desconecta na sequência (antes anulava 17% das partidas).
+  - Detecção de HP na engine agora acompanha `onVsync()` e ignora personagens de suporte da CPU, registrando corretamente vitórias por **Especial (Ougi)** e **Tempo Esgotado**.
+- **Top 100 Global completo e atualizado automaticamente:** a tela Ranqueada agora recarrega seu perfil e o ranking automaticamente ao voltar de cada luta (`ON_RESUME`), exibe todos os **100 jogadores** (em vez de cortar em 20) e destaca sua linha com `(Você)`.
+
+### Launcher, Aba Sobre e Atualizações com Changelog Garantido
+
+- **Aba Sobre movida para `Mais → Sobre`:** versão + código da build, pasta do jogo, link do GitHub, verificação de atualizações e botão **Ver novidades (Changelog)** agora ficam reunidos em **Mais → Sobre**.
+- **Changelog sempre visível nas atualizações:**
+  - Fallback automático via GitHub Atom quando a API do GitHub retorna limite `HTTP 403`, garantindo recebimento de atualizações e changelog localizado em PT-BR, EN e ES.
+  - Modal **Novidades da versão** exibido automaticamente após instalar uma nova versão (inclusive via APK manual ou vindo da `v0.2.0-beta`) e acessível a qualquer momento em **Mais → Sobre**.
+  - Validação prévia de `versionCode` e assinatura antes de abrir o instalador do Android para garantir instalação sempre por cima sem perder dados.
+
 ## v0.2.2 (26/11/2026)
 
 Atualização crítica focada na **correção definitiva de dessincronização (desync) no Online e Rede Local**, **fim automático de sala após 1 partida no Modo Ranqueado** e **otimizações extras para celulares de entrada no Modo Leve**.

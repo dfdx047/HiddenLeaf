@@ -2,6 +2,36 @@
 
 [English](CHANGELOG.md) · [Português](CHANGELOG.pt-BR.md) · **Español**
 
+## v0.2.3 (27/11/2026)
+
+Actualización de correcciones críticas enfocada en **eliminar la pantalla negra en Offline y la imagen congelada con sonido activo**, **garantizar puntos por W.O. ante abandonos en Clasificatoria**, **corregir el puntaje y el Top 100 Global** y **mover Acerca de a la pestaña Más con registro de cambios siempre visible en la app**.
+
+**Descarga:** `HiddenLeaf-v0.2.3.apk` (Android 10+, ARM de 64 bits — se instala directamente encima de `v0.2.2`, `v0.2.1` y `v0.2.0-beta` conservando todos tus datos, guardados, drivers y mods).
+
+### Corrección de Pantalla Negra Offline e Imagen Congelada
+
+- **Modo Ligero estable en GPUs Mali, PowerVR, MediaTek, Exynos y Unisoc:** se eliminaron los ajustes experimentales de `v0.2.2` (`accurate_blending_unit=0`, `texture_preloading=1`) y el `GSBackThreadMode=1` global en equipos de 6+ núcleos que provocaban pantalla negra offline o cuadros congelados mientras el audio continuaba. El GS en 2 hilos vuelve a limitarse a los SoC Qualcomm Adreno 610 verificados (y se desactiva con ZeroFG), conservando la mejora real de CPU con `NOMINUM_VU1=1`.
+- **Inicio Offline siempre limpio:** el botón **Jugar** y el acceso directo borran cualquier `online/session.txt` residual y garantizan un reinicio limpio del proceso `:game` (`onNewIntent` + `onDestroy`).
+
+### Modo Clasificatorio: Anti-Ragequit (W.O.), KO por Especial y Top 100 Global
+
+- **Puntos por W.O. rápidos y garantizados ante abandonos:**
+  - Tiempo de espera por desconexión reducido de **30s a 12s** cuando el rival cierra la app a la fuerza o corta su conexión.
+  - Salir desde el menú lateral durante un combate clasificatorio envía rendición inmediata (`forfeit`), otorgando los RP al vencedor y descontándolos al jugador que abandonó.
+  - El aviso de fin de partida bloquea el botón de volver hasta que el servidor confirma la puntuación de KO o W.O.
+- **Sin partidas anuladas (`KO + ragequit`) y detección de KO por Especial (Ougi) / Time Over:**
+  - Corregido el servidor Cloudflare para resolver siempre a favor del KO real en lugar de marcar disputa cuando el perdedor se desconecta al instante.
+  - El motor revisa el HP en cada `onVsync()` ignorando luchadores de apoyo de la CPU, detectando correctamente **KOs por Ougi** y **Tiempo Agotado**.
+- **Top 100 Global completo y actualizado al instante:** la pantalla Clasificatoria se recarga automáticamente en `ON_RESUME` al volver de cada pelea, muestra los **100 puestos completos** (antes cortaba en 20) y resalta tu posición.
+
+### Launcher, Pestaña Acerca de y Changelog Garantizado en la App
+
+- **Acerca de movido a `Más → Acerca de`:** versión + número de compilación, carpeta del juego, GitHub, búsqueda de actualizaciones y botón **Ver novedades (Changelog)**.
+- **Changelog siempre visible en actualizaciones:**
+  - Respaldo automático con GitHub Atom cuando la API devuelve límite `HTTP 403`.
+  - Ventana **Novedades de la versión** mostrada automáticamente tras actualizar (incluso al instalar el APK manualmente o desde `v0.2.0-beta`) y disponible en cualquier momento en **Más → Acerca de**.
+  - Validación previa de `versionCode` y firma digital antes de abrir el instalador de Android para actualizar siempre encima sin desinstalar.
+
 ## v0.2.2 (26/11/2026)
 
 Actualización crítica enfocada en la **corrección definitiva de la desincronización (desync) en Línea y Red Local**, **desconexión automática tras 1 combate en el Modo Clasificatorio** y **optimizaciones extra para dispositivos de gama de entrada en Modo Ligero**.

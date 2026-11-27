@@ -2,6 +2,36 @@
 
 **English** · [Português](CHANGELOG.pt-BR.md) · [Español](CHANGELOG.es.md)
 
+## v0.2.3 (2026-11-27)
+
+Critical bugfix update focused on **fixing the v0.2.2 offline black screen and frozen frames with running audio**, **guaranteeing Ranked W.O. points against ragequitters**, **fixing Ranked scoring & Global Top 100**, and **moving About into More with guaranteed in-app Changelog display**.
+
+**Download:** `HiddenLeaf-v0.2.3.apk` (Android 10+, 64-bit ARM — installs cleanly over `v0.2.2`, `v0.2.1`, and `v0.2.0-beta`, keeping all game data, saves, drivers, and mods).
+
+### Offline Black Screen & Frozen Display Fixes
+
+- **Stable Light Mode on Mali, PowerVR, MediaTek, Exynos, and Unisoc GPUs:** removed the experimental `v0.2.2` `un5.ini` overrides (`accurate_blending_unit=0`, `texture_preloading=1`) and global 6+ core `GSBackThreadMode=1` that caused offline black screens or frozen rendering while audio kept playing. 2-thread GS is again strictly limited to verified Qualcomm Adreno 610 SoCs (and disabled whenever ZeroFG is on), while preserving the real CPU speedup via `NOMINUM_VU1=1`.
+- **Clean Offline Startup:** the **Play** button and home-screen shortcut now clear any leftover `online/session.txt` before launch and enforce a fresh `:game` process lifecycle (`onNewIntent` + `onDestroy`), preventing black screens after exiting online matches.
+
+### Ranked Mode: Anti-Ragequit (W.O.), Ougi KO Detection & Global Top 100
+
+- **Fast, Reliable W.O. Scoring Against Ragequitters:**
+  - Reduced P2P disconnect timeout from **30s to 12s** when an opponent force-closes the app or cuts Wi-Fi.
+  - Quitting via the in-game drawer during a Ranked match now submits an immediate `"forfeit"` report, awarding RP to the winner and deducting RP from the quitter.
+  - The post-match modal keeps **Back to menu** disabled (*"Registrando..."*) until the server confirms the KO or W.O. result (`🏆 VITÓRIA POR W.O.! +X RP`), preventing early exits from cancelling the HTTP report.
+- **No More Voided `KO + ragequit` Matches & Ougi / Time-Over KO Detection:**
+  - Fixed the Cloudflare Worker so a real KO claim wins over a trailing peer disconnect instead of marking the match disputed (which previously voided ~17% of Ranked matches).
+  - Engine HP tracking now polls every `onVsync()` and ignores CPU assist fighters, accurately detecting **Ultimate Jutsu (Ougi) KOs** and **Time Overs**.
+- **Full Auto-Refreshing Global Top 100:** the Ranked screen now refreshes your profile and leaderboard automatically on `ON_RESUME` after every match, displays all **100 players** (instead of clipping at 20), and highlights your own row.
+
+### Launcher, About Tab & Guaranteed In-App Changelog
+
+- **About Moved to `More → About`:** version + build number, game folder path, GitHub link, update check, and a **View changelog** button now live in a dedicated **More → About** page.
+- **Guaranteed In-App Update Changelog:**
+  - Added automatic GitHub Atom fallback when GitHub's REST API returns `HTTP 403`, ensuring updates and localized changelogs (EN, PT-BR, ES) always load.
+  - Shows a **What's new** dialog once after upgrading to a new version (even for manual APK installs or upgrades from `v0.2.0-beta`), also accessible anytime from **More → About**.
+  - Pre-validates APK `versionCode` and signing certificate before opening Android's installer so updates always install cleanly over existing versions.
+
 ## v0.2.2 (2026-11-26)
 
 Critical update focused on **fixing Online & Local Wi-Fi (LAN) multiplayer desync**, **automatic 1-match Ranked room disconnect**, and **extra entry-level device optimizations in Light Mode**.

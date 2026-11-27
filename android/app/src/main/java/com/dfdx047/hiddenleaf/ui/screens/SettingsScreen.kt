@@ -13,26 +13,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Code
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.ScreenRotation
-import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Tv
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import com.dfdx047.hiddenleaf.data.REPO_URL
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -50,7 +35,6 @@ import com.dfdx047.hiddenleaf.R
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dfdx047.hiddenleaf.AppViewModel
-import com.dfdx047.hiddenleaf.BuildConfig
 import com.dfdx047.hiddenleaf.data.EngineSettings
 import com.dfdx047.hiddenleaf.data.Renderer
 import com.dfdx047.hiddenleaf.ui.components.ScreenTitle
@@ -64,7 +48,6 @@ import kotlin.math.roundToInt
 fun SettingsScreen(vm: AppViewModel) {
     val s by vm.engineSettings.collectAsStateWithLifecycle()
     val ui by vm.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     fun get(k: String, d: Int) = s[k] ?: d
 
     Column(
@@ -199,31 +182,6 @@ fun SettingsScreen(vm: AppViewModel) {
         }
 
         SavesCard(vm)
-
-        SectionCard(stringResource(R.string.about), Icons.Rounded.Info, accent = MaterialTheme.colorScheme.outline) {
-            Text("Hidden Leaf ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleSmall)
-            Text(stringResource(R.string.about_author), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                stringResource(R.string.about_text),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            val uri = LocalUriHandler.current
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { runCatching { uri.openUri(REPO_URL) } }) {
-                    Icon(Icons.Rounded.Code, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text(stringResource(R.string.github_repo))
-                }
-                OutlinedButton(onClick = { vm.checkForUpdate(manual = true) }) {
-                    Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text(stringResource(R.string.check_updates))
-                }
-            }
-            HorizontalDivider()
-            Text(stringResource(R.string.game_folder), style = MaterialTheme.typography.titleSmall)
-            Text(vm.paths.root.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

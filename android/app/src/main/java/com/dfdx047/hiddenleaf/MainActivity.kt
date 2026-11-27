@@ -63,13 +63,16 @@ import com.dfdx047.hiddenleaf.ui.screens.OnlineScreen
 import com.dfdx047.hiddenleaf.ui.screens.SubPage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Public
+import com.dfdx047.hiddenleaf.ui.screens.AboutScreen
 import com.dfdx047.hiddenleaf.ui.screens.HomeScreen
 import com.dfdx047.hiddenleaf.ui.screens.ModsScreen
 import com.dfdx047.hiddenleaf.ui.screens.SettingsScreen
 import com.dfdx047.hiddenleaf.ui.screens.TexturesScreen
 import com.dfdx047.hiddenleaf.ui.screens.UpdateDialog
+import com.dfdx047.hiddenleaf.ui.screens.WhatsNewDialog
 import com.dfdx047.hiddenleaf.ui.screens.DebugScreen
 import com.dfdx047.hiddenleaf.ui.screens.DriversScreen
 import com.dfdx047.hiddenleaf.ui.screens.GpuOfferDialog
@@ -134,6 +137,7 @@ private enum class Dest(val route: String, val label: Int, val icon: ImageVector
     DRIVERS("drivers", R.string.nav_drivers, NinjaIcons.Bolt, inBar = false, text = R.string.ln_more_drivers),
     CHEATS("cheats", R.string.ln_nav_cheats, Icons.Rounded.LockOpen, inBar = false, text = R.string.ln_more_cheats),
     DEBUG("debug", R.string.nav_debug, NinjaIcons.Eye, inBar = false, text = R.string.ln_more_debug),
+    ABOUT("about", R.string.about, Icons.Rounded.Info, inBar = false, text = R.string.ln_more_about),
     ;
 
     companion object {
@@ -159,6 +163,7 @@ private fun HiddenLeafApp(vm: AppViewModel, startPage: Pair<String, Long>? = nul
     // files may have been changed from outside (file manager, adb) while the app was in the background
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshAll(); vm.resumeUpdate(); vm.checkLastRun() }
     UpdateDialog(vm)
+    WhatsNewDialog(vm)
     GpuOfferDialog(vm)
     LastRunDialog(vm)
     TexFailDialog(vm)
@@ -218,7 +223,7 @@ private fun HiddenLeafApp(vm: AppViewModel, startPage: Pair<String, Long>? = nul
                     composable(Dest.CONTROLS.route) { ControlsScreen(vm) }
                     composable(Dest.SETTINGS.route) { SettingsScreen(vm) }
                     composable(Dest.MORE.route) {
-                        val accents = listOf(Konoha.SasukeBlueLight, Konoha.LeeGreen, Konoha.ChakraBlue, Konoha.ChakraAmber, Konoha.NarutoOrange)
+                        val accents = listOf(Konoha.SasukeBlueLight, Konoha.LeeGreen, Konoha.ChakraBlue, Konoha.ChakraAmber, Konoha.NarutoOrange, Konoha.SasukePurple)
                         MoreScreen(
                             Dest.more.mapIndexed { i, d ->
                                 MoreItem(stringResource(d.label), stringResource(d.text), d.icon, accents[i % accents.size]) { open(d) }
@@ -231,6 +236,7 @@ private fun HiddenLeafApp(vm: AppViewModel, startPage: Pair<String, Long>? = nul
                     composable(Dest.DRIVERS.route) { SubPage(back) { DriversScreen(vm) } }
                     composable(Dest.CHEATS.route) { SubPage(back) { CheatsScreen(vm) } }
                     composable(Dest.DEBUG.route) { SubPage(back) { DebugScreen(vm) } }
+                    composable(Dest.ABOUT.route) { SubPage(back) { AboutScreen(vm) } }
                 }
             }
         }

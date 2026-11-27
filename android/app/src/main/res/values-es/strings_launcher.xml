@@ -5,12 +5,20 @@
     <string name="ln_nav_cheats">Trucos</string>
     <string name="ln_back">Volver</string>
 
-    <string name="ln_more_sub">Texturas, mods, drivers, trucos y depuración</string>
+    <string name="ln_more_sub">Texturas, mods, drivers, trucos, depuración y acerca de</string>
     <string name="ln_more_textures">Packs de texturas en el formato de PCSX2</string>
     <string name="ln_more_mods">Mods desde su ISO, sobre el juego base</string>
     <string name="ln_more_drivers">Drivers Vulkan para GPUs Adreno (Turnip)</string>
     <string name="ln_more_cheats">Saltar la introducción, desbloquear todo</string>
     <string name="ln_more_debug">Dispositivo, rendimiento, contador de FPS, registros y opciones experimentales</string>
+    <string name="ln_more_about">Versión, actualizaciones, novedades (changelog) y carpeta del juego</string>
+
+    <string name="update_whats_new">Novedades de la v%1$s</string>
+    <string name="update_changelog_btn">Ver novedades (Changelog)</string>
+    <string name="update_changelog_empty">Consulta las novedades completas en GitHub.</string>
+    <string name="update_older_apk">Este APK es más antiguo que tu versión instalada (%1$s).</string>
+    <string name="update_sig_mismatch">Este APK tiene una firma diferente y no se puede instalar encima de la app actual.</string>
+    <string name="about_version_build">Hidden Leaf %1$s (compilación %2$d)</string>
 
     <string name="ln_cheat_opening">Introducción</string>
     <string name="ln_cheat_roster">Personajes</string>
